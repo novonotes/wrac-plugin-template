@@ -1,10 +1,7 @@
 # wxp-gain-example
 
-`wxp` を使った gain plugin の参照実装を独立して管理するためのリポジトリです。
-
-## Getting Started
-
-新しい wxp プラグインの作成手順は [Getting Started](docs/getting-started.md) を参照してください。
+[wxp](https://github.com/novonotes/wxp) を使った gain plugin の参照実装です。
+コピーして新規プロジェクトの出発点として使うこともできます。
 
 ## 含まれるもの
 
@@ -15,21 +12,12 @@
 | `script` | ビルド・インストール用スクリプト |
 | `clap_wrapper_builder` | CLAP を VST3 / AUv2 / Standalone にラップする補助ビルド環境 |
 
-## Positioning
+## 使い方
 
-このリポジトリは公式スターターキットではなく、`wxp` を使った最小構成の参照実装です。
-必要に応じてコピーして調整する前提で管理しています。
+このレポジトリを元に、新しい wxp プラグインを作成する手順は [Setup](docs/setup.md) を参照してください。
 
-## Architecture Overview
+## アーキテクチャ
 
-この gain plugin は、入力信号にゲインを掛けるだけのシンプルなエフェクトですが、
-`wxp` を使ったプラグイン開発に必要な要素を一通り含んでいます。
+スレッドモデル・通信フロー・パラメータ変更フローの詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
 
-- Rust 側で CLAP プラグインとパラメータ処理を実装
-- `wxp` と `@novonotes/webview-bridge` を使って WebView GUI と通信
-- `clap_wrapper_builder` を使って VST3 / AUv2 / Standalone を生成
-
-## 依存方針
-
-- Rust クレートは `git + rev` で `wxp` / `wxp_clack` / `wry` / `run_loop` を参照します。
-- `@novonotes/webview-bridge` は配布 tarball URL から取得します。
+また、wxp クレートの使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
