@@ -12,7 +12,7 @@
 | `script` | ビルド・インストール用スクリプト |
 | `clap_wrapper_builder` | CLAP を VST3 / AUv2 / Standalone にラップする補助ビルド環境 |
 
-## 使い方
+## 新規プロジェクトのセットアップ
 
 このレポジトリを元に、新しい wxp プラグインを作成する手順は [Setup](docs/setup.md) を参照してください。
 
