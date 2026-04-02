@@ -15,7 +15,7 @@ set -u
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 TARGET_DIR="${CARGO_TARGET_DIR:-$PLUGIN_ROOT/target}"
-DEFAULT_WRAPPER_DIR="$( cd "$PLUGIN_ROOT/../../clap_wrapper_builder" 2>/dev/null && pwd || true )"
+DEFAULT_WRAPPER_DIR="$( cd "$PLUGIN_ROOT/clap_wrapper_builder" 2>/dev/null && pwd || true )"
 WRAPPER_DIR="${CLAP_WRAPPER_DIR:-$DEFAULT_WRAPPER_DIR}"
 
 # ターミナル出力の色付け用エスケープコード

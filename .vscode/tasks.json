@@ -4,7 +4,7 @@
 		{
 			"label": "build-example-gain-standalone",
 			"type": "shell",
-			"command": "./examples/gain_plugin/script/build_standalone.sh",
+			"command": "./script/build_standalone.sh",
 			"group": "build",
 			"presentation": {
 				"reveal": "always",
@@ -16,7 +16,7 @@
 		{
 			"label": "open-example-gain-standalone",
 			"type": "shell",
-			"command": "open './examples/gain_plugin/target/standalone/Debug/WXP Example Gain Standalone.app'",
+			"command": "open './target/standalone/Debug/WXP Example Gain Standalone.app'",
 			"presentation": {
 				"reveal": "always",
 				"panel": "new",

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 build = "build.rs"
 
+[workspace]
+
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 
@@ -20,8 +22,8 @@ wry = { git = "https://github.com/novonotes/wxp.git", rev = "80987f1727c19a629ca
 wxp = { git = "https://github.com/novonotes/wxp.git", rev = "80987f1727c19a629cad723d4faa9e1d4d627fae" }
 wxp_clack = { git = "https://github.com/novonotes/wxp.git", rev = "80987f1727c19a629cad723d4faa9e1d4d627fae" }
 
-[lints]
-workspace = true
+[lints.rust]
+unreachable_pub = "deny"
 
 [build-dependencies]
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

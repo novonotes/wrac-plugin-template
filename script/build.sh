@@ -79,7 +79,7 @@ fi
 # ---------------------------------------------------------------------------
 # BASH_SOURCE[0] からスクリプト自身の絶対パスを求め、そこから相対的に各ディレクトリを特定する。
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"       # examples/gain_plugin/
+PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 GUI_DIR="$PLUGIN_ROOT/src-gui"
 TARGET_DIR="${CARGO_TARGET_DIR:-$PLUGIN_ROOT/target}"
 BUILD_DIR="$TARGET_DIR/$PROFILE_DIR"

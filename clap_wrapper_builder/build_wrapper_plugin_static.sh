@@ -195,6 +195,12 @@ esac
 # ビルドディレクトリをclap_wrapper_builderに作成
 BUILD_DIR="$SCRIPT_DIR/build_$CLAP_BASE_NAME"
 
+# リポジトリ名変更などで CMakeCache に古いソースパスが残っている場合は作り直す
+if [ -f "$BUILD_DIR/CMakeCache.txt" ] && ! grep -Fq "$SCRIPT_DIR" "$BUILD_DIR/CMakeCache.txt"; then
+    warning "既存の CMake キャッシュが現在のソースディレクトリと一致しないため削除します: $BUILD_DIR"
+    rm -rf "$BUILD_DIR"
+fi
+
 CMAKE_STANDALONE_ARGS=()
 if [ -n "$STANDALONE_PLUGIN_ID" ]; then
     CMAKE_STANDALONE_ARGS+=(

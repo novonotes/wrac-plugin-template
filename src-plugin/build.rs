@@ -28,7 +28,7 @@ fn main() {
 
     if !gui_dist_dir.exists() {
         panic!(
-            "frontend build output was not found at {}. Run `npm install && npm run build` in wxp-examples/examples/gain_plugin/src-gui before release builds.",
+            "frontend build output was not found at {}. Run `npm install && npm run build` in wxp-gain-example/src-gui before release builds.",
             gui_dist_dir.display()
         );
     }
