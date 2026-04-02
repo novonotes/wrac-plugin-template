@@ -1,0 +1,26 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug gain plugin standalone",
+			"type": "lldb",
+			"request": "launch",
+			"program": "${workspaceFolder}/target/standalone/Debug/WXP Example Gain Standalone.app/Contents/MacOS/WXP Example Gain Standalone",
+			"osx": {
+				"request": "attach",
+				"program": "${workspaceFolder}/target/standalone/Debug/WXP Example Gain Standalone.app/Contents/MacOS/WXP Example Gain Standalone",
+				"preLaunchTask": "build-and-open-example-gain-standalone"
+			},
+			"windows": {
+				"program": "${workspaceFolder}/target/standalone/Debug/WXP Example Gain Standalone.exe"
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"RUST_BACKTRACE": "1"
+			},
+			"terminal": "console",
+			"preLaunchTask": "build-example-gain-standalone"
+		}
+	]
+}

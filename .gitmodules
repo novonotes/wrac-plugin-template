@@ -1,0 +1,12 @@
+[submodule "clap_wrapper_builder/clap-wrapper"]
+	path = clap_wrapper_builder/clap-wrapper
+	url = https://github.com/free-audio/clap-wrapper.git
+[submodule "clap_wrapper_builder/vst3sdk"]
+	path = clap_wrapper_builder/vst3sdk
+	url = https://github.com/steinbergmedia/vst3sdk
+[submodule "clap_wrapper_builder/clap"]
+	path = clap_wrapper_builder/clap
+	url = https://github.com/free-audio/clap
+[submodule "clap_wrapper_builder/AudioUnitSDK"]
+	path = clap_wrapper_builder/AudioUnitSDK
+	url = https://github.com/apple/AudioUnitSDK.git
