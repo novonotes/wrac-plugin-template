@@ -1,0 +1,9 @@
+/.DS_Store
+/target/
+
+/examples/**/target/
+/examples/**/src-gui/node_modules/
+/examples/**/src-gui/dist/
+/examples/**/src-gui/dist.zip
+
+/clap_wrapper_builder/build_*/

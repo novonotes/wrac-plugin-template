@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WXP Example Gain</title>
+    <!--
+      Vite のモジュールスクリプトとしてエントリーポイントを読み込む。
+      デバッグ時は Vite dev server が .ts をそのまま配信する。
+      リリースビルドではバンドル済み JS に変換される。
+    -->
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <div id="app">
+      <main class="panel">
+        <p class="eyebrow">WXP Example Plugin</p>
+        <h1 class="title">Gain</h1>
+        <!-- メーター表示: リニアゲイン値（例: "1.00x"）と dB 値（例: "0.0 dB"） -->
+        <div class="meter">
+          <div class="value" id="gain-value">1.00x</div>
+          <div class="db" id="gain-db">0.0 dB</div>
+        </div>
+        <!--
+          ノブ UI:
+          - knob-track:     ノブの背景トラック（円弧）
+          - knob-fill:      現在値を示す塗りつぶし部分（CSS transform で回転）
+          - knob-indicator:  現在位置を示すインジケーター線（CSS transform で回転）
+          main.ts が knob-fill と knob-indicator の transform を動的に更新する。
+        -->
+        <section class="knob-zone">
+          <button class="knob" id="gain-knob" type="button" aria-label="Gain knob">
+            <div class="knob-track"></div>
+            <div class="knob-fill" id="knob-fill"></div>
+            <div class="knob-indicator" id="knob-indicator"></div>
+          </button>
+        </section>
+        <p class="hint">ドラッグまたはホイールで調整</p>
+      </main>
+    </div>
+  </body>
+</html>

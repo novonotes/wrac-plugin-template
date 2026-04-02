@@ -1,0 +1,40 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build-example-gain-standalone",
+			"type": "shell",
+			"command": "./examples/gain_plugin/script/build_standalone.sh",
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"close": true
+			},
+			"problemMatcher": "$rustc"
+		},
+		{
+			"label": "open-example-gain-standalone",
+			"type": "shell",
+			"command": "open './examples/gain_plugin/target/standalone/Debug/WXP Example Gain Standalone.app'",
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"close": true
+			}
+		},
+		{
+			"label": "build-and-open-example-gain-standalone",
+			"dependsOrder": "sequence",
+			"dependsOn": [
+				"build-example-gain-standalone",
+				"open-example-gain-standalone"
+			],
+			"presentation": {
+				"reveal": "always",
+				"panel": "new",
+				"close": true
+			}
+		}
+	]
+}
