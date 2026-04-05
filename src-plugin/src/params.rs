@@ -30,7 +30,7 @@ use crate::plugin::{
 
 /// プラグイン状態の保存・復元（CLAP state 拡張）。
 /// DAW がプロジェクトを保存/読み込みする際に呼ばれる。
-/// フォーマットは自由だが、ここでは [長さ(4byte LE)] + [JSON バイト列] を使用。
+/// フォーマットは自由だが、ここでは `[長さ (4 byte LE)] + [JSON バイト列]` を使用。
 impl PluginStateImpl for WxpExampleGainMainThread<'_> {
     fn save(&mut self, output: &mut OutputStream) -> Result<(), PluginError> {
         let bytes = to_vec(&SavedPluginState {

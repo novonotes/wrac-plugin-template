@@ -65,6 +65,17 @@ Channel コールバック        ◄──────    RunLoopSender → Cha
 5. JS: Channel コールバックで render() が呼ばれ、UI が更新される
 ```
 
+## wxp 初期化フロー（CLAP コンテキスト）
+
+CLAP の `set_parent()` コールバック内で WebView を生成します（実装は `gui.rs` 参照）。
+
+1. `WebContext::new(data_dir).build_wry_context()` — ユーザーデータディレクトリを設定。返した `wry::WebContext` は WebView の生存期間中保持し続ける必要があるため `self` に格納する
+2. `wxp_clack::window::clack_to_wry_window_handle(&parent)` — CLAP の `Window` を wry の `WindowHandle` に変換
+3. `WxpWebViewBuilder::new(&mut wry_context)` でビルダーを作成し、コマンドハンドラ・URL・サイズ等を設定
+4. `.build_as_child(&parent_handle)` で `WebViewRef` を取得して `self` に格納
+
+`destroy()` では `reset_webview()` を通じて GUI 通知チャネルのクリア、`WebViewRef` の drop による WebView 破棄、`wry::WebContext` の破棄を順に行います。
+
 ## 主要な依存クレート
 
 | クレート | 役割 |
