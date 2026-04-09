@@ -1,4 +1,4 @@
-# base_sdks.cmake provudes a collection of `guarantee_` functions which set up a particular
+# base_sdks.cmake provides a collection of `guarantee_` functions which set up a particular
 # SDK. Those functions have the important property that they can be called as many times as you
 # want and only the first call will set up the SDK. Practically this means they start with
 # if NOT TARGET base-sdk-foo return.
@@ -263,6 +263,155 @@ function(guarantee_auv2sdk)
             )
     target_include_directories(base-sdk-auv2 PUBLIC ${AUDIOUNIT_SDK_ROOT}/include)
 endfunction(guarantee_auv2sdk)
+
+function(guarantee_aaxsdk)
+    MESSAGE("guarantee aax SDK")
+    if (TARGET base-sdk-aax)
+        return()
+    endif()
+
+    if (NOT CLAP_WRAPPER_CAN_BUILD_AAX)
+        return()
+    endif()
+
+    if (NOT "${AAX_SDK_ROOT}" STREQUAL "")
+        # Use the provided root
+    elseif(${CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES})
+        guarantee_cpm()
+        CPMAddPackage(
+                NAME "aaxsdk"
+                GITHUB_REPOSITORY "audiosdk/aax"
+                GIT_TAG "2.8.1-slim"
+                # GIT_TAG "v3.7.6_build_18"
+                EXCLUDE_FROM_ALL TRUE
+                DOWNLOAD_ONLY TRUE
+                # GIT_SUBMODULES base public.sdk pluginterfaces cmake
+                SOURCE_DIR cpm/aaxsdk
+        )
+        set(AAX_SDK_ROOT "${CMAKE_CURRENT_BINARY_DIR}/cpm/aaxsdk")
+
+    else()
+        message(STATUS "searching sdk")
+        search_for_sdk_source(SDKDIR aax RESULT AAX_SDK_ROOT)
+    endif()
+
+    if ("${AAX_SDK_ROOT}" STREQUAL "")
+        message(FATAL_ERROR "There is no AAX SDK to be found. Please set AAX_SDK_ROOT appropriately or set CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON")
+    endif()
+    
+    cmake_path(CONVERT "${AAX_SDK_ROOT}" TO_CMAKE_PATH_LIST AAX_SDK_ROOT)
+    if(NOT EXISTS "${AAX_SDK_ROOT}/Interfaces/AAX.h")
+        message(FATAL_ERROR "There is no AAX SDK at ${AAX_SDK_ROOT}. Please set AAX_SDK_ROOT appropriately ")
+    endif()
+
+    # check 
+
+    MESSAGE("AAX SDK identified, checking version...")
+    # ------------------------------------------------------------------------------    
+    set(INPUT_FILE "${AAX_SDK_ROOT}/Interfaces/AAX_Version.h")
+    file(STRINGS "${INPUT_FILE}" file_content)
+
+    foreach(line IN LISTS file_content)
+      # message(STATUS"Scanning: ${line}")
+      string(REGEX MATCH "#define[ \t]+AAX_SDK_CURRENT_REVISION[ \t]*\\( *([0-9]+) *\\)" _ "${line}")
+      if(CMAKE_MATCH_1)
+        set(AAX_SDK_REVISION "${CMAKE_MATCH_1}")
+      endif()
+      string(REGEX MATCH "#define[ \t]+AAX_SDK_VERSION[ \t]*\\( 0x*([0-9]+) *\\)" _ "${line}")
+      if(CMAKE_MATCH_1)
+        set(AAX_SDK_VERSION "${CMAKE_MATCH_1}")
+      endif()
+    endforeach()
+
+    if (AAX_SDK_VERSION)
+        message(STATUS "AAX SDK Version determined: ${AAX_SDK_VERSION}")
+    else()
+        message(STATUS "No AAX Version found.")
+    endif()
+   
+    message(STATUS "clap-wrapper: AAX version: ${AAX_SDK_VERSION}/${AAX_SDK_REVISION}; AAX Root ${AAX_SDK_ROOT}")
+
+    add_library(base-sdk-aax STATIC)
+
+    if (APPLE)
+        target_sources(base-sdk-aax PRIVATE ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CAutoreleasePool.OSX.mm )
+    else()
+        target_sources(base-sdk-aax PRIVATE ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CAutoreleasePool.Win.cpp)
+        # target_sources(base-sdk-vst3 PRIVATE ${AAX_SDK_ROOT}/public.sdk/source/main/dllmain.cpp) -- aax?
+    endif()
+
+    target_sources(base-sdk-aax PRIVATE
+#            ${AAX_GLOB}
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CACFUnknown.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CChunkDataParser.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CEffectDirectData.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CEffectGUI.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CEffectParameters.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CHostProcessor.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CHostServices.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CMutex.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CommonConversions.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CPacketDispatcher.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CParameter.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CParameterManager.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CSessionDocumentClient.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CString.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CTaskAgent.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_CUIDs.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_IEffectDirectData.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_IEffectGUI.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_IEffectParameters.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_IHostProcessor.cpp
+            # ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_Init.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_ISessionDocumentClient.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_ITaskAgent.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_Properties.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_SliderConversions.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VAutomationDelegate.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VCollection.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VComponentDescriptor.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VController.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VDataBufferWrapper.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VDescriptionHost.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VEffectDescriptor.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VFeatureInfo.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VHostProcessorDelegate.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VHostServices.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VPageTable.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VPrivateDataAccess.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VPropertyMap.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VSessionDocument.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VTask.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VTransport.cpp
+            ${AAX_SDK_ROOT}/Libs/AAXLibrary/source/AAX_VViewContainer.cpp
+            )
+
+    # The VST3 SDK doesn't compile with unity builds
+    # set_target_properties(base-sdk-AAX PROPERTIES UNITY_BUILD FALSE) -- aax?
+
+    MESSAGE("guarantee aax SDK: added sources")
+
+    target_include_directories(base-sdk-aax PUBLIC 
+        ${AAX_SDK_ROOT}/Interfaces 
+        ${AAX_SDK_ROOT}/Interfaces/ACF 
+        ${AAX_SDK_ROOT}/Extensions
+        ${AAX_SDK_ROOT}/Libs
+    )
+    # target_compile_options(base-sdk-aax PUBLIC $<IF:$<CONFIG:Debug>,-DDEVELOPMENT=1,-DRELEASE=1>) # work through steinbergs alternate choices for these
+
+    # The AAX SDK uses the deprecated 'register' storage class specifier
+    if (MSVC)
+        target_compile_options(base-sdk-aax PUBLIC /wd5033)
+    else()
+        target_compile_options(base-sdk-aax PUBLIC -Wno-register)
+    endif()
+
+    target_link_libraries(base-sdk-aax PUBLIC clap-wrapper-sanitizer-options)
+
+    # finally pass to parent scope
+    set(AAX_SDK_ROOT ${AAX_SDK_ROOT} PARENT_SCOPE)
+
+endfunction(guarantee_aaxsdk)
 
 function(guarantee_rtaudio)
     if (TARGET base-sdk-rtaudio)
