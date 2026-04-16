@@ -1,40 +1,42 @@
 # Setup
 
-`wxp-gain-example` を出発点として新しい wxp プラグインを作成する手順を説明します。
+> 日本語版: [setup_JA.md](setup_JA.md)
 
-## 前提条件
+This guide explains how to create a new wxp plugin starting from `wxp-gain-example`.
 
-### CLAP のみをビルドする場合
+## Prerequisites
 
-- Rust（最新の stable）
-- Node.js（npm）
+### Building CLAP only
 
-### VST3 / AU / Standalone もビルドする場合
+- Rust (latest stable)
+- Node.js (npm)
 
-clap-wrapper を用いて VST3 / AU / Standalone を生成するには、追加で以下が必要です。
+### Building VST3 / AU / Standalone as well
+
+To generate VST3 / AU / Standalone using clap-wrapper, the following are additionally required.
 
 **macOS:**
-- Xcode または Xcode Command Line Tools
-- CMake（3.15 以上推奨）
+- Xcode or Xcode Command Line Tools
+- CMake (3.15 or later recommended)
 
 **Windows:**
-- Visual Studio 2022（C++ ビルドツール付き）
-- CMake（3.15 以上推奨）
+- Visual Studio 2022 (with C++ build tools)
+- CMake (3.15 or later recommended)
 
 **Linux:**
-- 現在 CLAP のみのサポートです。
+- CLAP only is supported at this time.
 
-### デバッグ
+### Debugging
 
-VS Code のデバッグ設定を用意しています。
-利用するには [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) の拡張が必要です。
+VS Code debug configurations are included.
+The [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscode-lldb) extension is required to use them.
 
-## 最初のプラグインを作成する
+## Creating Your First Plugin
 
-### 1. リポジトリのセットアップ
+### 1. Repository Setup
 
-GitHub の [wxp-gain-example](https://github.com/novonotes/wxp-gain-example) ページ右上の `Use this template` ボタンを使って新しいリポジトリを作成します。
-作成後、新しいリポジトリをクローンしてサブモジュールを初期化してください。
+Use the `Use this template` button in the upper right of the [wxp-gain-example](https://github.com/novonotes/wxp-gain-example) page on GitHub to create a new repository.
+After creating it, clone the new repository and initialize the submodules.
 
 ```sh
 git clone https://github.com/your-org/my-plugin.git
@@ -42,27 +44,27 @@ cd my_plugin
 git submodule update --init --recursive
 ```
 
-### 2. 識別子を一括置換
+### 2. Bulk Replace Identifiers
 
-このリポジトリには複数種類の識別子が散在しています。
-IDE の機能や `rg`、LLM エージェントなどで全ファイルを検索し、まとめて置換してください。
+Several kinds of identifiers are scattered throughout the repository.
+Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and replace them all at once.
 
-**置換テーブル:**
+**Replacement table:**
 
-| 種別 | 現在の値 | 置換先の例 |
-|------|---------|-----------|
-| Rust crate 名 | `wxp_example_gain_plugin` | `my_plugin` |
-| プラグイン表示名 | `WXP Example Gain` | `My Plugin` |
-| プラグイン ID（逆ドメイン推奨） | `com.novo-notes.wxp-example-gain` | `com.your-company.my-plugin` |
-| GUI / スクリプト内などの kebab-case 名 | `wxp-example-gain-plugin` | `my-plugin` |
+| Kind | Current value | Example replacement |
+|------|--------------|---------------------|
+| Rust crate name | `wxp_example_gain_plugin` | `my_plugin` |
+| Plugin display name | `WXP Example Gain` | `My Plugin` |
+| Plugin ID (reverse-domain recommended) | `com.novo-notes.wxp-example-gain` | `com.your-company.my-plugin` |
+| kebab-case name in GUI / scripts / etc. | `wxp-example-gain-plugin` | `my-plugin` |
 
-> **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
+> **Important:** The plugin ID must be globally unique. It cannot be changed once published.
 
-**手順:**
+**Steps:**
 
-対象ファイルと残件数を確認します。
+Check the target files and remaining count.
 
-rg を用いる例:
+Example using rg:
 
 ```sh
 rg --hidden "wxp_example_gain_plugin|WXP Example Gain|com\.novo-notes\.wxp-example-gain|wxp-example-gain-plugin" \
@@ -70,32 +72,32 @@ rg --hidden "wxp_example_gain_plugin|WXP Example Gain|com\.novo-notes\.wxp-examp
     --glob '!package-lock.json' --glob '!*.zip' --glob '!docs/setup.md'
 ```
 
-確認できたら、上の置換テーブルの通りに**全件置換**してください。
-置換後に同じコマンドを再実行し、出力がゼロ件になれば完了です。
+Once confirmed, **replace all occurrences** according to the table above.
+Re-run the same command after replacing and verify the output is zero matches.
 
-### 3. ビルド & インストール
+### 3. Build & Install
 
-リポジトリルートで以下を実行します。
+Run the following from the repository root.
 
 ```sh
 cd /path/to/my_plugin
 ./script/build_and_install.sh
 ```
 
-以下のディレクトリにビルド済みプラグインがインストールされます:
+The built plugin will be installed to the following directories:
 
-| OS | インストール先 |
-|----|--------------|
+| OS | Install path |
+|----|-------------|
 | macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
 | Windows | `%LOCALAPPDATA%/Programs/Common/CLAP/` |
 | Linux | `~/.clap/` |
 
-VST3 / AU も同時にインストールされます。
+VST3 / AU are installed at the same time.
 
-### 4. 動作確認
+### 4. Verify
 
-デバッグビルドでは GUI リソースを Vite dev server（`localhost:5173`）から取得します。
-DAW でプラグインを起動する前に、以下のコマンドで dev server を立ち上げておいてください。
+Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).
+Before launching the plugin in your DAW, start the dev server with the following commands.
 
 ```sh
 cd /path/to/my_plugin/src-gui
@@ -103,20 +105,19 @@ npm install
 npm run dev
 ```
 
-DAW を起動して、プラグインをインサートしてみましょう。
-DAW によってはプラグイン再スキャン等が必要な場合があります。
-GUI はホットリロード可能です。HTML ファイルを編集してみましょう。
+Launch your DAW and try inserting the plugin.
+Some DAWs may require a plugin rescan.
+The GUI supports hot reload — try editing the HTML files.
 
-### 5. デバッグ
+### 5. Debug
 
-DAW はデバッガーのアタッチが難しいケースがあるので、まずはスタンドアローンアプリとしてデバッグすることをお勧めします。
-VS Code で「Debug gain plugin standalone」構成を選択して実行します。
+Attaching a debugger to a DAW can be difficult, so we recommend debugging as a standalone application first.
+In VS Code, select the "Debug gain plugin standalone" configuration and run it.
 
-> **注意:** スタンドアローンモードでは音声フィードバックがあります。**ヘッドフォンを使用してください。**
+> **Note:** Audio feedback is present in standalone mode. **Use headphones.**
 
-## 次のステップ
+## Next Steps
 
-[architecture.md](architecture.md) を読んでみましょう。
-スレッドモデル・通信フロー・パラメータ変更フローの詳細を記載しています。
+Read [architecture.md](architecture.md) to learn about the thread model, communication flow, and parameter change flow.
 
-また、wxp の使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
+For wxp usage, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).
