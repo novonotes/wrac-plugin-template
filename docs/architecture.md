@@ -1,32 +1,34 @@
-# アーキテクチャ概要
+# Architecture Overview
 
-## スレッドモデル
+> 日本語版: [architecture_JA.md](architecture_JA.md)
 
-CLAP プラグインは主に 2 つのスレッドで動作します。
+## Thread Model
+
+A CLAP plugin operates on two primary threads.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ メインスレッド（= RunLoop スレッド）                                │
-│  - GUI の生成・破棄・リサイズ (gui.rs)                             │
-│  - パラメータ情報の公開 (params.rs)                                │
-│  - WxpCommandHandler によるコマンド処理                            │
-│  - 状態の保存・復元                                                │
-│  - wxp の WebView イベント処理                                     │
-│  - RunLoopSender 経由で他スレッドからタスクを受け取る                 │
-│  - Channel::send() による Rust → JS 通知もここで実行               │
+│ Main thread (= RunLoop thread)                                  │
+│  - GUI creation, destruction, and resize (gui.rs)               │
+│  - Exposing parameter information (params.rs)                   │
+│  - Command processing via WxpCommandHandler                     │
+│  - State save and restore                                        │
+│  - wxp WebView event processing                                  │
+│  - Receiving tasks from other threads via RunLoopSender          │
+│  - Channel::send() for Rust → JS notifications runs here        │
 ├─────────────────────────────────────────────────────────────────┤
-│ オーディオスレッド（リアルタイム）                                    │
-│  - process() でサンプルにゲインを掛ける (audio.rs)                  │
-│  - ロック・メモリ割り当て・I/O は禁止                                │
+│ Audio thread (real-time)                                        │
+│  - Applies gain to samples in process() (audio.rs)              │
+│  - Locking, memory allocation, and I/O are forbidden            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-> **補足:** RunLoop はメインスレッド上で初期化されるため、
-> このプラグインでは RunLoop スレッド＝メインスレッドです。
-> `RunLoopSender` はオーディオスレッドなど別のスレッドから
-> メインスレッドにクロージャをポストするために使います。
+> **Note:** Because RunLoop is initialized on the main thread,
+> the RunLoop thread and the main thread are the same in this plugin.
+> `RunLoopSender` is used to post closures from other threads (such as
+> the audio thread) to the main thread.
 
-## Rust ↔ JavaScript 通信
+## Rust ↔ JavaScript Communication
 
 ```
 JavaScript (main.ts)                    Rust (plugin.rs)
@@ -34,55 +36,55 @@ JavaScript (main.ts)                    Rust (plugin.rs)
 invoke("set_gain", {value})  ──────►   WxpCommandHandler
                                         └─ register_sync("set_gain", ...)
 
-Channel コールバック        ◄──────    RunLoopSender → Channel::send()
+Channel callback            ◄──────    RunLoopSender → Channel::send()
   └─ render(state)                      └─ notify_gui()
 ```
 
-- **JS → Rust**: `invoke()` で Rust 側に登録されたコマンドを RPC 呼び出し
-- **Rust → JS**: `Channel` によるプッシュ通知。ホストがオートメーション等で値を変更したとき、`RunLoopSender` 経由でメインスレッドにディスパッチし、`Channel::send()` で JS に JSON を送信
+- **JS → Rust**: `invoke()` makes an RPC call to a command registered on the Rust side.
+- **Rust → JS**: Push notifications via `Channel`. When the host changes a value through automation or similar, the change is dispatched to the main thread via `RunLoopSender`, and then sent to JS as JSON through `Channel::send()`.
 
-## パラメータ変更の流れ
+## Parameter Change Flow
 
-**UI → ホスト:**
+**UI → Host:**
 
 ```
-1. ユーザーがノブをドラッグ開始
+1. User starts dragging a knob
 2. JS: invoke("begin_parameter_gesture")
-3. JS: invoke("set_gain", {value})          ← ドラッグ中に繰り返し
-4. Rust: SharedStateInner の AtomicF32 を更新 + pending フラグを立てる
-5. オーディオスレッド: process() で pending フラグを読み取り、output events としてホストに通知
-6. ユーザーがドラッグ終了
+3. JS: invoke("set_gain", {value})          ← repeated while dragging
+4. Rust: Updates AtomicF32 in SharedStateInner + sets the pending flag
+5. Audio thread: process() reads the pending flag and notifies the host via output events
+6. User finishes dragging
 7. JS: invoke("end_parameter_gesture")
 ```
 
-**ホスト → UI:**
+**Host → UI:**
 
 ```
-1. ホストがオートメーション等で値を変更
-2. Rust: process() の input events から ParamValue を受け取る
-3. Rust: SharedStateInner の AtomicF32 を更新
+1. Host changes a value via automation or similar
+2. Rust: Receives a ParamValue from input events in process()
+3. Rust: Updates AtomicF32 in SharedStateInner
 4. Rust: notify_gui() → RunLoopSender → Channel::send()
-5. JS: Channel コールバックで render() が呼ばれ、UI が更新される
+5. JS: Channel callback invokes render(), updating the UI
 ```
 
-## wxp 初期化フロー（CLAP コンテキスト）
+## wxp Initialization Flow (CLAP Context)
 
-CLAP の `set_parent()` コールバック内で WebView を生成します（実装は `gui.rs` 参照）。
+The WebView is created inside the `set_parent()` callback (see `gui.rs` for the implementation).
 
-1. `WebContext::new(data_dir).build_wry_context()` — ユーザーデータディレクトリを設定。返した `wry::WebContext` は WebView の生存期間中保持し続ける必要があるため `self` に格納する
-2. `wxp_clack::window::clack_to_wry_window_handle(&parent)` — CLAP の `Window` を wry の `WindowHandle` に変換
-3. `WxpWebViewBuilder::new(&mut wry_context)` でビルダーを作成し、コマンドハンドラ・URL・サイズ等を設定
-4. `.build_as_child(&parent_handle)` で `WebViewRef` を取得して `self` に格納
+1. `WebContext::new(data_dir).build_wry_context()` — sets the user data directory. The returned `wry::WebContext` must be kept alive for the lifetime of the WebView, so it is stored on `self`.
+2. `wxp_clack::window::clack_to_wry_window_handle(&parent)` — converts the CLAP `Window` to a wry `WindowHandle`.
+3. `WxpWebViewBuilder::new(&mut wry_context)` — creates a builder and configures the command handler, URL, bounds, etc.
+4. `.build_as_child(&parent_handle)` — obtains a `WebViewRef` and stores it on `self`.
 
-`destroy()` では `reset_webview()` を通じて GUI 通知チャネルのクリア、`WebViewRef` の drop による WebView 破棄、`wry::WebContext` の破棄を順に行います。
+In `destroy()`, `reset_webview()` clears the GUI notification channel, drops the `WebViewRef` to destroy the WebView, then drops the `wry::WebContext`.
 
-## 主要な依存クレート
+## Key Dependencies
 
-| クレート | 役割 |
-|---------|------|
-| `clack-plugin` / `clack-extensions` | CLAP プラグイン API の Rust バインディング |
-| `wxp` | WebView GUI フレームワーク（WxpWebViewBuilder, WxpCommandHandler, Channel） |
-| `wxp_clack` | wxp と CLAP を繋ぐユーティリティ（DPI 変換、ウィンドウハンドル変換） |
-| `novonotes_run_loop` | プラットフォーム抽象化されたイベントループ（RunLoop, RunLoopSender） |
-| `wry` | WebView エンジン（wxp が内部で使用） |
-| `@novonotes/webview-bridge` | JS 側の通信ライブラリ（invoke, Channel） |
+| Crate | Role |
+|-------|------|
+| `clack-plugin` / `clack-extensions` | Rust bindings for the CLAP plugin API |
+| `wxp` | WebView GUI framework (WxpWebViewBuilder, WxpCommandHandler, Channel) |
+| `wxp_clack` | Utilities bridging wxp and CLAP (DPI conversion, window handle conversion) |
+| `novonotes_run_loop` | Platform-abstracted event loop (RunLoop, RunLoopSender) |
+| `wry` | WebView engine (used internally by wxp) |
+| `@novonotes/webview-bridge` | JS-side communication library (invoke, Channel) |

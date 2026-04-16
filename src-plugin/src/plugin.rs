@@ -23,111 +23,112 @@ use wxp_clack::dpi::DpiConverter;
 
 use crate::audio::WxpExampleGainAudioProcessor;
 
-// --- CLAP プラグインメタデータ ---
-// PLUGIN_ID はグローバルに一意である必要がある（リバースドメイン形式が慣例）。
+// --- CLAP plugin metadata ---
+// PLUGIN_ID must be globally unique (reverse-domain format is the convention).
 pub(crate) const PLUGIN_ID: &str = "com.novo-notes.wxp-example-gain";
 pub(crate) const PLUGIN_NAME: &str = "WXP Example Gain";
-/// パラメータの一意 ID。ホストはこの ID でパラメータを識別・保存するため、
-/// 一度公開したら変更してはならない。
+/// Unique ID for the parameter. The host uses this ID to identify and persist parameters,
+/// so it must never be changed once published.
 pub(crate) const PARAM_GAIN_ID: ClapId = ClapId::new(1);
-/// ゲインのデフォルト値。1.0 = 0dB（原音のまま）。
+/// Default gain value. 1.0 = 0 dB (unity gain).
 pub(crate) const DEFAULT_GAIN: f32 = 1.0;
 pub(crate) const MIN_GAIN: f32 = 0.0;
-/// 最大ゲイン 2.0 = 約 +6dB。
+/// Maximum gain 2.0 ≈ +6 dB.
 pub(crate) const MAX_GAIN: f32 = 2.0;
 pub(crate) const DEFAULT_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(360.0, 360.0);
 
-/// プラグインファクトリ。ホストがプラグインの一覧を問い合わせたり、
-/// インスタンスを生成する際に使われる。
+/// Plugin factory. Used by the host to enumerate plugins and create instances.
 pub(crate) struct WxpExampleGainPluginFactory {
     descriptor: PluginDescriptor,
 }
 
-/// clack の Plugin トレイトを実装するための型。
-/// 関連型でオーディオプロセッサ・共有状態・メインスレッドの型を紐づける。
+/// Type that implements the clack Plugin trait.
+/// Associates the audio processor, shared state, and main thread types via associated types.
 pub(crate) struct WxpExampleGainPlugin;
 
 // -----------------------------------------------------------------------
-// CLAP プラグインのスレッドモデル
+// CLAP plugin thread model
 // -----------------------------------------------------------------------
-// CLAP ではプラグインの状態を 3 つの層に分けて管理する：
+// CLAP divides plugin state into three layers:
 //
-//   1. SharedState     — 全スレッドから参照可能（Atomic 型で同期）
-//   2. MainThread      — メインスレッド専用。GUI やパラメータ情報の操作
-//   3. AudioProcessor  — オーディオスレッド専用。リアルタイム処理
+//   1. SharedState     — accessible from all threads (synchronized via Atomic types)
+//   2. MainThread      — main thread only; used for GUI and parameter info operations
+//   3. AudioProcessor  — audio thread only; real-time processing
 //
-// SharedState を介してスレッド間の値を受け渡す設計になっている。
+// Values are passed between threads through SharedState.
 // -----------------------------------------------------------------------
 
-/// 全スレッドから共有される状態。Arc で包んで AudioProcessor と MainThread の
-/// 両方から参照する。
+/// State shared across all threads. Wrapped in Arc so that both AudioProcessor
+/// and MainThread can hold a reference to it.
 pub(crate) struct SharedState {
     pub(crate) inner: Arc<SharedStateInner>,
 }
 
 pub(crate) struct SharedStateInner {
-    /// 現在のゲイン値。オーディオスレッドとメインスレッドの両方からアクセスされるため
-    /// AtomicF32 を使用。ロックフリーでリアルタイムスレッドから安全に読み書きできる。
+    /// Current gain value. Accessed from both the audio thread and the main thread,
+    /// so AtomicF32 is used. Lock-free and safe to read/write from real-time threads.
     gain: AtomicF32,
-    /// UI から変更されたパラメータを、次回の flush/process でホストに通知するための
-    /// フラグ群。「ジェスチャー開始→値変更→ジェスチャー終了」の 3 段階で管理する。
-    /// ジェスチャーとは、ユーザーがノブをドラッグするなどの一連の操作のこと。
-    /// ホストはジェスチャーの開始・終了を認識し、オートメーション記録の単位とする。
+    /// Pending flags for notifying the host of parameter changes made from the UI,
+    /// to be consumed in the next flush/process call.
+    /// Managed in three stages: gesture begin → value change → gesture end.
+    /// A gesture is a single user interaction such as dragging a knob.
+    /// The host uses gesture begin/end to determine the unit of automation recording.
     pending_ui: PendingUiState,
-    /// GUI（WebView）への通知に使うチャネル。
-    /// GUI が開いていないときは None。
+    /// Channel used to notify the GUI (WebView).
+    /// None when the GUI is not open.
     gui_notifier: Mutex<Option<GuiNotifier>>,
 }
 
-/// UI 側からのパラメータ変更をホストに伝えるための pending フラグ。
-/// 各フラグは AtomicBool で、オーディオスレッドの process()/flush() で
-/// swap(false) して消費される。
+/// Pending flags for propagating UI parameter changes to the host.
+/// Each flag is an AtomicBool consumed (swapped to false) by process()/flush() on the audio thread.
 struct PendingUiState {
     gesture_begin: AtomicBool,
     value_dirty: AtomicBool,
     gesture_end: AtomicBool,
 }
 
-/// GUI 通知用の送信ハンドル。RunLoopSender でメインスレッドにディスパッチし、
-/// Channel 経由で WebView の JavaScript に JSON メッセージを送る。
+/// Handle for sending GUI notifications. Dispatches to the main thread via RunLoopSender,
+/// then sends a JSON message to WebView JavaScript via Channel.
 #[derive(Clone)]
 struct GuiNotifier {
-    /// RunLoopSender は任意のスレッドからメインスレッド（RunLoop）に
-    /// クロージャをポストできる。WebView の操作はメインスレッド上でのみ安全なため、
-    /// オーディオスレッド等から直接 Channel::send() を呼ばず sender を経由する。
+    /// RunLoopSender can post closures from any thread to the main thread (RunLoop).
+    /// Because WebView operations are only safe on the main thread,
+    /// Channel::send() must not be called directly from the audio thread;
+    /// use the sender instead.
     sender: RunLoopSender,
-    /// wxp の Channel。JavaScript 側で subscribe した双方向通信チャネル。
-    /// Rust → JS 方向の push 通知に使う。
+    /// wxp Channel — a bidirectional communication channel subscribed from the JavaScript side.
+    /// Used for push notifications in the Rust → JS direction.
     channel: Channel,
 }
 
-/// プラグインの状態をシリアライズして保存するための構造体。
-/// ホストの「プロジェクト保存」機能で永続化される。
+/// Structure for serializing and saving plugin state.
+/// Persisted by the host's "save project" feature.
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SavedPluginState {
     pub(crate) gain: f32,
 }
 
-/// メインスレッド上でのみアクセスされる状態。GUI やパラメータの管理はここで行う。
+/// State accessed only on the main thread. GUI and parameter management happen here.
 pub(crate) struct WxpExampleGainMainThread<'a> {
     pub(crate) shared: &'a SharedState,
-    /// wxp の WebViewRef。GUI が開いている間だけ Some になる。
+    /// wxp WebViewRef. Some only while the GUI is open.
     pub(crate) web_view: Option<WebViewRef>,
-    /// wry の WebContext。WebView のユーザーデータ（キャッシュ等）の保存先を管理する。
-    /// WebView よりも長く生存する必要があるためフィールドとして保持する。
+    /// wry WebContext. Manages the storage location for WebView user data (cache, etc.).
+    /// Must outlive the WebView, so it is kept as a field.
     pub(crate) wry_context: Option<wry::WebContext>,
-    /// wxp のコマンドハンドラ。JavaScript から呼び出されるコマンド（RPC）を登録する。
+    /// wxp command handler. Registers commands (RPCs) callable from JavaScript.
     pub(crate) command_handler: Arc<WxpCommandHandler>,
     pub(crate) gui_size: LogicalSize<f64>,
-    /// ホストが提示する DPI スケールと論理サイズ・物理サイズを相互変換するユーティリティ。
+    /// Utility for converting between the DPI scale factor presented by the host
+    /// and logical/physical sizes.
     pub(crate) dpi_converter: DpiConverter,
 }
 
 impl WxpExampleGainPluginFactory {
     pub(crate) fn new() -> Self {
         Self {
-            // AUDIO_EFFECT: エフェクトプラグインであることをホストに伝える。
-            // STEREO: ステレオ（2ch）対応であることを示す。
+            // AUDIO_EFFECT: tells the host this is an effect plugin.
+            // STEREO: indicates stereo (2-channel) support.
             descriptor: PluginDescriptor::new(PLUGIN_ID, PLUGIN_NAME).with_features([
                 clack_plugin::plugin::features::AUDIO_EFFECT,
                 clack_plugin::plugin::features::STEREO,
@@ -136,21 +137,20 @@ impl WxpExampleGainPluginFactory {
     }
 }
 
-/// PluginFactoryImpl は CLAP ホストがプラグインを列挙・生成するためのインターフェース。
+/// PluginFactoryImpl is the interface the CLAP host uses to enumerate and create plugins.
 impl PluginFactoryImpl for WxpExampleGainPluginFactory {
-    /// このファクトリが提供するプラグインの数。
+    /// Number of plugins provided by this factory.
     fn plugin_count(&self) -> u32 {
         1
     }
 
-    /// index 番目のプラグインのディスクリプタ（ID, 名前, 機能）を返す。
+    /// Returns the descriptor (ID, name, features) for the plugin at the given index.
     fn plugin_descriptor(&self, index: u32) -> Option<&PluginDescriptor> {
         (index == 0).then_some(&self.descriptor)
     }
 
-    /// ホストが実際にプラグインインスタンスを生成する際に呼ばれる。
-    /// clack の PluginInstance::new に SharedState と MainThread の
-    /// コンストラクタを渡す。
+    /// Called when the host actually creates a plugin instance.
+    /// Passes the SharedState and MainThread constructors to clack's PluginInstance::new.
     fn create_plugin<'a>(
         &'a self,
         host_info: HostInfo<'a>,
@@ -170,24 +170,24 @@ impl PluginFactoryImpl for WxpExampleGainPluginFactory {
 }
 
 impl Plugin for WxpExampleGainPlugin {
-    /// オーディオスレッドで動作するプロセッサ型。
+    /// Processor type that runs on the audio thread.
     type AudioProcessor<'a> = WxpExampleGainAudioProcessor<'a>;
-    /// 全スレッドから共有される状態型。
+    /// State type shared across all threads.
     type Shared<'a> = SharedState;
-    /// メインスレッド専用の状態型。
+    /// State type for the main thread only.
     type MainThread<'a> = WxpExampleGainMainThread<'a>;
 
-    /// このプラグインがサポートする CLAP 拡張を宣言する。
-    /// ホストはここで登録された拡張だけを問い合わせる。
+    /// Declares the CLAP extensions supported by this plugin.
+    /// The host will only query extensions registered here.
     fn declare_extensions(
         builder: &mut PluginExtensions<Self>,
         _shared: Option<&Self::Shared<'_>>,
     ) {
         builder
-            .register::<PluginAudioPorts>()  // オーディオ入出力ポートの定義
-            .register::<PluginParams>()      // パラメータの公開
-            .register::<PluginState>()       // 状態の保存・復元
-            .register::<PluginGui>();         // GUI の提供
+            .register::<PluginAudioPorts>()  // audio input/output port definitions
+            .register::<PluginParams>()      // parameter exposure
+            .register::<PluginState>()       // state save and restore
+            .register::<PluginGui>();         // GUI provision
     }
 }
 
@@ -199,19 +199,19 @@ impl DefaultPluginFactory for WxpExampleGainPlugin {
         ])
     }
 
-    /// SharedState の生成。プラグインインスタンスごとに 1 つ作られる。
+    /// Creates SharedState. One instance is created per plugin instance.
     fn new_shared(_host: HostSharedHandle<'_>) -> Result<Self::Shared<'_>, PluginError> {
         Ok(SharedState::new())
     }
 
-    /// メインスレッド状態の生成。ここで wxp のコマンドハンドラを設定し、
-    /// JavaScript から呼べる RPC コマンドを登録する。
+    /// Creates the main thread state. Sets up the wxp command handler here and
+    /// registers RPC commands callable from JavaScript.
     fn new_main_thread<'a>(
         _host: HostMainThreadHandle<'a>,
         shared: &'a Self::Shared<'a>,
     ) -> Result<Self::MainThread<'a>, PluginError> {
-        // WxpCommandHandler は JavaScript ↔ Rust 間の RPC ブリッジ。
-        // register_commands() でコマンド名とハンドラを紐づける。
+        // WxpCommandHandler is the RPC bridge between JavaScript and Rust.
+        // register_commands() maps command names to their handlers.
         let command_handler = Arc::new(WxpCommandHandler::new());
         register_commands(command_handler.clone(), shared.inner.clone());
 
@@ -230,7 +230,7 @@ impl PluginShared<'_> for SharedState {}
 
 impl<'a> PluginMainThread<'a, SharedState> for WxpExampleGainMainThread<'a> {}
 
-/// オーディオポートの定義。入力 1 ポート・出力 1 ポート（ともにステレオ）。
+/// Audio port definition. One input port and one output port (both stereo).
 impl PluginAudioPortsImpl for WxpExampleGainMainThread<'_> {
     fn count(&mut self, _is_input: bool) -> u32 {
         1
@@ -242,16 +242,16 @@ impl PluginAudioPortsImpl for WxpExampleGainMainThread<'_> {
         }
 
         writer.set(&AudioPortInfo {
-            // 入力と出力で異なる ID を割り当てる。
+            // Assign different IDs to the input and output ports.
             id: ClapId::new(if is_input { 1 } else { 2 }),
             name: if is_input { b"Main In" } else { b"Main Out" },
-            // ステレオ = 2 チャネル（L, R）。
+            // Stereo = 2 channels (L, R).
             channel_count: 2,
-            // IS_MAIN: ホストがデフォルトでルーティングするメインポートであることを示す。
+            // IS_MAIN: indicates this is the main port the host routes by default.
             flags: AudioPortFlags::IS_MAIN,
             port_type: Some(AudioPortType::STEREO),
-            // in_place_pair を指定すると、入力と出力で同じバッファを使う
-            // 「インプレース処理」が可能になる。ここでは None（ホストに任せる）。
+            // Specifying in_place_pair enables "in-place processing" where
+            // the input and output share the same buffer. None here (let the host decide).
             in_place_pair: None,
         });
     }
@@ -278,14 +278,14 @@ impl SharedStateInner {
         }
     }
 
-    /// 現在のゲイン値を取得。オーディオスレッドからも呼ばれる。
-    /// Acquire ordering で、直前の store が確実に見えることを保証する。
+    /// Returns the current gain value. Also called from the audio thread.
+    /// Acquire ordering ensures the most recent store is visible.
     pub(crate) fn gain(&self) -> f32 {
         self.gain.load(Ordering::Acquire)
     }
 
-    /// ホスト（DAW のオートメーション等）からゲインが変更されたときに呼ばれる。
-    /// 値を保存し、GUI が開いていれば WebView に通知する。
+    /// Called when the gain is changed by the host (e.g., DAW automation).
+    /// Stores the value and notifies the GUI if it is open.
     pub(crate) fn set_gain_from_host(&self, gain: f64) -> f32 {
         let gain = clamp_gain(gain as f32);
         self.gain.store(gain, Ordering::Release);
@@ -293,19 +293,19 @@ impl SharedStateInner {
         gain
     }
 
-    // --- UI → ホストへのパラメータ変更通知 ---
-    // CLAP では UI がパラメータを変更する場合、以下の手順でホストに通知する：
-    //   1. begin_gesture  — ユーザーがノブ等の操作を開始
-    //   2. set_value       — 値を変更（ドラッグ中に複数回呼ばれうる）
-    //   3. end_gesture    — 操作を完了
-    // これらのフラグは次回の process()/flush() で消費され、
-    // output events としてホストに伝えられる。
+    // --- Parameter change notification from UI to host ---
+    // In CLAP, when the UI changes a parameter, it must notify the host in these steps:
+    //   1. begin_gesture  — user starts interacting with a knob or similar control
+    //   2. set_value       — change the value (may be called multiple times during a drag)
+    //   3. end_gesture    — interaction complete
+    // These flags are consumed in the next process()/flush() call and forwarded
+    // to the host as output events.
 
     pub(crate) fn begin_gesture_from_ui(&self) {
         self.pending_ui.gesture_begin.store(true, Ordering::Release);
     }
 
-    /// UI からゲインを変更。ホスト通知用の value_dirty フラグも立てる。
+    /// Changes gain from the UI. Also sets the value_dirty flag for host notification.
     pub(crate) fn set_gain_from_ui(&self, gain: f64) -> f32 {
         let gain = self.set_gain_from_host(gain);
         self.pending_ui.value_dirty.store(true, Ordering::Release);
@@ -316,8 +316,8 @@ impl SharedStateInner {
         self.pending_ui.gesture_end.store(true, Ordering::Release);
     }
 
-    // take_* メソッド群: swap(false) で「フラグを読みつつリセット」する。
-    // process()/flush() から呼ばれ、ホストへの output event 送出に使われる。
+    // take_* methods: use swap(false) to atomically read and clear a flag.
+    // Called from process()/flush() to emit output events to the host.
 
     pub(crate) fn take_ui_gesture_begin(&self) -> bool {
         self.pending_ui.gesture_begin.swap(false, Ordering::AcqRel)
@@ -331,28 +331,28 @@ impl SharedStateInner {
         self.pending_ui.gesture_end.swap(false, Ordering::AcqRel)
     }
 
-    /// GUI が開かれたときに、RunLoopSender と Channel を登録する。
-    /// これにより、ホストからのパラメータ変更を WebView にプッシュ通知できるようになる。
+    /// Registers a RunLoopSender and Channel when the GUI is opened.
+    /// This enables push notifications of host parameter changes to the WebView.
     pub(crate) fn set_gui_channel(&self, sender: RunLoopSender, channel: Channel) {
         *self.gui_notifier.lock() = Some(GuiNotifier { sender, channel });
     }
 
-    /// GUI が閉じられたときに呼ぶ。通知先をクリアする。
+    /// Called when the GUI is closed. Clears the notification target.
     pub(crate) fn clear_gui_channel(&self) {
         *self.gui_notifier.lock() = None;
     }
 
-    /// ゲイン値が変更されたとき、GUI に通知する。
-    /// RunLoopSender を使ってメインスレッドにディスパッチすることで、
-    /// オーディオスレッドなど任意のスレッドから安全に WebView にメッセージを送れる。
+    /// Notifies the GUI when the gain value changes.
+    /// By dispatching to the main thread via RunLoopSender, WebView messages can be
+    /// sent safely from any thread, including the audio thread.
     fn notify_gui(&self) {
         let Some(notifier) = self.gui_notifier.lock().clone() else {
             return;
         };
 
         let payload = gain_payload(self.gain());
-        // RunLoopSender::send() は非同期。クロージャはメインスレッド上で実行される。
-        // Channel::send() で JSON ペイロードを JavaScript 側に送信する。
+        // RunLoopSender::send() is asynchronous. The closure runs on the main thread.
+        // Channel::send() sends the JSON payload to the JavaScript side.
         notifier.sender.send(move || {
             let _ = notifier.channel.send(payload);
         });
@@ -360,8 +360,8 @@ impl SharedStateInner {
 }
 
 impl WxpExampleGainMainThread<'_> {
-    /// 現在のプラットフォームに適した GUI API を返す。
-    /// is_floating: false はホストのウィンドウに埋め込み表示することを意味する。
+    /// Returns the GUI API appropriate for the current platform.
+    /// is_floating: false means the GUI is embedded in the host's window.
     pub(crate) fn preferred_api(&self) -> Option<clack_extensions::gui::GuiConfiguration<'static>> {
         Some(clack_extensions::gui::GuiConfiguration {
             api_type: clack_extensions::gui::GuiApiType::default_for_current_platform()?,
@@ -369,8 +369,8 @@ impl WxpExampleGainMainThread<'_> {
         })
     }
 
-    /// GUI を閉じるときのクリーンアップ。
-    /// Channel をクリアしてから WebView と WebContext を破棄する。
+    /// Cleanup when closing the GUI.
+    /// Clears the Channel, then drops the WebView and WebContext.
     pub(crate) fn reset_webview(&mut self) {
         self.shared.inner.clear_gui_channel();
         self.web_view = None;
@@ -378,8 +378,8 @@ impl WxpExampleGainMainThread<'_> {
     }
 }
 
-/// JavaScript 側に送る JSON ペイロードを組み立てる。
-/// UI はこの形式のメッセージを受け取ってノブやテキスト表示を更新する。
+/// Builds the JSON payload sent to the JavaScript side.
+/// The UI receives this message format to update knob and text displays.
 pub(crate) fn gain_payload(gain: f32) -> serde_json::Value {
     json!({
         "type": "gain-state",
@@ -392,9 +392,9 @@ pub(crate) fn clamp_gain(gain: f32) -> f32 {
     gain.clamp(MIN_GAIN, MAX_GAIN)
 }
 
-/// リニアゲイン値を dB（デシベル）表記の文字列に変換する。
-/// dB = 20 * log10(gain) はオーディオ分野の標準的な対数スケール変換。
-/// ゲイン 1.0 = 0dB、ゲイン 0.0 = -∞ dB。
+/// Converts a linear gain value to a dB (decibel) string.
+/// dB = 20 * log10(gain) is the standard logarithmic scale conversion in audio.
+/// gain 1.0 = 0 dB, gain 0.0 = -∞ dB.
 pub(crate) fn gain_db_text(gain: f64) -> String {
     if gain <= 0.0 {
         "-inf dB".to_string()
@@ -404,22 +404,22 @@ pub(crate) fn gain_db_text(gain: f64) -> String {
 }
 
 // -----------------------------------------------------------------------
-// wxp コマンドハンドラの登録
+// wxp command handler registration
 // -----------------------------------------------------------------------
-// WxpCommandHandler は JavaScript ↔ Rust 間の RPC メカニズム。
-// JavaScript 側から `invoke("command_name", { args })` を呼ぶと、
-// ここで登録したハンドラが実行される。
+// WxpCommandHandler is the RPC mechanism between JavaScript and Rust.
+// When JavaScript calls `invoke("command_name", { args })`,
+// the handler registered here is executed.
 //
-// register_sync: 同期コマンド（すぐに結果を返す）
-// register_async: 非同期コマンド（Future を返す）
+// register_sync: synchronous command (returns result immediately)
+// register_async: asynchronous command (returns a Future)
 //
-// コマンドハンドラ内では SharedStateInner を通じてパラメータを読み書きする。
+// Handlers read and write parameters through SharedStateInner.
 
 pub(crate) fn register_commands(
     command_handler: Arc<WxpCommandHandler>,
     shared: Arc<SharedStateInner>,
 ) {
-    // 現在のゲイン状態を取得するコマンド。GUI の初期表示に使われる。
+    // Command for retrieving the current gain state. Used for the initial GUI render.
     {
         let shared = shared.clone();
         command_handler.register_sync("get_gain_state", move |_ctx| {
@@ -427,8 +427,8 @@ pub(crate) fn register_commands(
         });
     }
 
-    // ジェスチャー開始を通知するコマンド。
-    // JavaScript 側でノブのドラッグ開始時に呼ぶ。
+    // Command for notifying gesture begin.
+    // Called from JavaScript when the user starts dragging a knob.
     {
         let shared = shared.clone();
         command_handler.register_sync("begin_parameter_gesture", move |_ctx| {
@@ -437,8 +437,8 @@ pub(crate) fn register_commands(
         });
     }
 
-    // ゲイン値を設定するコマンド。ドラッグ中に繰り返し呼ばれる。
-    // ctx.arg() で JavaScript から渡された引数を型安全に取得できる。
+    // Command for setting the gain value. Called repeatedly during a drag.
+    // ctx.arg() retrieves arguments passed from JavaScript in a type-safe way.
     {
         let shared = shared.clone();
         command_handler.register_sync("set_gain", move |ctx| {
@@ -448,8 +448,8 @@ pub(crate) fn register_commands(
         });
     }
 
-    // ジェスチャー終了を通知するコマンド。
-    // JavaScript 側でノブのドラッグ終了時に呼ぶ。
+    // Command for notifying gesture end.
+    // Called from JavaScript when the user finishes dragging a knob.
     {
         let shared = shared.clone();
         command_handler.register_sync("end_parameter_gesture", move |_ctx| {
@@ -458,30 +458,30 @@ pub(crate) fn register_commands(
         });
     }
 
-    // ゲイン値の変更をサブスクライブするコマンド。
-    // JavaScript 側から Channel を渡してもらい、ホストからの値変更を
-    // リアルタイムに push 通知する。Rust → JS の非同期通知の典型パターン。
+    // Command for subscribing to gain value changes.
+    // JavaScript passes a Channel, and host-side value changes are pushed to it in real time.
+    // This is the canonical pattern for asynchronous Rust → JS notifications.
     {
         let shared = shared.clone();
         command_handler.register_sync("subscribe_gain", move |ctx| {
-            // Channel は wxp が提供する双方向通信チャネル。
-            // JavaScript 側で作成され、コマンド引数として Rust に渡される。
+            // Channel is a bidirectional communication channel provided by wxp.
+            // It is created on the JavaScript side and passed to Rust as a command argument.
             let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
-            // 登録と同時に現在の値を即座に送信する（初期同期）。
+            // Send the current value immediately upon registration (initial sync).
             channel
                 .send(gain_payload(shared.gain()))
                 .map_err(|e| e.to_string())?;
 
-            // RunLoop::sender() でメインスレッドへの送信ハンドルを取得し、
-            // Channel と一緒に保存する。以後、オーディオスレッド等から
-            // RunLoopSender 経由でメインスレッドに Channel 送信をポストできる。
+            // Obtain a sender handle to the main thread via RunLoop::sender() and
+            // store it together with the Channel. Afterward, Channel sends can be
+            // posted to the main thread from the audio thread or elsewhere via RunLoopSender.
             shared.set_gui_channel(RunLoop::sender(), channel);
 
             Ok::<_, String>(json!({ "ok": true }))
         });
     }
 
-    // サブスクリプション解除。GUI が閉じるときに呼ばれる。
+    // Unsubscribe command. Called when the GUI closes.
     {
         let shared = shared.clone();
         command_handler.register_sync("unsubscribe_gain", move |_ctx| {

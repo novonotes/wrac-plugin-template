@@ -1,23 +1,25 @@
 # wxp-gain-example
 
-[wxp](https://github.com/novonotes/wxp) を使った gain plugin の参照実装です。
-コピーして新規プロジェクトの出発点として使うこともできます。
+A reference implementation of a gain plugin built with [wxp](https://github.com/novonotes/wxp).
+You can also copy this repository as a starting point for new projects.
 
-## 含まれるもの
+> 日本語版: [README_JA.md](README_JA.md)
 
-| パス | 内容 |
-|-----|------|
-| `src-plugin` | Rust 製の CLAP プラグイン本体 |
-| `src-gui` | TypeScript + HTML/CSS で書かれた GUI |
-| `script` | ビルド・インストール用スクリプト |
-| `clap_wrapper_builder` | CLAP を VST3 / AUv2 / Standalone にラップする補助ビルド環境 |
+## Contents
 
-## 新規プロジェクトのセットアップ
+| Path | Description |
+|------|-------------|
+| `src-plugin` | CLAP plugin core written in Rust |
+| `src-gui` | GUI written in TypeScript + HTML/CSS |
+| `script` | Build and installation scripts |
+| `clap_wrapper_builder` | Helper build environment that wraps CLAP into VST3 / AUv2 / Standalone |
 
-このレポジトリを元に、新しい wxp プラグインを作成する手順は [Setup](docs/setup.md) を参照してください。
+## Setting Up a New Project
 
-## アーキテクチャ
+To create a new wxp plugin based on this repository, see [Setup](docs/setup.md).
 
-スレッドモデル・通信フロー・パラメータ変更フローの詳細は [docs/architecture.md](docs/architecture.md) を参照してください。
+## Architecture
 
-また、wxp クレートの使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
+For details on the thread model, communication flow, and parameter change flow, see [docs/architecture.md](docs/architecture.md).
+
+For usage of the wxp crate, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).

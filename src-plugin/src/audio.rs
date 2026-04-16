@@ -1,13 +1,13 @@
-//! オーディオ処理モジュール。
+//! Audio processing module.
 //!
-//! このモジュールはオーディオスレッド上で動作する。
-//! オーディオスレッドはリアルタイム制約があり、以下の操作は禁止：
-//!   - メモリ割り当て / 解放（malloc / free）
-//!   - ロック取得（Mutex, RwLock 等）
-//!   - I/O（ファイル、ネットワーク）
-//!   - システムコール全般
-//! これらを行うとオーディオのドロップアウト（ノイズ・途切れ）が発生する。
-//! そのため、パラメータの受け渡しには AtomicF32 のようなロックフリーな仕組みを使う。
+//! This module runs on the audio thread.
+//! The audio thread has real-time constraints; the following operations are forbidden:
+//!   - Memory allocation / deallocation (malloc / free)
+//!   - Lock acquisition (Mutex, RwLock, etc.)
+//!   - I/O (file, network)
+//!   - System calls in general
+//! Performing these operations causes audio dropouts (noise or glitches).
+//! For this reason, parameter passing uses lock-free mechanisms such as AtomicF32.
 
 use clack_extensions::params::PluginAudioProcessorParams;
 use clack_plugin::prelude::*;
@@ -16,8 +16,8 @@ use clack_plugin::process::audio::{ChannelPair, SampleType};
 use crate::params::{apply_host_parameter_events, drain_ui_events};
 use crate::plugin::{SharedState, WxpExampleGainMainThread};
 
-/// オーディオスレッドで動作するプロセッサ。
-/// SharedState への参照のみを持ち、Atomic 経由でパラメータを読み取る。
+/// Processor that runs on the audio thread.
+/// Holds only a reference to SharedState and reads parameters via Atomics.
 pub(crate) struct WxpExampleGainAudioProcessor<'a> {
     shared: &'a SharedState,
 }
@@ -25,9 +25,9 @@ pub(crate) struct WxpExampleGainAudioProcessor<'a> {
 impl<'a> PluginAudioProcessor<'a, SharedState, WxpExampleGainMainThread<'a>>
     for WxpExampleGainAudioProcessor<'a>
 {
-    /// ホストがオーディオ処理を開始するときに呼ばれる（activate）。
-    /// audio_config にはサンプルレートやバッファサイズの情報が含まれる。
-    /// このプラグインはシンプルなゲインなのでこれらの情報は不要。
+    /// Called when the host starts audio processing (activate).
+    /// `audio_config` contains sample rate and buffer size information.
+    /// This plugin is a simple gain, so those values are not needed.
     fn activate(
         _host: HostAudioProcessorHandle<'a>,
         _main_thread: &mut WxpExampleGainMainThread<'a>,
@@ -37,48 +37,48 @@ impl<'a> PluginAudioProcessor<'a, SharedState, WxpExampleGainMainThread<'a>>
         Ok(Self { shared })
     }
 
-    /// ホストがオーディオ処理を停止するときに呼ばれる（deactivate）。
+    /// Called when the host stops audio processing (deactivate).
     fn deactivate(self, _main_thread: &mut WxpExampleGainMainThread<'a>) {}
 
-    /// 毎オーディオバッファごとに呼ばれるメインの処理関数。
-    /// ホストは通常 44100Hz や 48000Hz のサンプルレートで、
-    /// 64〜2048 サンプル程度のバッファ単位でこの関数を呼び出す。
+    /// Main processing function called for every audio buffer.
+    /// The host typically calls this at 44100 Hz or 48000 Hz,
+    /// in buffer sizes of roughly 64 to 2048 samples.
     fn process(
         &mut self,
         _process: Process,
         mut audio: Audio,
         events: Events,
     ) -> Result<ProcessStatus, PluginError> {
-        // UI からのパラメータ変更をホストに通知する（output events）。
+        // Notify the host of parameter changes from the UI (output events).
         drain_ui_events(&self.shared.inner, events.output);
-        // ホストからのパラメータ変更（オートメーション等）を反映する。
+        // Apply parameter changes from the host (automation, etc.).
         apply_host_parameter_events(&self.shared.inner, events.input);
 
-        // Atomic から現在のゲイン値を読み取る。ロックフリーなので安全。
+        // Read the current gain value from the Atomic. Lock-free, so safe on the audio thread.
         let gain = self.shared.inner.gain();
-        // port_pair(0) で最初のオーディオポート（入力と出力のペア）を取得。
+        // port_pair(0) retrieves the first audio port pair (input + output).
         let Some(mut port_pair) = audio.port_pair(0) else {
             return Ok(ProcessStatus::ContinueIfNotQuiet);
         };
 
-        // ホストはサンプル形式として f32 または f64 を使用する。
-        // どちらが来ても対応できるようにマッチする。
+        // The host may use either f32 or f64 sample format.
+        // Handle both cases.
         match port_pair.channels()? {
             SampleType::F32(mut channels) => process_channels_f32(&mut channels, gain),
             SampleType::F64(mut channels) => process_channels_f64(&mut channels, gain as f64),
-            // Both の場合は f64 側を処理する（ホストは f64 を優先する）。
+            // For Both, process the f64 side (hosts prefer f64).
             SampleType::Both(_, mut channels) => process_channels_f64(&mut channels, gain as f64),
         }
 
-        // ContinueIfNotQuiet: 入力が無音になったら処理をスキップしてよいとホストに伝える。
-        // 残響やディレイのように音が残るエフェクトでは Tail を返す必要がある。
+        // ContinueIfNotQuiet: tells the host it may skip processing when input is silent.
+        // Effects with a tail (e.g., reverb or delay) should return Tail instead.
         Ok(ProcessStatus::ContinueIfNotQuiet)
     }
 }
 
-/// オーディオスレッド上でのパラメータ flush。
-/// process() が呼ばれていない間（再生停止中など）でも
-/// パラメータの同期が必要な場合にホストから呼ばれる。
+/// Parameter flush on the audio thread.
+/// Called by the host when parameter synchronization is needed but process() is not running
+/// (e.g., while playback is stopped).
 impl PluginAudioProcessorParams for WxpExampleGainAudioProcessor<'_> {
     fn flush(
         &mut self,
@@ -90,26 +90,26 @@ impl PluginAudioProcessorParams for WxpExampleGainAudioProcessor<'_> {
     }
 }
 
-/// f32 サンプル形式のチャネル処理。
-/// ChannelPair はホストがバッファを提供する 4 つのパターンに対応する：
+/// Channel processing for f32 sample format.
+/// ChannelPair handles the four buffer layouts the host may provide:
 fn process_channels_f32(
     channels: &mut clack_plugin::process::audio::PairedChannels<'_, f32>,
     gain: f32,
 ) {
     for pair in channels.iter_mut() {
         match pair {
-            // 入力のみ（出力バッファなし）: 何もしない。
+            // Input only (no output buffer): do nothing.
             ChannelPair::InputOnly(_) => {}
-            // 出力のみ（入力バッファなし）: 無音で埋める。
+            // Output only (no input buffer): fill with silence.
             ChannelPair::OutputOnly(output) => output.fill(0.0),
-            // 入出力が別バッファ: 入力にゲインを掛けて出力に書き込む。
+            // Separate input and output buffers: apply gain from input to output.
             ChannelPair::InputOutput(input, output) => {
                 for (src, dst) in input.iter().zip(output.iter_mut()) {
                     *dst = *src * gain;
                 }
             }
-            // インプレース処理: 入出力が同じバッファ。直接書き換える。
-            // メモリ効率が良く、ホストが最も好む形式。
+            // In-place processing: input and output share the same buffer. Modify in place.
+            // Memory-efficient and the format most preferred by hosts.
             ChannelPair::InPlace(buffer) => {
                 for sample in buffer.iter_mut() {
                     *sample *= gain;
@@ -119,7 +119,7 @@ fn process_channels_f32(
     }
 }
 
-/// f64 サンプル形式のチャネル処理。ロジックは f32 版と同じ。
+/// Channel processing for f64 sample format. Logic is identical to the f32 version.
 fn process_channels_f64(
     channels: &mut clack_plugin::process::audio::PairedChannels<'_, f64>,
     gain: f64,

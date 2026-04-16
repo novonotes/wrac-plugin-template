@@ -1,13 +1,13 @@
 //! WXP Example Gain Plugin
 //!
-//! wxp (WebView eXtension Platform) を使った CLAP オーディオプラグインのサンプル。
-//! 入力信号にゲイン（音量倍率）を掛けるだけのシンプルなエフェクトプラグイン。
+//! A sample CLAP audio plugin built with wxp (WebView eXtension Platform).
+//! A simple effect plugin that applies a gain (volume multiplier) to the input signal.
 //!
-//! ## モジュール構成
-//! - `plugin` : プラグインの定義、共有状態、コマンドハンドラの登録
-//! - `audio`  : リアルタイムオーディオ処理（オーディオスレッドで動作）
-//! - `params` : CLAP パラメータの公開・ホストとのパラメータ同期
-//! - `gui`    : wxp WebView による GUI の生成・リサイズ管理
+//! ## Module layout
+//! - `plugin` : Plugin definition, shared state, and command handler registration
+//! - `audio`  : Real-time audio processing (runs on the audio thread)
+//! - `params` : CLAP parameter exposure and host parameter synchronization
+//! - `gui`    : GUI creation and resize management via wxp WebView
 
 mod audio;
 mod gui;
@@ -19,23 +19,23 @@ use std::ffi::CStr;
 use clack_plugin::{clack_export_entry, entry::prelude::*};
 use plugin::WxpExampleGainPluginFactory;
 
-/// CLAP プラグインのエントリーポイント。
-/// ホスト（DAW）がプラグインの共有ライブラリをロードすると、まずこの型が生成される。
-/// Entry はプラグインのライフサイクル全体を管理する最上位の構造体。
+/// Entry point for the CLAP plugin.
+/// When the host (DAW) loads the plugin's shared library, this type is instantiated first.
+/// Entry is the top-level struct that manages the entire plugin lifecycle.
 pub struct WxpExampleGainEntry {
-    /// PluginFactoryWrapper は clack が提供するラッパーで、
-    /// 自前の PluginFactoryImpl をホストに公開するために使う。
+    /// PluginFactoryWrapper is a wrapper provided by clack that exposes
+    /// a custom PluginFactoryImpl to the host.
     plugin_factory: PluginFactoryWrapper<WxpExampleGainPluginFactory>,
 }
 
 impl Entry for WxpExampleGainEntry {
-    /// ホストがプラグインをロードした直後に一度だけ呼ばれる。
-    /// _bundle_path にはプラグインファイル（.clap）のパスが渡される。
+    /// Called exactly once immediately after the host loads the plugin.
+    /// `_bundle_path` receives the path to the plugin file (.clap).
     fn new(_bundle_path: &CStr) -> Result<Self, EntryLoadError> {
-        // RunLoop の初期化。メインスレッド上で RunLoop を起動する。
-        // wxp の WebView やコマンドハンドラはメインスレッド（= RunLoop）上で
-        // 動作するため、プラグインの最初期に init() を呼ぶ必要がある。
-        // init/deinit は参照カウント方式なので、複数回呼んでも安全。
+        // Initialize the RunLoop on the main thread.
+        // Because wxp's WebView and command handlers operate on the main thread (= RunLoop),
+        // init() must be called as early as possible during plugin startup.
+        // init/deinit use reference counting, so multiple calls are safe.
         novonotes_run_loop::RunLoop::init().map_err(|_| EntryLoadError)?;
 
         Ok(Self {
@@ -43,8 +43,8 @@ impl Entry for WxpExampleGainEntry {
         })
     }
 
-    /// ホストに対してこのプラグインが提供するファクトリを登録する。
-    /// 1つの Entry が複数のプラグインファクトリを公開することも可能。
+    /// Register the factories provided by this plugin with the host.
+    /// A single Entry can expose multiple plugin factories.
     fn declare_factories<'a>(&'a self, builder: &mut EntryFactories<'a>) {
         builder.register_factory(&self.plugin_factory);
     }
@@ -52,17 +52,17 @@ impl Entry for WxpExampleGainEntry {
 
 impl Drop for WxpExampleGainEntry {
     fn drop(&mut self) {
-        // init() と対になる deinit()。Entry が破棄される＝プラグインがアンロードされる。
+        // deinit() is the counterpart to init(). Entry being dropped means the plugin is unloaded.
         novonotes_run_loop::RunLoop::deinit();
     }
 }
 
-// CLAP ホストがプラグインを検出するためのエントリーポイントシンボルをエクスポートする。
-// このマクロにより `clap_entry` というグローバルシンボルが生成される。
+// Export the entry point symbol so the CLAP host can detect the plugin.
+// This macro generates the global `clap_entry` symbol.
 clack_export_entry!(WxpExampleGainEntry);
 
-/// 一部のホストは `clap_entry` シンボルを直接検出できないため、
-/// 関数として明示的にエントリーディスクリプタを返すフォールバック。
+/// Some hosts cannot detect the `clap_entry` symbol directly,
+/// so this function provides a fallback that returns the entry descriptor explicitly.
 #[unsafe(no_mangle)]
 pub extern "C" fn get_clap_entry() -> EntryDescriptor {
     clap_entry
