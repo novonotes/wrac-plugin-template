@@ -27,6 +27,15 @@ The WRAC stack is a technology stack for audio plugin development, built around 
 
 To create a new wxp plugin based on this repository, see [Setup](docs/setup.md).
 
+
+## Give it a spin?
+
+his template comes with a simple Gain plugin pre-implemented. Try loading it up and let us know how it works in your DAW! 
+Even a quick comment like **"Works on Logic Pro 10.7"** is incredibly helpful for the community.
+
+Feel free to drop a quick note here:
+👉 [DAW Compatibility Reports](https://github.com/novonotes/wrac-plugin-template/discussions/6)
+
 ## Reference
 
 For details on the thread model, communication flow, and parameter change flow, see [docs/architecture.md](docs/architecture.md).
