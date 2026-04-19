@@ -1,6 +1,6 @@
 # WRAC Plugin Template
 
-WRACK スタックによってオーディオプラグインを実装するためのテンプレートです。
+WRAC スタックによってオーディオプラグインを実装するためのテンプレートです。
 コピーして新規プロジェクトの出発点として使うことが可能です。
 
 > English version: [README.md](README.md)
