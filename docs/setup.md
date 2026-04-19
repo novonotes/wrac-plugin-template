@@ -2,7 +2,7 @@
 
 > 日本語版: [setup_JA.md](setup_JA.md)
 
-This guide explains how to create a new wxp plugin starting from `wxp-gain-example`.
+This guide explains how to create a new wxp plugin starting from `wrac-plugin-template`.
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ The [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscod
 
 ### 1. Repository Setup
 
-Use the `Use this template` button in the upper right of the [wxp-gain-example](https://github.com/novonotes/wxp-gain-example) page on GitHub to create a new repository.
+Use the `Use this template` button in the upper right of the [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) page on GitHub to create a new repository.
 After creating it, clone the new repository and initialize the submodules.
 
 ```sh

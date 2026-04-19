@@ -2,7 +2,7 @@
 
 > English version: [setup.md](setup.md)
 
-`wxp-gain-example` を出発点として新しい wxp プラグインを作成する手順を説明します。
+`wrac-plugin-template` を出発点として新しい wxp プラグインを作成する手順を説明します。
 
 ## 前提条件
 
@@ -35,7 +35,7 @@ VS Code のデバッグ設定を用意しています。
 
 ### 1. リポジトリのセットアップ
 
-GitHub の [wxp-gain-example](https://github.com/novonotes/wxp-gain-example) ページ右上の `Use this template` ボタンを使って新しいリポジトリを作成します。
+GitHub の [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) ページ右上の `Use this template` ボタンを使って新しいリポジトリを作成します。
 作成後、新しいリポジトリをクローンしてサブモジュールを初期化してください。
 
 ```sh
