@@ -1,12 +1,12 @@
 #!/bin/bash
-# build_standalone.sh - gain_plugin の standalone アプリをビルド
+# build_standalone.sh - Build standalone app for gain_plugin
 #
-# 使い方:
+# Usage:
 #   ./script/build_standalone.sh [Debug|Release]
 #
-# 環境変数:
-#   SKIP_CLAP_BUILD=1 を指定すると、事前の CLAP ビルドをスキップする。
-#   WXP_EXAMPLE_GAIN_STANDALONE_PLUGIN_ID で standalone 用 Plugin ID を上書きできる。
+# Environment variables:
+#   Set SKIP_CLAP_BUILD=1 to skip the preceding CLAP build.
+#   Override the standalone Plugin ID with WXP_EXAMPLE_GAIN_STANDALONE_PLUGIN_ID.
 
 set -e
 set -u
@@ -22,7 +22,7 @@ case "$(uname -s)" in
         OS="windows"
         ;;
     *)
-        echo "エラー: 未対応のOS $(uname -s)"
+        echo "Error: Unsupported OS $(uname -s)"
         exit 1
         ;;
 esac
@@ -39,7 +39,7 @@ case "$BUILD_CONFIG" in
         PROFILE_DIR="release"
         ;;
     *)
-        echo "エラー: 無効なビルド構成: $BUILD_CONFIG"
+        echo "Error: Invalid build configuration: $BUILD_CONFIG"
         exit 1
         ;;
 esac
@@ -54,18 +54,18 @@ STANDALONE_PLUGIN_ID="${WXP_EXAMPLE_GAIN_STANDALONE_PLUGIN_ID:-com.novo-notes.wx
 STANDALONE_OUTPUT_NAME="${WXP_EXAMPLE_GAIN_STANDALONE_OUTPUT_NAME:-WXP Example Gain Standalone}"
 
 if [[ -z "$WRAPPER_DIR" || ! -d "$WRAPPER_DIR" ]]; then
-    echo "エラー: clap_wrapper_builder が見つかりません"
-    echo "CLAP_WRAPPER_DIR 環境変数で clap_wrapper_builder のパスを指定してください"
+    echo "Error: clap_wrapper_builder not found"
+    echo "Set the CLAP_WRAPPER_DIR environment variable to the path of clap_wrapper_builder"
     exit 1
 fi
 
 if [[ "${SKIP_CLAP_BUILD:-0}" != "1" ]]; then
-    echo "CLAPプラグインを先にビルドします..."
+    echo "Building CLAP plugin first..."
     "$SCRIPT_DIR/build.sh" "$BUILD_CONFIG"
 fi
 
 if [[ "$OS" == "linux" ]]; then
-    echo "Linux では standalone ラッパーのビルドをスキップします"
+    echo "Skipping standalone wrapper build on Linux"
     exit 0
 fi
 
@@ -75,7 +75,7 @@ else
     LIB_FILE_NAME="libwxp_example_gain_plugin.a"
 fi
 
-echo "standalone ラッパーをビルドしています..."
+echo "Building standalone wrapper..."
 (
     cd "$WRAPPER_DIR"
     CLAP_WRAPPER_BUILDER_BUILD_VST3=OFF \
@@ -97,23 +97,23 @@ if [[ "$OS" == "macos" ]]; then
         STANDALONE_SOURCE=$(find "$WRAPPER_BUILD_DIR" -path "*/${STANDALONE_OUTPUT_NAME}.app" -type d 2>/dev/null | head -n 1 || true)
     fi
     if [[ -z "$STANDALONE_SOURCE" ]]; then
-        echo "エラー: standalone アプリが見つかりません"
+        echo "Error: Standalone app not found"
         exit 1
     fi
 
     rm -rf "$STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.app"
     ln -s "$STANDALONE_SOURCE" "$STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.app"
-    echo "standalone アプリへのリンクを作成しました: $STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.app"
+    echo "Created symlink to standalone app: $STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.app"
 elif [[ "$OS" == "windows" ]]; then
     STANDALONE_SOURCE=$(find "$WRAPPER_BUILD_DIR" -path "*/$BUILD_CONFIG/${STANDALONE_OUTPUT_NAME}.exe" -type f 2>/dev/null | head -n 1 || true)
     if [[ -z "$STANDALONE_SOURCE" ]]; then
         STANDALONE_SOURCE=$(find "$WRAPPER_BUILD_DIR" -path "*/${STANDALONE_OUTPUT_NAME}.exe" -type f 2>/dev/null | head -n 1 || true)
     fi
     if [[ -z "$STANDALONE_SOURCE" ]]; then
-        echo "エラー: standalone アプリが見つかりません"
+        echo "Error: Standalone app not found"
         exit 1
     fi
 
     cp "$STANDALONE_SOURCE" "$STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.exe"
-    echo "standalone アプリをコピーしました: $STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.exe"
+    echo "Copied standalone app: $STANDALONE_TARGET_DIR/${STANDALONE_OUTPUT_NAME}.exe"
 fi

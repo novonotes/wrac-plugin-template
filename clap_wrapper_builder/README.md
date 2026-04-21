@@ -1,21 +1,21 @@
 # clap_wrapper_builder
 
-`clap_wrapper_builder` は、`wrac-plugin-template` の参照実装から
-CLAP プラグインを VST3 / AUv2 / Standalone にラップするための補助ビルド環境です。
+`clap_wrapper_builder` is a helper build environment for wrapping a CLAP plugin
+from the `wrac-plugin-template` reference implementation into VST3 / AUv2 / Standalone.
 
-これは正式な安定 API ではありません。ルートの gain plugin などの
-サンプル実装を支えるための例示用コードとして扱い、破壊的変更が入る可能性があります。
+This is not a stable public API. Treat it as example code that supports sample
+implementations such as the root gain plugin — breaking changes may be introduced.
 
-## 含まれるもの
+## Contents
 
-- `build_wrapper_plugin.sh` - CLAP バンドルから VST3 / AUv2 ラッパーをビルド
-- `build_wrapper_plugin_static.sh` - 静的ライブラリから VST3 / AUv2 / Standalone をビルド
-- `install_wrapper_plugin.sh` - 生成済み VST3 をインストール
-- `clap-wrapper` / `clap` / `vst3sdk` / `AudioUnitSDK` - 依存 SDK / ツールチェーン
+- `build_wrapper_plugin.sh` - Build a VST3 / AUv2 wrapper from a CLAP bundle
+- `build_wrapper_plugin_static.sh` - Build VST3 / AUv2 / Standalone from a static library
+- `install_wrapper_plugin.sh` - Install the generated VST3
+- `clap-wrapper` / `clap` / `vst3sdk` / `AudioUnitSDK` - Dependency SDKs / toolchain
 
-## 想定用途
+## Intended use
 
-- `wrac-plugin-template` の参照プラグインを複数フォーマットで配布する
-- `xdevice-private` など別プロジェクトから参照実装として利用する
+- Distribute the reference plugin of `wrac-plugin-template` in multiple formats
+- Use as a reference implementation from other projects such as `xdevice-private`
 
-長期安定な公開インターフェースとしては扱わず、必要に応じて構成やスクリプトを見直します。
+This is not treated as a long-term stable public interface; the configuration and scripts may be revised as needed.

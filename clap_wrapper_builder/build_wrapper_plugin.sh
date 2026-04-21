@@ -1,29 +1,29 @@
 #!/bin/bash
-# build_wrapper_plugin.sh - 任意のCLAPプラグインからVST3/AUラッパーをビルド
+# build_wrapper_plugin.sh - Build VST3/AU wrapper from any CLAP plugin
 #
-# 使い方:
-#   ./build_wrapper_plugin.sh <CLAPファイル名> <出力プラグイン名> [Debug|Release]
+# Usage:
+#   ./build_wrapper_plugin.sh <CLAP file> <output plugin name> [Debug|Release]
 #
-# 引数:
-#   CLAPファイル名 - CLAPプラグインのファイル名 (例: "example_plugin_nih.clap")
-#   出力プラグイン名 - VST3/AUで使用する表示名 (例: "Example Plugin NIH")
-#   Debug|Release - ビルド構成（省略時は Debug）
+# Arguments:
+#   CLAP file    - CLAP plugin filename (e.g. "example_plugin_nih.clap")
+#   Output name  - Display name used in VST3/AU (e.g. "Example Plugin NIH")
+#   Debug|Release - Build configuration (default: Debug)
 #
-# 例:
+# Examples:
 #   ./build_wrapper_plugin.sh example_plugin_nih.clap "Example Plugin NIH" Release
 #   ./build_wrapper_plugin.sh "XDevice Editor.clap" "XDevice Editor" Debug
 
 set -Eeuo pipefail
 
-# カラー出力用の定数
+# Constants for colored output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# エラーメッセージ表示関数
+# Error message function
 error() {
-    echo -e "${RED}エラー: $1${NC}" >&2
+    echo -e "${RED}Error: $1${NC}" >&2
     exit 1
 }
 
@@ -31,37 +31,37 @@ on_error() {
     local exit_code="$1"
     local line_no="$2"
     local command="$3"
-    echo -e "${RED}エラー: ${line_no} 行目のコマンドが失敗しました (exit=${exit_code}): ${command}${NC}" >&2
+    echo -e "${RED}Error: command failed at line ${line_no} (exit=${exit_code}): ${command}${NC}" >&2
     exit "$exit_code"
 }
 
 trap 'on_error $? $LINENO "$BASH_COMMAND"' ERR
 
-# 成功メッセージ表示関数
+# Success message function
 success() {
     echo -e "${GREEN}$1${NC}"
 }
 
-# 警告メッセージ表示関数
+# Warning message function
 warning() {
-    echo -e "${YELLOW}警告: $1${NC}"
+    echo -e "${YELLOW}Warning: $1${NC}"
 }
 
-# 現在のディレクトリを保存
+# Save the directory of this script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# 使用方法を表示する関数
+# Usage display function
 usage() {
-    echo "使用方法: $0 <CLAPファイル名> <出力プラグイン名> [Debug|Release]"
-    echo "  引数を指定しない場合、ビルド構成のデフォルトは Debug です"
+    echo "Usage: $0 <CLAP file> <output plugin name> [Debug|Release]"
+    echo "  If omitted, build configuration defaults to Debug"
     echo ""
-    echo "例:"
+    echo "Examples:"
     echo "  $0 example_plugin_nih.clap \"Example Plugin NIH\" Release"
     echo "  $0 \"XDevice Editor.clap\" \"XDevice Editor\" Debug"
     exit 1
 }
 
-# 引数の処理
+# Argument parsing
 if [ $# -lt 2 ]; then
     usage
 fi
@@ -82,52 +82,52 @@ if [ $# -ge 3 ]; then
             usage
             ;;
         *)
-            error "無効なビルド構成: $3"
+            error "Invalid build configuration: $3"
             ;;
     esac
 fi
 
-echo "CLAPファイル: $CLAP_FILE"
-echo "出力プラグイン名: $OUTPUT_NAME"
-echo "ビルド構成: $BUILD_CONFIG"
+echo "CLAP file: $CLAP_FILE"
+echo "Output plugin name: $OUTPUT_NAME"
+echo "Build configuration: $BUILD_CONFIG"
 
-# CLAPファイル名から拡張子を除いた名前を取得し、スペースをアンダースコアに置換
-# パス部分を除去してファイル名のみを取得
+# Strip extension from CLAP filename and replace spaces with underscores
+# Remove path component, keep filename only
 CLAP_FILE_BASENAME=$(basename "$CLAP_FILE")
 CLAP_BASE_NAME="${CLAP_FILE_BASENAME%.clap}"
 CLAP_BASE_NAME="${CLAP_BASE_NAME// /_}"
 
-# clap-wrapper ディレクトリの確認
+# Check for clap-wrapper directory
 if [ ! -d "$SCRIPT_DIR/clap-wrapper" ]; then
-    error "clap-wrapper ディレクトリが見つかりません。先に git clone https://github.com/free-audio/clap-wrapper.git を実行してください。"
+    error "clap-wrapper directory not found. Run: git clone https://github.com/free-audio/clap-wrapper.git"
 fi
 
-# サブモジュールの clap SDK を使用
+# Use the clap SDK submodule
 CLAP_SDK_ROOT="$SCRIPT_DIR/clap"
 if [ ! -d "$CLAP_SDK_ROOT" ]; then
-    error "clap サブモジュールが見つかりません。git submodule update --init --recursive を実行してください。"
+    error "clap submodule not found. Run: git submodule update --init --recursive"
 fi
-success "CLAP SDK サブモジュールを検出: $CLAP_SDK_ROOT"
+success "CLAP SDK submodule found: $CLAP_SDK_ROOT"
 
-# サブモジュールの VST3 SDK を使用
+# Use the VST3 SDK submodule
 VST3_SDK_ROOT="$SCRIPT_DIR/vst3sdk"
 if [ ! -d "$VST3_SDK_ROOT" ]; then
-    error "vst3sdk サブモジュールが見つかりません。git submodule update --init --recursive を実行してください。"
+    error "vst3sdk submodule not found. Run: git submodule update --init --recursive"
 fi
-success "VST3 SDK サブモジュールを検出: $VST3_SDK_ROOT"
+success "VST3 SDK submodule found: $VST3_SDK_ROOT"
 
-# サブモジュールの AU SDK を使用
+# Use the AU SDK submodule
 if [[ "$OSTYPE" == darwin* ]]; then
     AU_SDK_ROOT="$SCRIPT_DIR/AudioUnitSDK"
     if [[ ! -d "$AU_SDK_ROOT" ]]; then
-        error "AudioUnitSDK サブモジュールが見つかりません。git submodule update --init --recursive を実行してください。"
+        error "AudioUnitSDK submodule not found. Run: git submodule update --init --recursive"
     fi
-    success "AU SDK サブモジュールを検出: $AU_SDK_ROOT"
+    success "AU SDK submodule found: $AU_SDK_ROOT"
 else
     AU_SDK_ROOT=
 fi
 
-# OS の検出とジェネレータの選択
+# OS detection and generator selection
 CMAKE_GENERATOR=""
 
 case "$OSTYPE" in
@@ -135,41 +135,41 @@ case "$OSTYPE" in
         # macOS
         if command -v xcodebuild &> /dev/null; then
             CMAKE_GENERATOR="Xcode"
-            success "macOS を検出: Xcode を使用します"
+            success "Detected macOS: using Xcode"
         else
-            error "Xcode が見つかりません。Xcode または Command Line Tools をインストールしてください。"
+            error "Xcode not found. Install Xcode or Command Line Tools."
         fi
         ;;
     linux*)
         # Linux
         CMAKE_GENERATOR="Unix Makefiles"
-        success "Linux を検出: Unix Makefiles を使用します"
+        success "Detected Linux: using Unix Makefiles"
         ;;
     msys*|cygwin*|mingw*)
         # Windows
-        # CMakeが自動的にVisual Studioを検出する
+        # CMake automatically detects Visual Studio
         CMAKE_GENERATOR="Visual Studio 17 2022"
-        success "Windows を検出: Visual Studio 2022 を使用します"
+        success "Detected Windows: using Visual Studio 2022"
         ;;
     *)
         CMAKE_GENERATOR="Unix Makefiles"
-        warning "不明な OS: Unix Makefiles を使用します"
+        warning "Unknown OS: using Unix Makefiles"
         ;;
 esac
 
-# ビルドディレクトリをclap_wrapper_builderに作成
+# Create build directory inside clap_wrapper_builder
 BUILD_DIR="$SCRIPT_DIR/build_$CLAP_BASE_NAME"
 
-# リポジトリ名変更などで CMakeCache に古いソースパスが残っている場合は作り直す
+# Rebuild if the CMakeCache has a stale source path (e.g. after repo rename)
 if [ -f "$BUILD_DIR/CMakeCache.txt" ] && ! grep -Fq "$SCRIPT_DIR/clap-wrapper" "$BUILD_DIR/CMakeCache.txt"; then
-    warning "既存の CMake キャッシュが現在のソースディレクトリと一致しないため削除します: $BUILD_DIR"
+    warning "Removing stale CMake cache that does not match current source directory: $BUILD_DIR"
     rm -rf "$BUILD_DIR"
 fi
 
-# CMake の設定
-echo "CMake を設定中..."
+# CMake configuration
+echo "Configuring CMake..."
 if [[ "$OSTYPE" == darwin* ]]; then
-    # macOS の場合、Universal Binary を作成
+    # On macOS, build a Universal Binary
     cmake -S "$SCRIPT_DIR/clap-wrapper" -B "$BUILD_DIR" \
         -DCLAP_SDK_ROOT="$CLAP_SDK_ROOT" \
         -DVST3_SDK_ROOT="$VST3_SDK_ROOT" \
@@ -181,7 +181,7 @@ if [[ "$OSTYPE" == darwin* ]]; then
         -DCLAP_WRAPPER_CXX_STANDARD=23 \
         -G "$CMAKE_GENERATOR"
 else
-    # その他のプラットフォーム
+    # Other platforms
     cmake -S "$SCRIPT_DIR/clap-wrapper" -B "$BUILD_DIR" \
         -DCLAP_SDK_ROOT="$CLAP_SDK_ROOT" \
         -DVST3_SDK_ROOT="$VST3_SDK_ROOT" \
@@ -190,17 +190,17 @@ else
         -G "$CMAKE_GENERATOR"
 fi
 
-success "CMake の設定が完了しました"
+success "CMake configuration complete"
 
-# ビルドの実行
-echo "ビルド中..."
+# Run the build
+echo "Building..."
 
-# AudioUnitSDK のヘッダーが GNU statement expression を使用しており、
-# clap-wrapper の -Wpedantic -Werror と衝突するため、Xcode ビルド時に抑制する
+# AudioUnitSDK headers use GNU statement expressions which conflict with
+# clap-wrapper's -Wpedantic -Werror; suppress the warning during Xcode builds
 if [[ "$CMAKE_GENERATOR" == "Xcode" ]]; then
     XCODE_FLAGS=('--' 'OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32')
     XCODE_BUILD_ARGS=(--clean-first)
-    # macOS かつ xcbeautify がある場合のみパイプを追加
+    # Pipe through xcbeautify only when on macOS and xcbeautify is available
     if command -v xcbeautify &> /dev/null; then
         cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG" "${XCODE_BUILD_ARGS[@]}" "${XCODE_FLAGS[@]}" 2>&1 | xcbeautify --quiet
     else
@@ -211,19 +211,19 @@ elif [[ "$CMAKE_GENERATOR" == "Visual Studio 17 2022" ]]; then
 else
     cmake --build "$BUILD_DIR"
 fi
-success "ビルドが完了しました"
+success "Build complete"
 
-# ビルド結果の確認
+# Verify build output
 VST3_OUTPUT=""
 if [[ "$CMAKE_GENERATOR" == "Xcode" ]] || [[ "$CMAKE_GENERATOR" == "Visual Studio 17 2022" ]]; then
-    # マルチコンフィギュレーションジェネレータの場合、Configuration サブディレクトリを探す
+    # For multi-configuration generators, look in the Configuration subdirectory
     if [[ "$OSTYPE" == darwin* ]]; then
         VST3_OUTPUT=$(find "$BUILD_DIR/$BUILD_CONFIG" -name "*.vst3" -type d 2>/dev/null | head -n 1)
     else
         VST3_OUTPUT=$(find "$BUILD_DIR/$BUILD_CONFIG" -name "*.vst3" -type f 2>/dev/null | head -n 1)
     fi
 else
-    # シングルコンフィギュレーションジェネレータの場合
+    # For single-configuration generators
     if [[ "$OSTYPE" == darwin* ]]; then
         VST3_OUTPUT=$(find "$BUILD_DIR" -name "*.vst3" -type d | head -n 1)
     else
@@ -232,9 +232,9 @@ else
 fi
 
 if [ -n "$VST3_OUTPUT" ]; then
-    # フルパスを取得
+    # Resolve full path
     VST3_FULLPATH="$(cd "$(dirname "$VST3_OUTPUT")" && pwd)/$(basename "$VST3_OUTPUT")"
-    success "VST3 プラグインが生成されました: $VST3_FULLPATH"
+    success "VST3 plugin generated: $VST3_FULLPATH"
 else
-    error "VST3 プラグインが見つかりません"
+    error "VST3 plugin not found"
 fi

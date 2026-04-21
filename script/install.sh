@@ -1,24 +1,24 @@
 #!/bin/bash
-# install.sh - gain_plugin の CLAP インストール
+# install.sh - CLAP installation for gain_plugin
 #
-# build.sh で作成した .clap バンドルを、OS ごとの CLAP プラグインディレクトリにコピーする。
-# DAW はこのディレクトリを自動スキャンしてプラグインを検出する。
+# Copies the .clap bundle created by build.sh to the OS-specific CLAP plugin directory.
+# DAWs automatically scan this directory to detect plugins.
 #
-# インストール先:
+# Installation directories:
 #   macOS:   ~/Library/Audio/Plug-Ins/CLAP/
 #   Windows: %LOCALAPPDATA%/Programs/Common/CLAP/
 #   Linux:   ~/.clap/
 #
-# 使い方:
+# Usage:
 #   ./script/install.sh
 #
-# 注意: 実行前に build.sh でバンドルを作成しておく必要がある。
+# Note: The bundle must be created with build.sh before running this script.
 
-set -e  # エラー発生時にスクリプトを停止
-set -u  # 未定義変数の参照をエラーにする
+set -e  # Stop script on error
+set -u  # Treat unset variables as an error
 
 # ---------------------------------------------------------------------------
-# OS 検出
+# OS detection
 # ---------------------------------------------------------------------------
 case "$(uname -s)" in
     Darwin*)
@@ -31,15 +31,15 @@ case "$(uname -s)" in
         OS="windows"
         ;;
     *)
-        echo "エラー: 未対応のOS $(uname -s)"
+        echo "Error: Unsupported OS $(uname -s)"
         exit 1
         ;;
 esac
 
-echo "検出されたOS: $OS"
+echo "Detected OS: $OS"
 
 # ---------------------------------------------------------------------------
-# パスの解決
+# Path resolution
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
@@ -49,54 +49,54 @@ BUNDLE_NAME="WXP Example Gain.clap"
 BUNDLE_PATH="$TARGET_DIR/bundled/${BUNDLE_NAME}"
 
 # ---------------------------------------------------------------------------
-# バンドルの存在確認
+# Bundle existence check
 # ---------------------------------------------------------------------------
-# インストール前に build.sh が正常完了しているかを確認する。
+# Verify that build.sh has completed successfully before installing.
 if [ ! -e "$BUNDLE_PATH" ]; then
-    echo "エラー: バンドルが見つかりません: $BUNDLE_PATH"
-    echo "先に build.sh を実行してください"
+    echo "Error: Bundle not found: $BUNDLE_PATH"
+    echo "Please run build.sh first"
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# OS 別インストール
+# OS-specific installation
 # ---------------------------------------------------------------------------
 case "$OS" in
     macos)
-        # macOS の CLAP 標準ディレクトリ。
-        # Logic Pro、Ableton Live 等の多くの DAW がここをスキャンする。
-        echo "インストールディレクトリを準備しています..."
+        # Standard CLAP directory on macOS.
+        # Most DAWs including Logic Pro and Ableton Live scan this directory.
+        echo "Preparing installation directory..."
         mkdir -p ~/Library/Audio/Plug-Ins/CLAP || {
-            echo "エラー: CLAPプラグインディレクトリを作成できませんでした"
+            echo "Error: Failed to create CLAP plugin directory"
             exit 1
         }
 
-        # 既存バージョンを削除してから上書きする（macOS バンドルはディレクトリのため）。
+        # Remove existing version before overwriting (macOS bundles are directories).
         if [ -e ~/Library/Audio/Plug-Ins/CLAP/"${BUNDLE_NAME}" ]; then
             rm -rf ~/Library/Audio/Plug-Ins/CLAP/"${BUNDLE_NAME}"
         fi
 
-        echo "プラグインをインストールしています..."
-        # macOS バンドルはディレクトリ構造のため -r（再帰コピー）が必要。
+        echo "Installing plugin..."
+        # macOS bundles are directory structures, so -r (recursive copy) is required.
         cp -r "$BUNDLE_PATH" ~/Library/Audio/Plug-Ins/CLAP/ || {
-            echo "エラー: プラグインのコピーに失敗しました"
+            echo "Error: Failed to copy plugin"
             exit 1
         }
 
-        echo "インストールが完了しました！"
-        echo "プラグインは以下の場所にインストールされました: ~/Library/Audio/Plug-Ins/CLAP/${BUNDLE_NAME}"
+        echo "Installation complete!"
+        echo "Plugin installed at: ~/Library/Audio/Plug-Ins/CLAP/${BUNDLE_NAME}"
         ;;
     windows)
-        # Windows の CLAP 標準ディレクトリ（ユーザーローカル）。
-        # %PROGRAMFILES%/Common Files/CLAP/ もよく使われるが、管理者権限が不要なこちらを使う。
+        # Standard CLAP directory on Windows (user-local).
+        # %PROGRAMFILES%/Common Files/CLAP/ is also common, but this location does not require admin rights.
         CLAP_DIR="$LOCALAPPDATA/Programs/Common/CLAP"
 
-        echo "注意: Program Files へのインストールには管理者権限が必要な場合があります"
-        echo "インストールディレクトリを準備しています..."
+        echo "Note: Installing to Program Files may require administrator privileges"
+        echo "Preparing installation directory..."
 
         mkdir -p "$CLAP_DIR" || {
-            echo "エラー: CLAPプラグインディレクトリを作成できませんでした"
-            echo "手動で以下のコマンドを実行してください:"
+            echo "Error: Failed to create CLAP plugin directory"
+            echo "Please run the following command manually:"
             echo "cp \"$BUNDLE_PATH\" \"$CLAP_DIR/\""
             exit 1
         }
@@ -105,26 +105,26 @@ case "$OS" in
             rm -rf "$CLAP_DIR/${BUNDLE_NAME}"
         fi
 
-        echo "プラグインをインストールしています..."
+        echo "Installing plugin..."
         cp "$BUNDLE_PATH" "$CLAP_DIR/" || {
-            echo "エラー: プラグインのコピーに失敗しました"
-            echo "手動で以下のコマンドを実行してください:"
+            echo "Error: Failed to copy plugin"
+            echo "Please run the following command manually:"
             echo "cp \"$BUNDLE_PATH\" \"$CLAP_DIR/\""
             exit 1
         }
 
-        echo "インストールが完了しました！"
-        echo "プラグインは以下の場所にインストールされました: $CLAP_DIR/${BUNDLE_NAME}"
+        echo "Installation complete!"
+        echo "Plugin installed at: $CLAP_DIR/${BUNDLE_NAME}"
         ;;
     linux)
-        # Linux の CLAP 標準ディレクトリ（ユーザーローカル）。
-        # システム全体にインストールする場合は /usr/lib/clap/ を使うが、
-        # root 権限が不要な ~/.clap/ を使う。
+        # Standard CLAP directory on Linux (user-local).
+        # Use /usr/lib/clap/ for system-wide installation (requires root),
+        # but ~/.clap/ is used here to avoid requiring root privileges.
         CLAP_DIR="$HOME/.clap"
 
-        echo "インストールディレクトリを準備しています..."
+        echo "Preparing installation directory..."
         mkdir -p "$CLAP_DIR" || {
-            echo "エラー: CLAPプラグインディレクトリを作成できませんでした"
+            echo "Error: Failed to create CLAP plugin directory"
             exit 1
         }
 
@@ -132,13 +132,13 @@ case "$OS" in
             rm -rf "$CLAP_DIR/${BUNDLE_NAME}"
         fi
 
-        echo "プラグインをインストールしています..."
+        echo "Installing plugin..."
         cp -r "$BUNDLE_PATH" "$CLAP_DIR/" || {
-            echo "エラー: プラグインのコピーに失敗しました"
+            echo "Error: Failed to copy plugin"
             exit 1
         }
 
-        echo "インストールが完了しました！"
-        echo "プラグインは以下の場所にインストールされました: $CLAP_DIR/${BUNDLE_NAME}"
+        echo "Installation complete!"
+        echo "Plugin installed at: $CLAP_DIR/${BUNDLE_NAME}"
         ;;
 esac

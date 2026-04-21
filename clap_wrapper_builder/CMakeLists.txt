@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 project(clap_wrapper_builder)
 # enable_language(OBJCXX)
 
-# C++23 以上を要求（clap-wrapper と AudioUnitSDK の要件に合わせる）
+# Require C++23 or later (required by clap-wrapper and AudioUnitSDK)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
@@ -11,7 +11,7 @@ set(CLAP_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/clap")
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-# キャッシュ変数として静的リンクライブラリのパスを受け取る
+# Receive the static library path as a cache variable
 set(CLAP_WRAPPER_BUILDER_TARGET_LIB "" CACHE FILEPATH "Path to the static library to wrap")
 option(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE "Build standalone app target in clap_wrapper_builder" OFF)
 option(CLAP_WRAPPER_BUILDER_BUILD_VST3 "Build VST3 target in clap_wrapper_builder" ON)
@@ -23,7 +23,7 @@ endif()
 set(CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME "" CACHE STRING "Output name for standalone app")
 set(CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID "" CACHE STRING "Plugin ID used by standalone app")
 
-# 必須パラメータの検証
+# Validate required parameters
 if(NOT CLAP_WRAPPER_BUILDER_TARGET_LIB)
     message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_TARGET_LIB must be specified. Use: -DCLAP_WRAPPER_BUILDER_TARGET_LIB=/path/to/your/plugin.a")
 endif()
@@ -32,7 +32,7 @@ if(NOT EXISTS ${CLAP_WRAPPER_BUILDER_TARGET_LIB})
     message(FATAL_ERROR "Static library not found: ${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
 endif()
 
-# プラグイン名の取得（静的ライブラリのファイル名から）
+# Derive plugin name from the static library filename
 get_filename_component(PLUGIN_NAME ${CLAP_WRAPPER_BUILDER_TARGET_LIB} NAME_WE)
 string(REGEX REPLACE "^lib" "" PLUGIN_NAME ${PLUGIN_NAME})
 string(REGEX REPLACE "[^A-Za-z0-9_]" "_" PLUGIN_NAME_SAFE ${PLUGIN_NAME})
@@ -43,15 +43,15 @@ message(STATUS "  Target Library: ${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
 message(STATUS "  Plugin Name: ${PLUGIN_NAME}")
 message(STATUS "  Safe Plugin Name: ${PLUGIN_NAME_SAFE}")
 
-# clap-wrapper サブプロジェクトを追加
+# Add the clap-wrapper subproject
 add_subdirectory(clap-wrapper)
 
 if(APPLE AND TARGET clap-wrapper-compile-options)
   target_compile_options(clap-wrapper-compile-options INTERFACE -Wno-shorten-64-to-32)
 endif()
 
-# 静的ライブラリターゲットの作成
-# 外部の静的ライブラリをインポートライブラリとして設定
+# Create the static library target
+# Set up the external static library as an imported library
 add_library(${PLUGIN_NAME_SAFE}_impl STATIC IMPORTED)
 
 if(MSVC)
@@ -67,12 +67,11 @@ if(APPLE)
       INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation"
   )
 endif()
-# CLAP エントリーポイント用のソースファイルを生成
-# ただし、 CLAP のエントリーポイントは clack が用意したものが
-# CLAP_WRAPPER_BUILDER_TARGET_LIB の中に存在していて、
-# ここでは CLAP_WRAPPER_BUILDER_TARGET_LIB の中の get_clap_entry() 関数を呼び出すことで
-# CLAP_WRAPPER_BUILDER_TARGET_LIB の中の clap_entry のシンボルが strip されずに
-# 正しく DLL 中にも残るようにしている。
+# Generate the source file for the CLAP entry point.
+# The CLAP entry point itself is provided by clack and lives inside
+# CLAP_WRAPPER_BUILDER_TARGET_LIB. Calling get_clap_entry() from here
+# prevents the clap_entry symbol inside CLAP_WRAPPER_BUILDER_TARGET_LIB
+# from being stripped, ensuring it is correctly retained in the DLL.
 set(ENTRY_SOURCE_FILE "${CMAKE_CURRENT_BINARY_DIR}/${PLUGIN_NAME_SAFE}_entry.cpp")
 file(WRITE ${ENTRY_SOURCE_FILE} "
 #include <clap/clap.h>
@@ -87,7 +86,7 @@ extern \"C\" {
 #endif
 ")
 
-# ビルドするプラグインフォーマットを設定
+# Configure plugin formats to build
 set(PLUGIN_FORMATS "CLAP")
 if(CLAP_WRAPPER_BUILDER_BUILD_VST3)
     list(APPEND PLUGIN_FORMATS "VST3")
@@ -96,11 +95,11 @@ if(APPLE AND CLAP_WRAPPER_BUILDER_BUILD_AUV2)
     list(APPEND PLUGIN_FORMATS "AUV2")
 endif()
 
-# プラグインのバンドル情報
+# Plugin bundle metadata
 set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
 set(BUNDLE_VERSION "1.0.0")
 
-# make_clapfirst_plugins を使用してマルチフォーマットプラグインを作成
+# Create multi-format plugins using make_clapfirst_plugins
 set(CLAPFIRST_COMMON_ARGS
     TARGET_NAME ${PLUGIN_NAME_SAFE}
     IMPL_TARGET ${PLUGIN_NAME_SAFE}_impl

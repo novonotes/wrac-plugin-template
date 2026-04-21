@@ -1,32 +1,32 @@
 #!/bin/bash
-# build.sh - gain_plugin の CLAP ビルド
+# build.sh - CLAP build for gain_plugin
 #
-# このスクリプトは以下の 3 ステップを実行します:
-#   1. GUI フロントエンド（src-gui）の npm ビルド
-#   2. Rust プラグイン（src-plugin）の cargo ビルド
-#   3. ビルド成果物を .clap バンドル形式にパッケージング
+# This script performs the following 3 steps:
+#   1. npm build of the GUI frontend (src-gui)
+#   2. cargo build of the Rust plugin (src-plugin)
+#   3. Package the build artifacts into a .clap bundle format
 #
-# .clap バンドルとは:
-#   CLAP ホスト（DAW）がプラグインとして認識できる形式のファイル/ディレクトリ。
-#   macOS ではバンドル（.app に似たディレクトリ構造）、
-#   Windows/Linux では単一の .dll/.so ファイルになる。
+# What is a .clap bundle:
+#   A file/directory in a format that CLAP hosts (DAWs) can recognize as a plugin.
+#   On macOS it is a bundle (directory structure similar to .app),
+#   on Windows/Linux it is a single .dll/.so file.
 #
-# 使い方:
+# Usage:
 #   ./script/build.sh [Debug|Release]
 #
-# 引数:
-#   Debug|Release - ビルド構成（省略時は Debug）
+# Arguments:
+#   Debug|Release - Build configuration (default: Debug)
 #
-# 出力:
+# Output:
 #   target/bundled/WXP Example Gain.clap
 
-set -e  # エラー発生時にスクリプトを停止
-set -u  # 未定義変数の参照をエラーにする
+set -e  # Stop script on error
+set -u  # Treat unset variables as an error
 
 # ---------------------------------------------------------------------------
-# OS 検出
+# OS detection
 # ---------------------------------------------------------------------------
-# バンドル形式が OS ごとに異なるため、最初に判定しておく。
+# Bundle format differs per OS, so determine it first.
 case "$(uname -s)" in
     Darwin*)
         OS="macos"
@@ -38,15 +38,15 @@ case "$(uname -s)" in
         OS="windows"
         ;;
     *)
-        echo "エラー: 未対応のOS $(uname -s)"
+        echo "Error: Unsupported OS $(uname -s)"
         exit 1
         ;;
 esac
 
-echo "検出されたOS: $OS"
+echo "Detected OS: $OS"
 
 # ---------------------------------------------------------------------------
-# ビルド構成の決定
+# Build configuration
 # ---------------------------------------------------------------------------
 BUILD_CONFIG="Debug"
 CARGO_BUILD_FLAG=""
@@ -60,13 +60,13 @@ if [ $# -eq 1 ]; then
             CARGO_BUILD_FLAG="--release"
             ;;
         *)
-            echo "エラー: 無効なビルド構成: $1"
+            echo "Error: Invalid build configuration: $1"
             exit 1
             ;;
     esac
 fi
 
-echo "ビルド構成: $BUILD_CONFIG"
+echo "Build configuration: $BUILD_CONFIG"
 
 if [ "$BUILD_CONFIG" = "Debug" ]; then
     PROFILE_DIR="debug"
@@ -75,9 +75,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# パスの解決
+# Path resolution
 # ---------------------------------------------------------------------------
-# BASH_SOURCE[0] からスクリプト自身の絶対パスを求め、そこから相対的に各ディレクトリを特定する。
+# Derive the absolute path of this script from BASH_SOURCE[0], then locate each directory relative to it.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 GUI_DIR="$PLUGIN_ROOT/src-gui"
@@ -85,11 +85,11 @@ TARGET_DIR="${CARGO_TARGET_DIR:-$PLUGIN_ROOT/target}"
 BUILD_DIR="$TARGET_DIR/$PROFILE_DIR"
 
 # ---------------------------------------------------------------------------
-# ステップ 1: GUI フロントエンドのビルド
+# Step 1: GUI frontend build
 # ---------------------------------------------------------------------------
-# Vite で TypeScript/CSS をバンドルし、src-gui/dist/ に出力する。
-# リリースビルドでは build.rs がこの dist/ を ZIP 化してバイナリに埋め込む。
-echo "GUI をビルドしています..."
+# Bundle TypeScript/CSS with Vite and output to src-gui/dist/.
+# For release builds, build.rs ZIP-compresses this dist/ and embeds it in the binary.
+echo "Building GUI..."
 (
     cd "$GUI_DIR"
     npm install
@@ -97,13 +97,13 @@ echo "GUI をビルドしています..."
 )
 
 # ---------------------------------------------------------------------------
-# ステップ 2: Rust プラグインのビルド
+# Step 2: Rust plugin build
 # ---------------------------------------------------------------------------
-# cargo が生成する共有ライブラリ:
+# Shared libraries produced by cargo:
 #   macOS:   libwxp_example_gain_plugin.dylib
 #   Windows: wxp_example_gain_plugin.dll
 #   Linux:   libwxp_example_gain_plugin.so
-echo "プラグインをビルドしています..."
+echo "Building plugin..."
 (
     if [ "$OS" = "macos" ]; then
         MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \
@@ -115,26 +115,26 @@ echo "プラグインをビルドしています..."
 )
 
 # ---------------------------------------------------------------------------
-# ステップ 3: .clap バンドルの作成
+# Step 3: Create .clap bundle
 # ---------------------------------------------------------------------------
-# CLAP プラグインの配布形式は OS ごとに異なる:
-#   macOS:   macOS バンドル（ディレクトリ構造 + Info.plist）
-#   Windows: .dll を .clap にリネーム
-#   Linux:   .so を .clap にリネーム
+# The distribution format for CLAP plugins differs per OS:
+#   macOS:   macOS bundle (directory structure + Info.plist)
+#   Windows: rename .dll to .clap
+#   Linux:   rename .so to .clap
 PLUGIN_NAME="WXP Example Gain.clap"
 BUNDLE_DIR="$TARGET_DIR/bundled/$PLUGIN_NAME"
 
-echo "バンドル構造を作成しています..."
+echo "Creating bundle structure..."
 rm -rf "$BUNDLE_DIR"
 
 case "$OS" in
     macos)
-        # macOS の .clap は .app と同様のバンドル構造を持つ。
-        # Contents/MacOS/ に実行可能バイナリ、Contents/Info.plist にメタデータを配置する。
+        # A .clap on macOS has the same bundle structure as .app.
+        # Place the executable binary under Contents/MacOS/ and metadata in Contents/Info.plist.
         mkdir -p "$BUNDLE_DIR/Contents/MacOS"
 
-        # Info.plist: macOS がバンドルを識別するためのメタデータファイル。
-        # CFBundleIdentifier はプラグインの PLUGIN_ID と一致させる。
+        # Info.plist: metadata file that macOS uses to identify the bundle.
+        # CFBundleIdentifier must match the plugin's PLUGIN_ID.
         cat > "$BUNDLE_DIR/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 
@@ -167,37 +167,37 @@ case "$OS" in
 </plist>
 EOF
 
-        # PkgInfo: macOS の古い慣習で必要なファイル。
-        # "BNDL" はバンドルタイプ、"????" はクリエータコード（汎用）。
+        # PkgInfo: required by an old macOS convention.
+        # "BNDL" is the bundle type, "????" is the creator code (generic).
         echo -n "BNDL????" > "$BUNDLE_DIR/Contents/PkgInfo"
 
-        # .dylib を拡張子なしのバイナリ名でコピーする。
-        # CLAP ホストは CFBundleExecutable に指定した名前でバイナリを探す。
+        # Copy the .dylib under the binary name without extension.
+        # The CLAP host looks for the binary by the name specified in CFBundleExecutable.
         cp "$BUILD_DIR/libwxp_example_gain_plugin.dylib" \
             "$BUNDLE_DIR/Contents/MacOS/WXP Example Gain"
 
-        # install_name_tool: dylib の LC_ID_DYLIB（ライブラリの自己識別パス）を書き換える。
-        # "@loader_path/..." にすることで、バンドル内の相対パスで自己参照できるようになり、
-        # インストール先のパスに依存しないポータブルなバンドルになる。
+        # install_name_tool: rewrite the LC_ID_DYLIB (the dylib's self-identification path).
+        # Using "@loader_path/..." allows self-referencing via a relative path within the bundle,
+        # making it a portable bundle that does not depend on the installation path.
         install_name_tool -id "@loader_path/WXP Example Gain" \
             "$BUNDLE_DIR/Contents/MacOS/WXP Example Gain"
         ;;
     windows)
-        # Windows では .dll をそのまま .clap として配置するだけでよい。
+        # On Windows, simply place the .dll as-is with the .clap extension.
         mkdir -p "$TARGET_DIR/bundled"
         cp "$BUILD_DIR/wxp_example_gain_plugin.dll" "$BUNDLE_DIR"
         ;;
     linux)
-        # Linux も同様に .so を .clap として配置する。
+        # On Linux, similarly place the .so with the .clap extension.
         mkdir -p "$TARGET_DIR/bundled"
         cp "$BUILD_DIR/libwxp_example_gain_plugin.so" "$BUNDLE_DIR"
         ;;
 esac
 
 if [ ! -e "$BUNDLE_DIR" ]; then
-    echo "エラー: ビルドは成功しましたが、バンドルされたプラグインが見つかりません"
+    echo "Error: Build succeeded but bundled plugin not found"
     exit 1
 fi
 
-echo "ビルドが完了しました！"
-echo "バンドルは以下の場所に作成されました: target/bundled/$PLUGIN_NAME"
+echo "Build complete!"
+echo "Bundle created at: target/bundled/$PLUGIN_NAME"
