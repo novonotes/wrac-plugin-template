@@ -193,7 +193,13 @@ case "$OSTYPE" in
 esac
 
 # Create build directory inside clap_wrapper_builder
-BUILD_DIR="$SCRIPT_DIR/build_$CLAP_BASE_NAME"
+# On Windows, use a short hash to avoid MAX_PATH limits
+if [[ "$OSTYPE" =~ ^(msys|cygwin|mingw).* ]]; then
+    CLAP_BASE_HASH=$(printf '%s' "$CLAP_BASE_NAME" | cksum | awk '{print $1}')
+    BUILD_DIR="$SCRIPT_DIR/bw_$CLAP_BASE_HASH"
+else
+    BUILD_DIR="$SCRIPT_DIR/build_$CLAP_BASE_NAME"
+fi
 
 # Rebuild if the CMakeCache has a stale source path (e.g. after repo rename)
 if [ -f "$BUILD_DIR/CMakeCache.txt" ] && ! grep -Fq "$SCRIPT_DIR" "$BUILD_DIR/CMakeCache.txt"; then
