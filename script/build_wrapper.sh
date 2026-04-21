@@ -1,11 +1,11 @@
 #!/bin/bash
-# build_wrapper.sh - gain_plugin の VST3 / AU ラッパーをビルド
+# build_wrapper.sh - Build VST3 / AU wrapper for gain_plugin
 #
-# 使い方:
+# Usage:
 #   ./script/build_wrapper.sh [Debug|Release]
 #
-# 環境変数:
-#   SKIP_CLAP_BUILD=1 を指定すると、事前の CLAP ビルドをスキップする。
+# Environment variables:
+#   Set SKIP_CLAP_BUILD=1 to skip the preceding CLAP build.
 
 set -e
 set -u
@@ -21,7 +21,7 @@ case "$(uname -s)" in
         OS="windows"
         ;;
     *)
-        echo "エラー: 未対応のOS $(uname -s)"
+        echo "Error: Unsupported OS $(uname -s)"
         exit 1
         ;;
 esac
@@ -36,7 +36,7 @@ case "$BUILD_CONFIG" in
         BUILD_CONFIG="Release"
         ;;
     *)
-        echo "エラー: 無効なビルド構成: $BUILD_CONFIG"
+        echo "Error: Invalid build configuration: $BUILD_CONFIG"
         exit 1
         ;;
 esac
@@ -48,25 +48,25 @@ DEFAULT_WRAPPER_DIR="$( cd "$PLUGIN_ROOT/clap_wrapper_builder" 2>/dev/null && pw
 WRAPPER_DIR="${CLAP_WRAPPER_DIR:-$DEFAULT_WRAPPER_DIR}"
 
 if [[ -z "$WRAPPER_DIR" || ! -d "$WRAPPER_DIR" ]]; then
-    echo "エラー: clap_wrapper_builder が見つかりません"
-    echo "CLAP_WRAPPER_DIR 環境変数で clap_wrapper_builder のパスを指定してください"
+    echo "Error: clap_wrapper_builder not found"
+    echo "Set the CLAP_WRAPPER_DIR environment variable to the path of clap_wrapper_builder"
     exit 1
 fi
 
 if [[ "${SKIP_CLAP_BUILD:-0}" != "1" ]]; then
-    echo "CLAPプラグインを先にビルドします..."
+    echo "Building CLAP plugin first..."
     "$SCRIPT_DIR/build.sh" "$BUILD_CONFIG"
 fi
 
 if [[ "$OS" == "linux" ]]; then
-    echo "Linux では VST3 / AU ラッパーのビルドをスキップします"
+    echo "Skipping VST3 / AU wrapper build on Linux"
     exit 0
 fi
 
-echo "VST3 / AU ラッパーをビルドしています..."
+echo "Building VST3 / AU wrapper..."
 (
     cd "$WRAPPER_DIR"
     ./build_wrapper_plugin.sh "$TARGET_DIR/bundled/WXP Example Gain.clap" "WXP Example Gain" "$BUILD_CONFIG"
 )
 
-echo "VST3 / AU ラッパーのビルドが完了しました"
+echo "VST3 / AU wrapper build complete"
