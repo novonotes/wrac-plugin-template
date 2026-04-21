@@ -87,7 +87,13 @@ echo "Building standalone wrapper..."
 
 WRAPPER_BUILD_BASE="${LIB_FILE_NAME%.a}"
 WRAPPER_BUILD_BASE="${WRAPPER_BUILD_BASE%.lib}"
-WRAPPER_BUILD_DIR="$WRAPPER_DIR/build_${WRAPPER_BUILD_BASE}_static"
+WRAPPER_BUILD_BASE="${WRAPPER_BUILD_BASE// /_}_static"
+if [[ "$OSTYPE" =~ ^(msys|cygwin|mingw).* ]]; then
+    WRAPPER_BUILD_HASH=$(printf '%s' "$WRAPPER_BUILD_BASE" | cksum | awk '{print $1}')
+    WRAPPER_BUILD_DIR="$WRAPPER_DIR/bw_${WRAPPER_BUILD_HASH}"
+else
+    WRAPPER_BUILD_DIR="$WRAPPER_DIR/build_${WRAPPER_BUILD_BASE}"
+fi
 STANDALONE_TARGET_DIR="$TARGET_DIR/standalone/$BUILD_CONFIG"
 mkdir -p "$STANDALONE_TARGET_DIR"
 
