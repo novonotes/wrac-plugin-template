@@ -256,12 +256,11 @@ echo "Building..."
 # clap-wrapper's -Wpedantic -Werror; suppress the warning during Xcode builds
 if [[ "$CMAKE_GENERATOR" == "Xcode" ]]; then
     XCODE_FLAGS=('--' 'OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32')
-    XCODE_BUILD_ARGS=(--clean-first)
     # Pipe through xcbeautify only when on macOS and xcbeautify is available
     if command -v xcbeautify &> /dev/null; then
-        cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG" "${XCODE_BUILD_ARGS[@]}" "${XCODE_FLAGS[@]}" 2>&1 | xcbeautify --quiet
+        cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG" "${XCODE_FLAGS[@]}" 2>&1 | xcbeautify --quiet
     else
-        cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG" "${XCODE_BUILD_ARGS[@]}" "${XCODE_FLAGS[@]}"
+        cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG" "${XCODE_FLAGS[@]}"
     fi
 elif [[ "$CMAKE_GENERATOR" == "Visual Studio 17 2022" ]]; then
     cmake --build "$BUILD_DIR" --config "$BUILD_CONFIG"
