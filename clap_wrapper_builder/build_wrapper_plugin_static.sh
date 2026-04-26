@@ -75,7 +75,10 @@ STANDALONE_PLUGIN_ID="${CLAP_WRAPPER_STANDALONE_PLUGIN_ID:-}"
 STANDALONE_OUTPUT_NAME="${CLAP_WRAPPER_STANDALONE_OUTPUT_NAME:-}"
 BUILD_VST3="${CLAP_WRAPPER_BUILDER_BUILD_VST3:-}"
 BUILD_AUV2="${CLAP_WRAPPER_BUILDER_BUILD_AUV2:-}"
+BUILD_AAX="${CLAP_WRAPPER_BUILDER_BUILD_AAX:-}"
 BUILD_DIR_SUFFIX="${CLAP_WRAPPER_BUILDER_BUILD_DIR_SUFFIX:-}"
+AAX_SDK_ROOT="${CLAP_WRAPPER_BUILDER_AAX_SDK_ROOT:-${AAX_SDK_ROOT:-}}"
+DOWNLOAD_DEPENDENCIES="${CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES:-OFF}"
 
 if [ $# -ge 3 ]; then
     case "$3" in
@@ -110,11 +113,23 @@ if [ -z "$BUILD_AUV2" ]; then
     fi
 fi
 
+if [ -z "$BUILD_AAX" ]; then
+    if [ -n "$AAX_SDK_ROOT" ] || [ "$DOWNLOAD_DEPENDENCIES" = "ON" ]; then
+        BUILD_AAX="ON"
+    else
+        BUILD_AAX="OFF"
+    fi
+fi
+
 echo "CLAP library file: $CLAP_LIBRARY_FILE"
 echo "Output plugin name: $OUTPUT_NAME"
 echo "Build configuration: $BUILD_CONFIG"
 echo "VST3 build: $BUILD_VST3"
 echo "AU build: $BUILD_AUV2"
+echo "AAX build: $BUILD_AAX"
+if [ -n "$AAX_SDK_ROOT" ]; then
+    echo "AAX SDK root: $AAX_SDK_ROOT"
+fi
 if [ -n "$STANDALONE_PLUGIN_ID" ]; then
     if [ -z "$STANDALONE_OUTPUT_NAME" ]; then
         STANDALONE_OUTPUT_NAME="${OUTPUT_NAME} Standalone"
@@ -230,6 +245,15 @@ fi
 if [ -n "${CLAP_WRAPPER_BUILDER_BUILD_AUV2:-}" ]; then
     CMAKE_FORMAT_ARGS+=(-DCLAP_WRAPPER_BUILDER_BUILD_AUV2="${CLAP_WRAPPER_BUILDER_BUILD_AUV2}")
 fi
+if [ -n "${CLAP_WRAPPER_BUILDER_BUILD_AAX:-}" ]; then
+    CMAKE_FORMAT_ARGS+=(-DCLAP_WRAPPER_BUILDER_BUILD_AAX="${CLAP_WRAPPER_BUILDER_BUILD_AAX}")
+fi
+if [ -n "$AAX_SDK_ROOT" ]; then
+    CMAKE_FORMAT_ARGS+=(-DAAX_SDK_ROOT="$AAX_SDK_ROOT")
+fi
+if [ "$DOWNLOAD_DEPENDENCIES" = "ON" ]; then
+    CMAKE_FORMAT_ARGS+=(-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON)
+fi
 
 CMAKE_CONFIGURE_ARGS=(
     -S "."
@@ -324,5 +348,21 @@ if [ -n "$STANDALONE_PLUGIN_ID" ]; then
         success "Standalone app generated: $STANDALONE_FULLPATH"
     else
         error "Standalone app not found"
+    fi
+fi
+
+if [ "$BUILD_AAX" = "ON" ]; then
+    AAX_OUTPUT=""
+    if [[ "$CMAKE_GENERATOR" == "Xcode" ]] || [[ "$CMAKE_GENERATOR" == "Visual Studio 17 2022" ]]; then
+        AAX_OUTPUT=$(find "$BUILD_DIR" -name "*.aaxplugin" \( -type d -o -type f \) 2>/dev/null | head -n 1)
+    else
+        AAX_OUTPUT=$(find "$BUILD_DIR" -name "*.aaxplugin" \( -type d -o -type f \) 2>/dev/null | head -n 1)
+    fi
+
+    if [ -n "$AAX_OUTPUT" ]; then
+        AAX_FULLPATH="$(cd "$(dirname "$AAX_OUTPUT")" && pwd)/$(basename "$AAX_OUTPUT")"
+        success "AAX plugin generated: $AAX_FULLPATH"
+    else
+        error "AAX plugin not found"
     fi
 fi
