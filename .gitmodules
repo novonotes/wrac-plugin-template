@@ -1,6 +1,7 @@
 [submodule "clap_wrapper_builder/clap-wrapper"]
 	path = clap_wrapper_builder/clap-wrapper
-	url = https://github.com/free-audio/clap-wrapper.git
+	url = https://github.com/novonotes/clap-wrapper.git
+	branch = wrac-plugin-template
 [submodule "clap_wrapper_builder/vst3sdk"]
 	path = clap_wrapper_builder/vst3sdk
 	url = https://github.com/steinbergmedia/vst3sdk
