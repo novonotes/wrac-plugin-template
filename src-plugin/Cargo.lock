@@ -1298,7 +1298,7 @@ checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=80987f1727c19a629cad723d4faa9e1d4d627fae#80987f1727c19a629cad723d4faa9e1d4d627fae"
+source = "git+https://github.com/novonotes/wxp.git?rev=27ab6f68c9f14bf94c3e116b723fa06de8b3cc88#27ab6f68c9f14bf94c3e116b723fa06de8b3cc88"
 dependencies = [
  "core-foundation",
  "futures",
@@ -3099,7 +3099,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 [[package]]
 name = "wry"
 version = "0.52.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=80987f1727c19a629cad723d4faa9e1d4d627fae#80987f1727c19a629cad723d4faa9e1d4d627fae"
+source = "git+https://github.com/novonotes/wxp.git?rev=27ab6f68c9f14bf94c3e116b723fa06de8b3cc88#27ab6f68c9f14bf94c3e116b723fa06de8b3cc88"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3142,7 +3142,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=80987f1727c19a629cad723d4faa9e1d4d627fae#80987f1727c19a629cad723d4faa9e1d4d627fae"
+source = "git+https://github.com/novonotes/wxp.git?rev=27ab6f68c9f14bf94c3e116b723fa06de8b3cc88#27ab6f68c9f14bf94c3e116b723fa06de8b3cc88"
 dependencies = [
  "async-trait",
  "directories",
@@ -3163,7 +3163,7 @@ dependencies = [
 [[package]]
 name = "wxp_clack"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=80987f1727c19a629cad723d4faa9e1d4d627fae#80987f1727c19a629cad723d4faa9e1d4d627fae"
+source = "git+https://github.com/novonotes/wxp.git?rev=27ab6f68c9f14bf94c3e116b723fa06de8b3cc88#27ab6f68c9f14bf94c3e116b723fa06de8b3cc88"
 dependencies = [
  "clack-extensions",
  "wxp",
