@@ -75,6 +75,7 @@ STANDALONE_PLUGIN_ID="${CLAP_WRAPPER_STANDALONE_PLUGIN_ID:-}"
 STANDALONE_OUTPUT_NAME="${CLAP_WRAPPER_STANDALONE_OUTPUT_NAME:-}"
 BUILD_VST3="${CLAP_WRAPPER_BUILDER_BUILD_VST3:-}"
 BUILD_AUV2="${CLAP_WRAPPER_BUILDER_BUILD_AUV2:-}"
+BUILD_DIR_SUFFIX="${CLAP_WRAPPER_BUILDER_BUILD_DIR_SUFFIX:-}"
 
 if [ $# -ge 3 ]; then
     case "$3" in
@@ -199,6 +200,11 @@ if [[ "$OSTYPE" =~ ^(msys|cygwin|mingw).* ]]; then
     BUILD_DIR="$SCRIPT_DIR/bw_$CLAP_BASE_HASH"
 else
     BUILD_DIR="$SCRIPT_DIR/build_$CLAP_BASE_NAME"
+fi
+
+if [ -n "$BUILD_DIR_SUFFIX" ]; then
+    SAFE_BUILD_DIR_SUFFIX="${BUILD_DIR_SUFFIX//[^A-Za-z0-9_-]/_}"
+    BUILD_DIR="${BUILD_DIR}_${SAFE_BUILD_DIR_SUFFIX}"
 fi
 
 # Rebuild if the CMakeCache has a stale source path (e.g. after repo rename)
