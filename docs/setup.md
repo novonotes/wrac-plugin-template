@@ -22,6 +22,7 @@ To generate VST3 / AU / Standalone using clap-wrapper, the following are additio
 **Windows:**
 - Visual Studio 2022 (with C++ build tools)
 - CMake (3.15 or later recommended)
+- Git Bash. The scripts under `./script/` are Bash scripts and are intended to be run from Git Bash on Windows.
 
 **Linux:**
 - CLAP only is supported at this time.
@@ -83,6 +84,8 @@ Run the following from the repository root.
 cd /path/to/my_plugin
 ./script/build_and_install.sh
 ```
+
+On Windows, run the script from Git Bash rather than PowerShell or Command Prompt.
 
 The built plugin will be installed to the following directories:
 

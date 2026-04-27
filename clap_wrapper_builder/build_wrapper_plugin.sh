@@ -69,6 +69,9 @@ fi
 CLAP_FILE="$1"
 OUTPUT_NAME="$2"
 BUILD_CONFIG="Debug"
+BUILD_AAX="${CLAP_WRAPPER_BUILDER_BUILD_AAX:-}"
+AAX_SDK_ROOT="${CLAP_WRAPPER_BUILDER_AAX_SDK_ROOT:-${AAX_SDK_ROOT:-}}"
+DOWNLOAD_DEPENDENCIES="${CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES:-OFF}"
 
 if [ $# -ge 3 ]; then
     case "$3" in
@@ -90,6 +93,19 @@ fi
 echo "CLAP file: $CLAP_FILE"
 echo "Output plugin name: $OUTPUT_NAME"
 echo "Build configuration: $BUILD_CONFIG"
+
+if [ -z "$BUILD_AAX" ]; then
+    if [ -n "$AAX_SDK_ROOT" ] || [ "$DOWNLOAD_DEPENDENCIES" = "ON" ]; then
+        BUILD_AAX="ON"
+    else
+        BUILD_AAX="OFF"
+    fi
+fi
+
+echo "AAX build: $BUILD_AAX"
+if [ -n "$AAX_SDK_ROOT" ]; then
+    echo "AAX SDK root: $AAX_SDK_ROOT"
+fi
 
 # Strip extension from CLAP filename and replace spaces with underscores
 # Remove path component, keep filename only
@@ -176,7 +192,12 @@ if [[ "$OSTYPE" == darwin* ]]; then
         -DCLAP_WRAPPER_OUTPUT_NAME="$OUTPUT_NAME" \
         -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
         -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+        -DCLAP_WRAPPER_BUILD_AAX="$BUILD_AAX" \
         -DCLAP_WRAPPER_BUILD_AUV2=ON \
+        -DCLAP_WRAPPER_BUILD_STANDALONE=OFF \
+        -DCLAP_WRAPPER_BUILD_TESTS=OFF \
+        -DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES="$DOWNLOAD_DEPENDENCIES" \
+        -DAAX_SDK_ROOT="$AAX_SDK_ROOT" \
         -DAUDIOUNIT_SDK_ROOT="$AU_SDK_ROOT" \
         -DCLAP_WRAPPER_CXX_STANDARD=23 \
         -G "$CMAKE_GENERATOR"
@@ -187,6 +208,11 @@ else
         -DVST3_SDK_ROOT="$VST3_SDK_ROOT" \
         -DCLAP_WRAPPER_OUTPUT_NAME="$OUTPUT_NAME" \
         -DCMAKE_BUILD_TYPE="$BUILD_CONFIG" \
+        -DCLAP_WRAPPER_BUILD_AAX="$BUILD_AAX" \
+        -DCLAP_WRAPPER_BUILD_STANDALONE=OFF \
+        -DCLAP_WRAPPER_BUILD_TESTS=OFF \
+        -DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES="$DOWNLOAD_DEPENDENCIES" \
+        -DAAX_SDK_ROOT="$AAX_SDK_ROOT" \
         -G "$CMAKE_GENERATOR"
 fi
 
@@ -236,4 +262,20 @@ if [ -n "$VST3_OUTPUT" ]; then
     success "VST3 plugin generated: $VST3_FULLPATH"
 else
     error "VST3 plugin not found"
+fi
+
+if [ "$BUILD_AAX" = "ON" ]; then
+    AAX_OUTPUT=""
+    if [[ "$CMAKE_GENERATOR" == "Xcode" ]] || [[ "$CMAKE_GENERATOR" == "Visual Studio 17 2022" ]]; then
+        AAX_OUTPUT=$(find "$BUILD_DIR" -name "*.aaxplugin" \( -type d -o -type f \) 2>/dev/null | head -n 1)
+    else
+        AAX_OUTPUT=$(find "$BUILD_DIR" -name "*.aaxplugin" \( -type d -o -type f \) 2>/dev/null | head -n 1)
+    fi
+
+    if [ -n "$AAX_OUTPUT" ]; then
+        AAX_FULLPATH="$(cd "$(dirname "$AAX_OUTPUT")" && pwd)/$(basename "$AAX_OUTPUT")"
+        success "AAX plugin generated: $AAX_FULLPATH"
+    else
+        error "AAX plugin not found"
+    fi
 fi
