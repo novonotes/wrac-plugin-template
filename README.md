@@ -1,5 +1,12 @@
 # WRAC Plugin Template
 
+⚠️ Currently in **pre-release testing** for the official launch.
+- Feedback is welcome via issues, discussions, DM, email, or any other means.
+- The scope is currently intentionally limited to acquaintances and stakeholders.
+- Official launch is planned for early May 2026. Your shares and support at that time would be greatly appreciated!
+
+---
+
 A template for implementing audio plugins with the WRAC stack.
 You can copy this repository as a starting point for new projects.
 
