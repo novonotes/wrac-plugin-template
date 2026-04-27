@@ -192,7 +192,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 [[package]]
 name = "clack-common"
 version = "0.1.0"
-source = "git+https://github.com/prokopyl/clack.git?rev=9f2ccb40#9f2ccb40b539ae3132ad4137fbd0b10dd0da0ea5"
+source = "git+https://github.com/prokopyl/clack.git?rev=4541f03#4541f03792635dfdc6be9441a01b786e9b4ccf18"
 dependencies = [
  "bitflags 2.11.0",
  "clap-sys",
@@ -201,7 +201,7 @@ dependencies = [
 [[package]]
 name = "clack-extensions"
 version = "0.1.0"
-source = "git+https://github.com/prokopyl/clack.git?rev=9f2ccb40#9f2ccb40b539ae3132ad4137fbd0b10dd0da0ea5"
+source = "git+https://github.com/prokopyl/clack.git?rev=4541f03#4541f03792635dfdc6be9441a01b786e9b4ccf18"
 dependencies = [
  "bitflags 2.11.0",
  "clack-common",
@@ -212,7 +212,7 @@ dependencies = [
 [[package]]
 name = "clack-plugin"
 version = "0.1.0"
-source = "git+https://github.com/prokopyl/clack.git?rev=9f2ccb40#9f2ccb40b539ae3132ad4137fbd0b10dd0da0ea5"
+source = "git+https://github.com/prokopyl/clack.git?rev=4541f03#4541f03792635dfdc6be9441a01b786e9b4ccf18"
 dependencies = [
  "clack-common",
  "clap-sys",
@@ -1298,7 +1298,7 @@ checksum = "72ef4a56884ca558e5ddb05a1d1e7e1bfd9a68d9ed024c21704cc98872dae1bb"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=4636daec47a4a7d98d433100fdb27607e5e9d4a3#4636daec47a4a7d98d433100fdb27607e5e9d4a3"
+source = "git+https://github.com/novonotes/run_loop.git?rev=2779a6400cc99a8728052ba4df1c475a492849de#2779a6400cc99a8728052ba4df1c475a492849de"
 dependencies = [
  "core-foundation",
  "futures",
@@ -3099,7 +3099,7 @@ checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
 [[package]]
 name = "wry"
 version = "0.52.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=4636daec47a4a7d98d433100fdb27607e5e9d4a3#4636daec47a4a7d98d433100fdb27607e5e9d4a3"
+source = "git+https://github.com/novonotes/wry.git?rev=8a54991c590dec567cfb4ab73b11a365d740616c#8a54991c590dec567cfb4ab73b11a365d740616c"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3142,10 +3142,11 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=4636daec47a4a7d98d433100fdb27607e5e9d4a3#4636daec47a4a7d98d433100fdb27607e5e9d4a3"
+source = "git+https://github.com/novonotes/wxp.git?rev=ace80b6a158ee342dd0e98c78bdcbe622d61040f#ace80b6a158ee342dd0e98c78bdcbe622d61040f"
 dependencies = [
  "async-trait",
  "directories",
+ "log",
  "mime_guess",
  "novonotes_run_loop",
  "once_cell",
@@ -3163,7 +3164,7 @@ dependencies = [
 [[package]]
 name = "wxp_clack"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=4636daec47a4a7d98d433100fdb27607e5e9d4a3#4636daec47a4a7d98d433100fdb27607e5e9d4a3"
+source = "git+https://github.com/novonotes/wxp.git?rev=ace80b6a158ee342dd0e98c78bdcbe622d61040f#ace80b6a158ee342dd0e98c78bdcbe622d61040f"
 dependencies = [
  "clack-extensions",
  "wxp",

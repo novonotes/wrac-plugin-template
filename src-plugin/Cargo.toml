@@ -11,16 +11,16 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 atomic_float = "1.1.0"
-clack-extensions = { git = "https://github.com/prokopyl/clack.git", rev = "9f2ccb40", features = ["audio-ports", "params", "clack-plugin", "gui", "state"] }
-clack-plugin = { git = "https://github.com/prokopyl/clack.git", rev = "9f2ccb40" }
+clack-extensions = { git = "https://github.com/prokopyl/clack.git", rev = "4541f03", features = ["audio-ports", "params", "clack-plugin", "gui", "state"] }
+clack-plugin = { git = "https://github.com/prokopyl/clack.git", rev = "4541f03" }
 log = "0.4"
-novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", rev = "4636daec47a4a7d98d433100fdb27607e5e9d4a3" }
+novonotes_run_loop = { git = "https://github.com/novonotes/run_loop.git", rev = "2779a6400cc99a8728052ba4df1c475a492849de" }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
-wry = { git = "https://github.com/novonotes/wxp.git", rev = "4636daec47a4a7d98d433100fdb27607e5e9d4a3", features = ["devtools"] }
-wxp = { git = "https://github.com/novonotes/wxp.git", rev = "4636daec47a4a7d98d433100fdb27607e5e9d4a3" }
-wxp_clack = { git = "https://github.com/novonotes/wxp.git", rev = "4636daec47a4a7d98d433100fdb27607e5e9d4a3" }
+wry = { git = "https://github.com/novonotes/wry.git", rev = "8a54991c590dec567cfb4ab73b11a365d740616c", features = ["devtools"] }
+wxp = { git = "https://github.com/novonotes/wxp.git", rev = "ace80b6a158ee342dd0e98c78bdcbe622d61040f" }
+wxp_clack = { git = "https://github.com/novonotes/wxp.git", rev = "ace80b6a158ee342dd0e98c78bdcbe622d61040f" }
 
 [lints.rust]
 unreachable_pub = "deny"

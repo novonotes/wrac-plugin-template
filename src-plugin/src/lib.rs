@@ -31,7 +31,7 @@ pub struct WxpExampleGainEntry {
 impl Entry for WxpExampleGainEntry {
     /// Called exactly once immediately after the host loads the plugin.
     /// `_bundle_path` receives the path to the plugin file (.clap).
-    fn new(_bundle_path: &CStr) -> Result<Self, EntryLoadError> {
+    fn new(_bundle_path: Option<&CStr>) -> Result<Self, EntryLoadError> {
         // Initialize the RunLoop on the main thread.
         // Because wxp's WebView and command handlers operate on the main thread (= RunLoop),
         // init() must be called as early as possible during plugin startup.
