@@ -101,7 +101,7 @@ impl PluginGuiImpl for WxpExampleGainMainThread<'_> {
         // Destroy any existing WebView before creating a new one.
         self.reset_webview();
 
-        // Convert the CLAP window handle to a format wry can accept.
+        // Convert the CLAP window handle to a format wxp can accept.
         // macOS: NSView, Windows: HWND, Linux: X11 Window.
         let parent_handle = wxp_clack::window::clack_to_wry_window_handle(&parent)
             .map_err(|_| PluginError::Message("Window handle conversion failed"))?;
@@ -114,9 +114,9 @@ impl PluginGuiImpl for WxpExampleGainMainThread<'_> {
             .map_err(|_| PluginError::Message("Failed to create data directory"))?;
 
         let wxp_context = WebContext::new(data_dir);
-        // wry_context must outlive the WebView, so it is kept as a field on self.
-        self.wry_context = Some(wxp_context.build_wry_context());
-        let Some(wry_context) = self.wry_context.as_mut() else {
+        // web_context must outlive the WebView, so it is kept as a field on self.
+        self.web_context = Some(wxp_context);
+        let Some(web_context) = self.web_context.as_mut() else {
             return Err(PluginError::Message("Failed to create web context"));
         };
 
@@ -125,7 +125,7 @@ impl PluginGuiImpl for WxpExampleGainMainThread<'_> {
         // --- Debug build ---
         // Connects to the Vite dev server (localhost:5173). Hot reload is available.
         #[cfg(debug_assertions)]
-        let builder = WxpWebViewBuilder::new(wry_context)
+        let builder = WxpWebViewBuilder::new(web_context)
             // Passing command_handler lets JavaScript call Rust commands via invoke().
             .with_command_handler(self.command_handler.clone())
             .with_devtools(cfg!(debug_assertions))
@@ -138,7 +138,7 @@ impl PluginGuiImpl for WxpExampleGainMainThread<'_> {
         // with_serve_zip() registers the custom protocol "wxp-plugin://".
         // When the WebView requests that scheme, files from the ZIP are returned.
         #[cfg(not(debug_assertions))]
-        let builder = WxpWebViewBuilder::new(wry_context)
+        let builder = WxpWebViewBuilder::new(web_context)
             .with_command_handler(self.command_handler.clone())
             .with_devtools(cfg!(debug_assertions))
             .with_visible(true)

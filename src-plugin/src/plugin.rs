@@ -18,7 +18,7 @@ use novonotes_run_loop::{RunLoop, RunLoopSender};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use wxp::{Channel, WebViewRef, WxpCommandHandler, dpi::LogicalSize};
+use wxp::{Channel, WebContext, WebViewRef, WxpCommandHandler, dpi::LogicalSize};
 use wxp_clack::dpi::DpiConverter;
 
 use crate::audio::WxpExampleGainAudioProcessor;
@@ -113,9 +113,9 @@ pub(crate) struct WxpExampleGainMainThread<'a> {
     pub(crate) shared: &'a SharedState,
     /// wxp WebViewRef. Some only while the GUI is open.
     pub(crate) web_view: Option<WebViewRef>,
-    /// wry WebContext. Manages the storage location for WebView user data (cache, etc.).
+    /// wxp WebContext. Manages the storage location for WebView user data (cache, etc.).
     /// Must outlive the WebView, so it is kept as a field.
-    pub(crate) wry_context: Option<wry::WebContext>,
+    pub(crate) web_context: Option<WebContext>,
     /// wxp command handler. Registers commands (RPCs) callable from JavaScript.
     pub(crate) command_handler: Arc<WxpCommandHandler>,
     pub(crate) gui_size: LogicalSize<f64>,
@@ -184,10 +184,10 @@ impl Plugin for WxpExampleGainPlugin {
         _shared: Option<&Self::Shared<'_>>,
     ) {
         builder
-            .register::<PluginAudioPorts>()  // audio input/output port definitions
-            .register::<PluginParams>()      // parameter exposure
-            .register::<PluginState>()       // state save and restore
-            .register::<PluginGui>();         // GUI provision
+            .register::<PluginAudioPorts>() // audio input/output port definitions
+            .register::<PluginParams>() // parameter exposure
+            .register::<PluginState>() // state save and restore
+            .register::<PluginGui>(); // GUI provision
     }
 }
 
@@ -218,7 +218,7 @@ impl DefaultPluginFactory for WxpExampleGainPlugin {
         Ok(WxpExampleGainMainThread {
             shared,
             web_view: None,
-            wry_context: None,
+            web_context: None,
             command_handler,
             gui_size: DEFAULT_GUI_SIZE,
             dpi_converter: DpiConverter::new(1.0),
@@ -374,7 +374,7 @@ impl WxpExampleGainMainThread<'_> {
     pub(crate) fn reset_webview(&mut self) {
         self.shared.inner.clear_gui_channel();
         self.web_view = None;
-        self.wry_context = None;
+        self.web_context = None;
     }
 }
 

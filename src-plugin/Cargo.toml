@@ -18,7 +18,6 @@ novonotes_run_loop = { git = "https://github.com/novonotes/run_loop.git", rev = 
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
-wry = { git = "https://github.com/novonotes/wry.git", rev = "8a54991c590dec567cfb4ab73b11a365d740616c", features = ["devtools"] }
 wxp = { git = "https://github.com/novonotes/wxp.git", rev = "ace80b6a158ee342dd0e98c78bdcbe622d61040f" }
 wxp_clack = { git = "https://github.com/novonotes/wxp.git", rev = "ace80b6a158ee342dd0e98c78bdcbe622d61040f" }
 

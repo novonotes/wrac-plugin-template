@@ -71,12 +71,12 @@ Channel callback            ◄──────    RunLoopSender → Channel::
 
 The WebView is created inside the `set_parent()` callback (see `gui.rs` for the implementation).
 
-1. `WebContext::new(data_dir).build_wry_context()` — sets the user data directory. The returned `wry::WebContext` must be kept alive for the lifetime of the WebView, so it is stored on `self`.
+1. `WebContext::new(data_dir)` — sets the user data directory. The `WebContext` must be kept alive for the lifetime of the WebView, so it is stored on `self`.
 2. `wxp_clack::window::clack_to_wry_window_handle(&parent)` — converts the CLAP `Window` to a wry `WindowHandle`.
-3. `WxpWebViewBuilder::new(&mut wry_context)` — creates a builder and configures the command handler, URL, bounds, etc.
+3. `WxpWebViewBuilder::new(&mut web_context)` — creates a builder and configures the command handler, URL, bounds, etc.
 4. `.build_as_child(&parent_handle)` — obtains a `WebViewRef` and stores it on `self`.
 
-In `destroy()`, `reset_webview()` clears the GUI notification channel, drops the `WebViewRef` to destroy the WebView, then drops the `wry::WebContext`.
+In `destroy()`, `reset_webview()` clears the GUI notification channel, drops the `WebViewRef` to destroy the WebView, then drops the `WebContext`.
 
 ## Key Dependencies
 

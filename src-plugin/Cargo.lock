@@ -3182,7 +3182,6 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
- "wry",
  "wxp",
  "wxp_clack",
  "zip 2.4.2",
