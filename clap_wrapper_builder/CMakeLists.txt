@@ -174,6 +174,10 @@ if(APPLE)
             MACOSX_BUNDLE_GUI_IDENTIFIER "${AUV2_BUNDLE_ID}"
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AUV2_BUNDLE_ID}"
         )
+        # AUv2 can host a CLAP Cocoa view backed by WKWebView. Without an explicit
+        # WebKit link, Objective-C runtime lookup may fail inside AU hosts even
+        # though the CLAP/static library built successfully.
+        target_link_libraries(${PLUGIN_NAME_SAFE}_auv2 PRIVATE "-framework WebKit")
     endif()
 
     if(TARGET ${PLUGIN_NAME_SAFE}_standalone)
