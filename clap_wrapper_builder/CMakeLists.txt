@@ -69,7 +69,9 @@ add_library(${PLUGIN_NAME_SAFE}_impl STATIC IMPORTED)
 if(MSVC)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
       IMPORTED_LOCATION ${CLAP_WRAPPER_BUILDER_TARGET_LIB}
-      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib"
+      # Rust の staticlib を CMake 側で最終リンクするため、Cargo が cdylib
+      # ビルド時に解決する Windows system lib 依存をここで明示する。
+      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib"
   )
 endif()
 
