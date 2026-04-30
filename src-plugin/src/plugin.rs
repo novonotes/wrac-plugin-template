@@ -1,4 +1,5 @@
 use std::ffi::CStr;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -117,7 +118,7 @@ pub(crate) struct WxpExampleGainMainThread<'a> {
     /// Must outlive the WebView, so it is kept as a field.
     pub(crate) web_context: Option<WebContext>,
     /// wxp command handler. Registers commands (RPCs) callable from JavaScript.
-    pub(crate) command_handler: Arc<WxpCommandHandler>,
+    pub(crate) command_handler: Rc<WxpCommandHandler>,
     pub(crate) gui_size: LogicalSize<f64>,
     /// Utility for converting between the DPI scale factor presented by the host
     /// and logical/physical sizes.
@@ -212,7 +213,7 @@ impl DefaultPluginFactory for WxpExampleGainPlugin {
     ) -> Result<Self::MainThread<'a>, PluginError> {
         // WxpCommandHandler is the RPC bridge between JavaScript and Rust.
         // register_commands() maps command names to their handlers.
-        let command_handler = Arc::new(WxpCommandHandler::new());
+        let command_handler = Rc::new(WxpCommandHandler::new());
         register_commands(command_handler.clone(), shared.inner.clone());
 
         Ok(WxpExampleGainMainThread {
@@ -416,7 +417,7 @@ pub(crate) fn gain_db_text(gain: f64) -> String {
 // Handlers read and write parameters through SharedStateInner.
 
 pub(crate) fn register_commands(
-    command_handler: Arc<WxpCommandHandler>,
+    command_handler: Rc<WxpCommandHandler>,
     shared: Arc<SharedStateInner>,
 ) {
     // Command for retrieving the current gain state. Used for the initial GUI render.
