@@ -71,7 +71,8 @@ if(MSVC)
       IMPORTED_LOCATION ${CLAP_WRAPPER_BUILDER_TARGET_LIB}
       # Rust の staticlib を CMake 側で最終リンクするため、Cargo が cdylib
       # ビルド時に解決する Windows system lib 依存をここで明示する。
-      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib;runtimeobject.lib"
+      # psapi.lib は sentry の debug image 収集がロード済み module を列挙するために必要。
+      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib;runtimeobject.lib;psapi.lib"
   )
 endif()
 
