@@ -71,14 +71,14 @@ if(MSVC)
       IMPORTED_LOCATION ${CLAP_WRAPPER_BUILDER_TARGET_LIB}
       # Rust の staticlib を CMake 側で最終リンクするため、Cargo が cdylib
       # ビルド時に解決する Windows system lib 依存をここで明示する。
-      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib"
+      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib;runtimeobject.lib"
   )
 endif()
 
 if(APPLE)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
       IMPORTED_LOCATION ${CLAP_WRAPPER_BUILDER_TARGET_LIB}
-      INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation"
+      INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation;-framework WebKit"
   )
 endif()
 # Generate the source file for the CLAP entry point.
@@ -176,10 +176,6 @@ if(APPLE)
             MACOSX_BUNDLE_GUI_IDENTIFIER "${AUV2_BUNDLE_ID}"
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AUV2_BUNDLE_ID}"
         )
-        # AUv2 can host a CLAP Cocoa view backed by WKWebView. Without an explicit
-        # WebKit link, Objective-C runtime lookup may fail inside AU hosts even
-        # though the CLAP/static library built successfully.
-        target_link_libraries(${PLUGIN_NAME_SAFE}_auv2 PRIVATE "-framework WebKit")
     endif()
 
     if(TARGET ${PLUGIN_NAME_SAFE}_standalone)
