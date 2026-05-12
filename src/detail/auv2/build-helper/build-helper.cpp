@@ -400,8 +400,18 @@ int main(int argc, char **argv)
           cppf << "AUV2_Type::aumu_musicdevice";
         }
         cppf << "," << args << ", ci) {}"
-             << "};\n"
-             << "AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, " << on << ");\n";
+             << "};\n";
+        // AUMusicDeviceFactory assumes the MusicDevice selector surface. Effect
+        // and note-effect components should use AUBaseFactory so auval and
+        // hosts see a factory that matches the advertised AudioComponent type.
+        if (u.type == "aumu")
+        {
+          cppf << "AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, " << on << ");\n";
+        }
+        else
+        {
+          cppf << "AUSDK_COMPONENT_ENTRY(ausdk::AUBaseFactory, " << on << ");\n";
+        }
       }
 #else
       // TODO: this will be remove

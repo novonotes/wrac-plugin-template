@@ -1141,6 +1141,15 @@ void WrapAsAUV2::onEndEdit(clap_id id)
 void WrapAsAUV2::onIdle()
 {
   if (!_plugin) return;
+  if (_flushRequested.exchange(false))
+  {
+    auto guarantee_mainthread = _plugin->AlwaysMainThread();
+    if (_processAdapter)
+    {
+      _processAdapter->flush();
+    }
+  }
+
   // run queue stuff
   queueEvent e;
   while (this->_queueToUI.pop(e))

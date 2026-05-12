@@ -46,6 +46,10 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 #define S16(x) u##x
 #endif
 
+static Vst::SpeakerArrangement speakerArrFromPortInfo(const clap_audio_port_info_t &info);
+static bool portInfoMatchesSpeakerArr(const clap_audio_port_info_t &info, Vst::SpeakerArrangement arr);
+static const char *clapPortTypeFromSpeakerArr(Vst::SpeakerArrangement arr);
+
 DEF_CLASS_IID(ARA::IPlugInEntryPoint)
 DEF_CLASS_IID(ARA::IPlugInEntryPoint2)
 DEF_CLASS_IID(Presonus::IGainReductionInfo)
@@ -367,16 +371,43 @@ tresult PLUGIN_API ClapAsVst3::setBusArrangements(Vst::SpeakerArrangement *input
     return kResultFalse;
   }
 
+  if (_plugin->_ext._configurable_audio_ports)
+  {
+    // VST3 hosts negotiate speaker arrangements after plugin discovery. If the
+    // wrapped CLAP plugin can reconfigure ports, apply the requested arrangement
+    // before validating port info so the process adapter is built with the same
+    // channel count the host will later pass to process().
+    std::vector<clap_audio_port_configuration_request_t> requests;
+    requests.reserve(static_cast<size_t>(numIns + numOuts));
+
+    for (int i = 0; i < numIns; ++i)
+    {
+      requests.push_back({true, static_cast<uint32_t>(i),
+                          static_cast<uint32_t>(Vst::SpeakerArr::getChannelCount(inputs[i])),
+                          clapPortTypeFromSpeakerArr(inputs[i]), nullptr});
+    }
+
+    for (int i = 0; i < numOuts; ++i)
+    {
+      requests.push_back({false, static_cast<uint32_t>(i),
+                          static_cast<uint32_t>(Vst::SpeakerArr::getChannelCount(outputs[i])),
+                          clapPortTypeFromSpeakerArr(outputs[i]), nullptr});
+    }
+
+    if (!_plugin->_ext._configurable_audio_ports->can_apply_configuration(
+            _plugin->_plugin, requests.data(), static_cast<uint32_t>(requests.size())) ||
+        !_plugin->_ext._configurable_audio_ports->apply_configuration(
+            _plugin->_plugin, requests.data(), static_cast<uint32_t>(requests.size())))
+    {
+      return kResultFalse;
+    }
+  }
+
   for (int i = 0; i < numIns; ++i)
   {
     clap_audio_port_info_t info;
     _plugin->_ext._audioports->get(_plugin->_plugin, i, true, &info);
-    Vst::SpeakerArrangement sa{0};
-    for (auto c = 0U; c < info.channel_count; ++c)
-    {
-      sa = (sa << 1) + 1;
-    }
-    if (inputs[i] != sa)
+    if (!portInfoMatchesSpeakerArr(info, inputs[i]))
     {
       return kResultFalse;
     }
@@ -386,12 +417,7 @@ tresult PLUGIN_API ClapAsVst3::setBusArrangements(Vst::SpeakerArrangement *input
   {
     clap_audio_port_info_t info;
     _plugin->_ext._audioports->get(_plugin->_plugin, i, false, &info);
-    Vst::SpeakerArrangement sa{0};
-    for (auto c = 0U; c < info.channel_count; ++c)
-    {
-      sa = (sa << 1) + 1;
-    }
-    if (outputs[i] != sa)
+    if (!portInfoMatchesSpeakerArr(info, outputs[i]))
     {
       return kResultFalse;
     }
@@ -727,6 +753,36 @@ static Vst::SpeakerArrangement speakerArrFromPortType(const char *port_type)
   }
 
   return Vst::SpeakerArr::kEmpty;
+}
+
+static Vst::SpeakerArrangement speakerArrFromPortInfo(const clap_audio_port_info_t &info)
+{
+  auto arr = speakerArrFromPortType(info.port_type);
+  if (arr != Vst::SpeakerArr::kEmpty) return arr;
+
+  Vst::SpeakerArrangement fallback{0};
+  for (auto c = 0U; c < info.channel_count; ++c)
+  {
+    fallback = (fallback << 1) + 1;
+  }
+  return fallback;
+}
+
+static bool portInfoMatchesSpeakerArr(const clap_audio_port_info_t &info, Vst::SpeakerArrangement arr)
+{
+  if (!info.port_type || info.port_type[0] == '\0')
+  {
+    return Vst::SpeakerArr::getChannelCount(arr) == static_cast<int32>(info.channel_count);
+  }
+
+  return speakerArrFromPortInfo(info) == arr;
+}
+
+static const char *clapPortTypeFromSpeakerArr(Vst::SpeakerArrangement arr)
+{
+  if (arr == Vst::SpeakerArr::kMono) return CLAP_PORT_MONO;
+  if (arr == Vst::SpeakerArr::kStereo) return CLAP_PORT_STEREO;
+  return nullptr;
 }
 
 void ClapAsVst3::addAudioBusFrom(const clap_audio_port_info_t *info, bool is_input)

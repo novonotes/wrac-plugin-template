@@ -278,6 +278,17 @@ void ProcessAdapter::process(ProcessData &data)
   _eventindices.clear();
 }
 
+void ProcessAdapter::flush()
+{
+  if (_plugin && _ext_params)
+  {
+    _ext_params->flush(_plugin, &_in_events, &_out_events);
+    processOutputEvents();
+  }
+  _events.clear();
+  _eventindices.clear();
+}
+
 uint32_t ProcessAdapter::input_events_size(const struct clap_input_events *list)
 {
   auto self = static_cast<ProcessAdapter *>(list->ctx);

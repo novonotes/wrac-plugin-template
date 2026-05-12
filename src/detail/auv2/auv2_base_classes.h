@@ -385,6 +385,11 @@ class WrapAsAUV2 : public ausdk::AUBase,
   }
   void param_request_flush() override
   {
+    // GUI-originated CLAP parameter edits can only be emitted while the host
+    // provides an output event queue. AUv2 has no direct CLAP flush callback, so
+    // defer the actual flush to onIdle(), where automation notifications are
+    // already marshalled back to the AU host outside the render thread.
+    _flushRequested.store(true);
   }
 
   void latency_changed() override;
@@ -560,6 +565,7 @@ class WrapAsAUV2 : public ausdk::AUBase,
   AUMIDIOutputCallbackStruct _midioutput_hostcallback = {nullptr, nullptr};
 
   std::atomic_bool _requestUICallback = false;
+  std::atomic_bool _flushRequested = false;
 
   // the queue from audiothread to UI thread
   ClapWrapper::detail::shared::fixedqueue<queueEvent, 8192> _queueToUI;

@@ -8,8 +8,30 @@ if (PROJECT_IS_TOP_LEVEL)
 
 	string(MAKE_C_IDENTIFIER ${CLAP_WRAPPER_OUTPUT_NAME} pluginname)
 
+	if (APPLE)
+		if (NOT DEFINED CLAP_WRAPPER_MACOS_EMBEDDED_CLAP_LOCATION)
+			set(CLAP_WRAPPER_MACOS_EMBEDDED_CLAP_LOCATION "")
+		endif()
 
-	if (CLAP_WRAPPER_CAN_BUILD_AAX)
+		# AUv2 identity must be product-specific. Reusing clap-wrapper's generic
+		# default makes hosts and auval resolve a different AudioComponent than
+		# the one the product build script installed.
+		if (NOT DEFINED CLAP_WRAPPER_AUV2_INSTRUMENT_TYPE)
+			set(CLAP_WRAPPER_AUV2_INSTRUMENT_TYPE "aumu")
+		endif()
+		if (NOT DEFINED CLAP_WRAPPER_AUV2_MANUFACTURER_NAME)
+			set(CLAP_WRAPPER_AUV2_MANUFACTURER_NAME "cleveraudio.org")
+		endif()
+		if (NOT DEFINED CLAP_WRAPPER_AUV2_MANUFACTURER_CODE)
+			set(CLAP_WRAPPER_AUV2_MANUFACTURER_CODE "clAd")
+		endif()
+		if (NOT DEFINED CLAP_WRAPPER_AUV2_SUBTYPE_CODE)
+			set(CLAP_WRAPPER_AUV2_SUBTYPE_CODE "gWrp")
+		endif()
+	endif()
+
+
+	if (CLAP_WRAPPER_CAN_BUILD_AAX AND CLAP_WRAPPER_BUILD_AAX)
 		    # Link the actual plugin library
 			add_library(${pluginname}_as_aax MODULE)
 			target_add_aax_wrapper(
@@ -29,6 +51,7 @@ if (PROJECT_IS_TOP_LEVEL)
 			SINGLE_PLUGIN_TUID "${CLAP_VST3_TUID_STRING}"
 			BUNDLE_IDENTIFIER "${CLAP_WRAPPER_BUNDLE_IDENTIFIER}"
 			BUNDLE_VERSION "${CLAP_WRAPPER_BUNDLE_VERSION}"
+			MACOS_EMBEDDED_CLAP_LOCATION "${CLAP_WRAPPER_MACOS_EMBEDDED_CLAP_LOCATION}"
 			)
 
 	if (APPLE)
@@ -40,12 +63,14 @@ if (PROJECT_IS_TOP_LEVEL)
 					BUNDLE_IDENTIFIER "${CLAP_WRAPPER_BUNDLE_IDENTIFIER}"
 					BUNDLE_VERSION "${CLAP_WRAPPER_BUNDLE_VERSION}"
 
-					# AUv2 is still a work in progress. For now make this an
-					# explict option to the single plugin version
-					INSTRUMENT_TYPE "aumu"
-					MANUFACTURER_NAME "cleveraudio.org"
-					MANUFACTURER_CODE "clAd"
-					SUBTYPE_CODE "gWrp"
+					# The top-level helper builds one product at a time, so AUv2
+					# metadata is supplied by the product build script instead of
+					# using clap-wrapper's generic sample identity.
+					INSTRUMENT_TYPE "${CLAP_WRAPPER_AUV2_INSTRUMENT_TYPE}"
+					MANUFACTURER_NAME "${CLAP_WRAPPER_AUV2_MANUFACTURER_NAME}"
+					MANUFACTURER_CODE "${CLAP_WRAPPER_AUV2_MANUFACTURER_CODE}"
+					SUBTYPE_CODE "${CLAP_WRAPPER_AUV2_SUBTYPE_CODE}"
+					MACOS_EMBEDDED_CLAP_LOCATION "${CLAP_WRAPPER_MACOS_EMBEDDED_CLAP_LOCATION}"
 			)
 		endif()
 	endif()
