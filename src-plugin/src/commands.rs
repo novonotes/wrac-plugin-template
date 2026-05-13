@@ -12,7 +12,7 @@ use wrac_clap_adapter::{HostGuiResizeRequester, HostParameterEditNotifier};
 use wrac_wxp_gui::WxpGuiResizeHandle;
 use wxp::{Channel, WxpCommandHandler};
 
-use crate::gui::{GuiStateNotifier, parameter_payload};
+use crate::gui::{GuiStateNotifier, GuiSubscriptionId, parameter_payload};
 use crate::plugin::{parameter_default_value, parameter_text_value};
 use crate::state::SharedState;
 
@@ -122,23 +122,32 @@ pub(crate) fn register_commands(
         });
     }
 
-    // parameter の変化を継続的に受け取るための subscription を開始する。
-    // 引数の `channel` は JS 側で作った callback channel で、これに対して plugin が
-    // 値の変化を push してくる仕組み。
+    // parameter の変化を受け取る subscription を開始する。
+    // `channel` は JS 側で作った callback channel で、plugin はここに値の変化を push する。
+    // 戻り値の `subscriptionId` は購読の識別子。JS は cleanup 時にこの id を返すことで、
+    // 自分が始めた購読だけを確実に解除できる。
     {
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("subscribe_parameters", move |ctx| {
             let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
-            gui_notifier.set_channel(channel);
-            Ok::<_, String>(json!({ "ok": true }))
+            let subscription_id = gui_notifier.subscribe_parameters(channel);
+            Ok::<_, String>(json!({
+                "ok": true,
+                "subscriptionId": subscription_id.get(),
+            }))
         });
     }
 
-    // subscription を解除する。
+    // subscription を解除する。指定の id が登録されていなければ no-op。
+    // id 指定にすることで、遅れて届いた古い cleanup が、後から始まった別の購読を
+    // 誤って解除してしまう事故を防げる。
     {
         let gui_notifier = gui_notifier.clone();
-        command_handler.register_sync("unsubscribe_parameters", move |_ctx| {
-            gui_notifier.clear_channel();
+        command_handler.register_sync("unsubscribe_parameters", move |ctx| {
+            let subscription_id = ctx
+                .arg::<u64>("subscriptionId")
+                .map_err(|e| e.to_string())?;
+            gui_notifier.unsubscribe(GuiSubscriptionId::from_raw(subscription_id));
             Ok::<_, String>(json!({ "ok": true }))
         });
     }

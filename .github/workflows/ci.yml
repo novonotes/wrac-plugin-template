@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  WRY_OBJC_SUFFIX: WracGainPlugin
+
+jobs:
+  rust-quality:
+    name: Rust format and lint
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Rust version
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Rust version
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
+
+      - name: Run tests
+        run: cargo test --locked --workspace
+
+  plugin-validation:
+    name: Build and validate macOS plugin bundles
+    runs-on: macos-14
+    needs:
+      - rust-quality
+      - test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: src-gui/package-lock.json
+
+      - name: Show tool versions
+        run: |
+          rustc --version
+          cargo --version
+          cmake --version
+          xcodebuild -version
+          /usr/bin/auval -h || true
+
+      - name: Build and validate plugin bundles
+        run: cargo xtask build --release --target=clap,vst3,au --validate
+
+      - name: Verify plugin bundles
+        run: |
+          test -d "target/wrac/artifacts/release/WRAC Gain.clap"
+          test -d "target/wrac/artifacts/release/WRAC Gain.vst3"
+          test -d "target/wrac/artifacts/release/WRAC Gain.component"

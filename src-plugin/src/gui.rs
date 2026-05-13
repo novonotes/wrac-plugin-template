@@ -11,8 +11,10 @@
 //! - この module    : WebView の内容 (URL / 埋め込み zip)、register する
 //!   command、resize/scale の挙動など、製品ごとに変わる部分だけを書く
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use novonotes_run_loop::{RunLoop, RunLoopSender};
@@ -64,6 +66,15 @@ pub(crate) struct GuiIntegration {
     pub(crate) notifier: Arc<GuiStateNotifier>,
 }
 
+#[derive(Clone)]
+struct GuiRuntimeDependencies {
+    shared: Arc<SharedState>,
+    gui_notifier: Arc<GuiStateNotifier>,
+    host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
+    host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    resize_handle: WxpGuiResizeHandle,
+}
+
 /// plugin core から使う GUI extension 一式を作る。
 ///
 /// `plugin.rs` 側には GUI window のサイズ制約や WebView runtime の詳細を置かず、
@@ -74,10 +85,6 @@ pub(crate) fn create_gui_integration(
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());
-    let gui_shared = shared.clone();
-    let gui_notifier = notifier.clone();
-    let gui_host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
-    let gui_host_gui_resize_requester = host_gui_resize_requester.clone();
     let resize_handle = WxpGuiResizeHandle::new(
         DEFAULT_GUI_SIZE,
         GuiSizeLimits {
@@ -85,15 +92,17 @@ pub(crate) fn create_gui_integration(
             max: MAX_GUI_SIZE,
         },
     );
-    let gui_resize_handle = resize_handle.clone();
+    let runtime_dependencies = GuiRuntimeDependencies {
+        shared,
+        gui_notifier: notifier.clone(),
+        host_parameter_edit_notifier,
+        host_gui_resize_requester,
+        resize_handle: resize_handle.clone(),
+    };
     let controller = Arc::new(WxpGuiController::new_with_resize_handle(
         move |configuration, initial_size, parent| {
             WracGainGuiRuntime::create(
-                gui_shared.clone(),
-                gui_notifier.clone(),
-                gui_host_parameter_edit_notifier.clone(),
-                gui_host_gui_resize_requester.clone(),
-                gui_resize_handle.clone(),
+                runtime_dependencies.clone(),
                 configuration,
                 initial_size,
                 parent,
@@ -109,53 +118,108 @@ pub(crate) fn create_gui_integration(
     }
 }
 
-/// WebView 側へ parameter state を push するための通知口。
+/// WebView 側へ GUI state を push するための通知口。
 ///
 /// [`Channel`] と UI run loop の扱いは GUI runtime 固有なので、共有 state ではなく
 /// GUI module に閉じ込める。通知タイミング自体は呼び出し元が決める。
 pub(crate) struct GuiStateNotifier {
-    subscription: Mutex<Option<GuiSubscription>>,
+    next_subscription_id: AtomicU64,
+    subscriptions: Mutex<HashMap<GuiSubscriptionId, GuiSubscription>>,
 }
 
+/// WebView 側 subscriber 1 つぶんの登録情報。
+///
+/// `kind` で「何の stream を購読しているか」、`channel` で「どこに送るか」を分けて持つ。
+/// こうしておけば、同じ GUI が parameter / meter / analyzer などを個別に購読・解除でき、
+/// 古い cleanup が新しい購読を巻き込んで消してしまう事故も起きない。
 #[derive(Clone)]
 struct GuiSubscription {
-    // UI thread (= GUI runtime の run loop) にクロージャを送るための sender。
+    kind: GuiSubscriptionKind,
+    // 通知を UI thread に戻すための run loop sender。
     sender: RunLoopSender,
-    // WebView 側 JS の subscriber に値を送るための channel。
+    // WebView 側 JS の subscriber に値を送る channel。
     channel: Channel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct GuiSubscriptionId(u64);
+
+impl GuiSubscriptionId {
+    pub(crate) fn get(self) -> u64 {
+        self.0
+    }
+
+    pub(crate) fn from_raw(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+/// 購読の種類。現状は parameter 変化通知のみ。
+///
+/// meter や analyzer などの stream を足すときは、ここに variant を追加し、
+/// `notify_*` 側でその variant を持つ subscription にだけ配信すればよい。
+/// Channel そのものを増やすのではなく、種別で振り分ける形にしておく狙い。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuiSubscriptionKind {
+    Parameters,
 }
 
 impl GuiStateNotifier {
     fn new() -> Self {
         Self {
-            subscription: Mutex::new(None),
+            next_subscription_id: AtomicU64::new(1),
+            subscriptions: Mutex::new(HashMap::new()),
         }
     }
 
-    pub(crate) fn set_channel(&self, channel: Channel) {
-        *self.subscription.lock() = Some(GuiSubscription {
-            sender: RunLoop::sender(),
-            channel,
-        });
+    pub(crate) fn subscribe_parameters(&self, channel: Channel) -> GuiSubscriptionId {
+        // id は Rust 側で採番する。wxp の Channel id とは独立させることで、
+        // transport (Channel) と購読 lifecycle を別々に管理できる。
+        let id = GuiSubscriptionId(self.next_subscription_id.fetch_add(1, Ordering::Relaxed));
+        self.subscriptions.lock().insert(
+            id,
+            GuiSubscription {
+                kind: GuiSubscriptionKind::Parameters,
+                sender: RunLoop::sender(),
+                channel,
+            },
+        );
+        id
     }
 
-    pub(crate) fn clear_channel(&self) {
-        *self.subscription.lock() = None;
+    pub(crate) fn unsubscribe(&self, id: GuiSubscriptionId) {
+        self.subscriptions.lock().remove(&id);
+    }
+
+    pub(crate) fn clear_subscriptions(&self) {
+        self.subscriptions.lock().clear();
     }
 
     pub(crate) fn notify_parameter(&self, parameter_id: u32, value: f32) {
-        let Some(subscription) = self.subscription.lock().clone() else {
-            // GUI が開いていなければ通知不要。
+        // lock を握ったまま送信しない。送り先の処理が再び notifier を触りに来ても
+        // deadlock しないように、配信対象を先に clone してから lock を離す。
+        let subscriptions: Vec<_> = self
+            .subscriptions
+            .lock()
+            .values()
+            .filter(|subscription| subscription.kind == GuiSubscriptionKind::Parameters)
+            .cloned()
+            .collect();
+        if subscriptions.is_empty() {
+            // GUI が開いていなければ送り先がないので何もしない。
             return;
-        };
+        }
 
         let payload = parameter_payload(parameter_id, value);
-        // WebView channel は GUI runtime と同じ UI thread 上で扱う必要がある。
-        // host / audio thread から直接 send すると native UI の thread affinity を
-        // 破るので、いったん run loop に戻してから channel に渡す。
-        subscription.sender.send(move || {
-            let _ = subscription.channel.send(payload);
-        });
+        for subscription in subscriptions {
+            let payload = payload.clone();
+            // WebView channel は GUI runtime と同じ UI thread 上で扱う必要がある。
+            // host / audio thread から直接 send すると native UI の thread affinity を
+            // 破るので、いったん run loop に戻してから channel に渡す。
+            subscription.sender.send(move || {
+                let _ = subscription.channel.send(payload);
+            });
+        }
     }
 }
 
@@ -194,12 +258,8 @@ pub(crate) struct WracGainGuiRuntime {
 impl WracGainGuiRuntime {
     /// host が「GUI を開いて」と要求してきたタイミングで `plugin.rs` の closure
     /// から呼ばれる factory。parent window に貼り付ける WebView を作って返す。
-    pub(crate) fn create(
-        shared: Arc<SharedState>,
-        gui_notifier: Arc<GuiStateNotifier>,
-        host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
-        host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
-        resize_handle: WxpGuiResizeHandle,
+    fn create(
+        dependencies: GuiRuntimeDependencies,
         configuration: GuiConfiguration,
         initial_size: GuiSize,
         parent: ParentWindowHandle,
@@ -214,11 +274,11 @@ impl WracGainGuiRuntime {
         let command_handler = Rc::new(WxpCommandHandler::new());
         register_commands(
             command_handler.clone(),
-            shared.clone(),
-            gui_notifier.clone(),
-            host_parameter_edit_notifier,
-            host_gui_resize_requester,
-            resize_handle,
+            dependencies.shared.clone(),
+            dependencies.gui_notifier.clone(),
+            dependencies.host_parameter_edit_notifier,
+            dependencies.host_gui_resize_requester,
+            dependencies.resize_handle,
         );
 
         // WebView の cache/cookie などを置く data directory。
@@ -275,8 +335,8 @@ impl WracGainGuiRuntime {
         // 実装に依存してしまう。host の癖で GUI だけ古い値を出し続ける問題を防ぐ
         // ため、GUI runtime 自身の run loop 上で timer を回して定期的に回収する。
         let gui_update_timer = Timer::new(Duration::from_millis(33), {
-            let shared = shared.clone();
-            let gui_notifier = gui_notifier.clone();
+            let shared = dependencies.shared.clone();
+            let gui_notifier = dependencies.gui_notifier.clone();
             move || {
                 gui_notifier.notify_parameter(PARAM_GAIN_ID, shared.gain());
             }
@@ -284,7 +344,7 @@ impl WracGainGuiRuntime {
         gui_update_timer.start();
 
         Ok(Self {
-            gui_notifier,
+            gui_notifier: dependencies.gui_notifier,
             web_view: Some(web_view),
             wxp_context: Some(wxp_context),
             command_handler,
@@ -330,7 +390,7 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
 impl Drop for WracGainGuiRuntime {
     fn drop(&mut self) {
         // GUI が消えるので、shared state からも channel を外しておく。
-        self.gui_notifier.clear_channel();
+        self.gui_notifier.clear_subscriptions();
         // WebView → WebContext の順で drop。逆だと wry が context 不在で panic することがある。
         self.web_view = None;
         self.wxp_context = None;

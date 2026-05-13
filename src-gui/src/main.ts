@@ -30,6 +30,11 @@ type ParameterState = {
   text: string;
 };
 
+type SubscribeParametersResponse = {
+  ok?: boolean;
+  subscriptionId: number;
+};
+
 // Keep these ids in sync with PARAM_* constants in src-plugin/src/plugin.rs.
 // When adding parameters to the template, add one id here and route its UI in render().
 const PARAM_GAIN_ID = 1;
@@ -63,6 +68,7 @@ let dragStartY = 0;
 let dragStartGain = gain;
 /** Whether a gesture (drag interaction) is in progress. Prevents double-sending. */
 let gestureActive = false;
+let parameterSubscriptionId: number | undefined;
 
 type ResizeResponse = {
   ok?: boolean;
@@ -138,9 +144,13 @@ void (async () => {
     parameterId: PARAM_GAIN_ID,
   });
   render(initialState);
-  // Passing the Channel as an argument lets the Rust side call Channel::send()
-  // to push messages to this callback.
-  await invoke("subscribe_parameters", { channel });
+  // Register the Channel on the Rust side and remember the returned subscriptionId.
+  // Passing that id back on unsubscribe guarantees we tear down only our own
+  // subscription, even if a remount created another one in the meantime.
+  const subscription = await invoke<SubscribeParametersResponse>("subscribe_parameters", {
+    channel,
+  });
+  parameterSubscriptionId = subscription.subscriptionId;
 })();
 
 function clamp(value: number): number {
@@ -425,5 +435,9 @@ gainInput.addEventListener("pointerdown", (event) => event.stopPropagation());
 // End any active gesture and unsubscribe before the WebView closes.
 window.addEventListener("beforeunload", () => {
   endGesture();
-  void invoke("unsubscribe_parameters");
+  if (parameterSubscriptionId !== undefined) {
+    void invoke("unsubscribe_parameters", {
+      subscriptionId: parameterSubscriptionId,
+    });
+  }
 });
