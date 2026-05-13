@@ -38,12 +38,12 @@ use crate::state::SharedState;
 // GUI window のサイズ範囲 (pixel)。host は initial size でウインドウを開き、
 // ユーザーがリサイズしたときは min..=max の範囲にクランプされる。
 const DEFAULT_GUI_SIZE: GuiSize = GuiSize {
-    width: 360,
-    height: 360,
+    width: 320,
+    height: 340,
 };
 const MIN_GUI_SIZE: GuiSize = GuiSize {
-    width: 280,
-    height: 280,
+    width: 320,
+    height: 340,
 };
 const MAX_GUI_SIZE: GuiSize = GuiSize {
     width: 720,
@@ -51,7 +51,7 @@ const MAX_GUI_SIZE: GuiSize = GuiSize {
 };
 
 // resize 時にクランプする論理ピクセルの上下限。
-const MIN_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(280.0, 280.0);
+const MIN_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(320.0, 340.0);
 const MAX_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(720.0, 720.0);
 
 // release build 時のみ、`build.rs` が作った frontend zip を埋め込む。

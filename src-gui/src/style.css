@@ -24,18 +24,19 @@ body {
 }
 
 #app {
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
   position: relative;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 20px;
   overflow: hidden;
 }
 
 .panel {
-  width: min(100%, 320px);
-  padding: 28px 24px 24px;
-  border-radius: 28px;
+  width: min(100%, 300px);
+  padding: 22px 22px 20px;
+  border-radius: 20px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
     rgba(9, 12, 16, 0.72);
@@ -81,7 +82,7 @@ body {
   border: 0;
   background: transparent;
   color: #f7f1e7;
-  font-size: 42px;
+  font-size: 40px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -96,15 +97,15 @@ body {
 }
 
 .knob-zone {
-  margin-top: 18px;
+  margin-top: 16px;
   display: grid;
   place-items: center;
 }
 
 .knob {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: 208px;
+  height: 208px;
   border: 0;
   border-radius: 50%;
   background:
@@ -139,14 +140,14 @@ body {
 .knob-indicator {
   position: absolute;
   left: 50%;
-  top: 18px;
+  top: 17px;
   width: 6px;
-  height: 64px;
+  height: 60px;
   margin-left: -3px;
   border-radius: 999px;
   background: linear-gradient(180deg, #fff6e5, #ffb85c);
   box-shadow: 0 0 18px rgba(255, 184, 92, 0.28);
-  transform-origin: 50% 92px;
+  transform-origin: 50% 87px;
 }
 
 .resize-grip {

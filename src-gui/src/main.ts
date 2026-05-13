@@ -309,8 +309,9 @@ knob.addEventListener("wheel", (event) => {
   );
 });
 
-dbLabel.addEventListener("click", (event) => {
+dbLabel.addEventListener("pointerdown", (event) => {
   event.stopPropagation();
+  event.preventDefault();
   enterTextInput();
 });
 
