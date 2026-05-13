@@ -66,15 +66,19 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     }),
 };
 
-/// plugin 1 instance を表す型。`PluginCore` trait の実装本体。
+/// plugin 1 instance を表す型。
 ///
 /// host (DAW) が plugin を読み込むごとにこの struct が 1 つずつ作られる。
 /// audio 処理本体は `activate` で別途 `Processor` として切り出すので、
-/// この struct 自身は lifecycle と factory の役目に徹する。
-pub(crate) struct WxpExampleGainCore {
+/// この struct は lifecycle と、host に公開する extension trait 群を実装する。
+pub(crate) struct WxpExampleGainPlugin {
     // audio thread / GUI / host から共有して触る状態。
     // 詳細は `SharedState` の doc を参照。
     shared: Arc<SharedState>,
+    // 現在の audio channel 数 (mono なら 1、stereo なら 2)。
+    // configurable audio ports は adapter 側で inactive 時だけ受け付けるので、
+    // audio thread と共有する atomic state にはしない。
+    audio_channel_count: u32,
     // WebView による GUI を CLAP の GUI extension として扱うための helper。
     // `Arc` にしているのは host が `plugin_gui` を複数回問い合わせるため。
     gui: Arc<WxpGuiController>,
@@ -93,13 +97,15 @@ pub(crate) struct SavedPluginState {
     pub(crate) gain: f32,
 }
 
-impl WxpExampleGainCore {
+impl WxpExampleGainPlugin {
     pub(crate) fn new(context: PluginCoreContext) -> Self {
         let shared = Arc::new(SharedState::new());
         let gui = create_gui_integration(shared.clone(), context.host_parameter_edit_notifier);
 
         Self {
             shared,
+            // template の default は stereo。host が configure してくれば書き換わる。
+            audio_channel_count: 2,
             gui: gui.controller,
             gui_notifier: gui.notifier,
         }
@@ -111,7 +117,7 @@ impl WxpExampleGainCore {
 /// host が新しい plugin instance を必要としたタイミングで adapter が呼び出し、
 /// trait object として `PluginCore` を返す。実装の差し替えはここを変えるだけ。
 pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCore> {
-    Box::new(WxpExampleGainCore::new(context))
+    Box::new(WxpExampleGainPlugin::new(context))
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +126,7 @@ pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCo
 // `PluginCore` は plugin 一個分の lifecycle 全体を見る trait。各メソッドが
 // 「この plugin は ○○ をサポートします」という宣言にもなっており、対応しない
 // 機能では `None` を返せば OK。
-impl PluginCore for WxpExampleGainCore {
+impl PluginCore for WxpExampleGainPlugin {
     /// host が audio 処理を開始する直前に呼ばれる。
     /// ここで返した `Processor` が以降 audio thread 上で `process()` される。
     fn activate(&mut self, _context: ActivateContext) -> PluginResult<Box<dyn Processor>> {
@@ -163,14 +169,14 @@ impl PluginCore for WxpExampleGainCore {
 // PluginAudioPorts: audio 入出力 port の宣言
 // ---------------------------------------------------------------------------
 // gain plugin なので「main in 1 つ」「main out 1 つ」のシンプルな構成。
-// channel 数は `SharedState::audio_channel_count` から動的に取り出す。
-impl PluginAudioPorts for WxpExampleGainCore {
+// channel 数は configurable audio ports 経由で host が変更できる。
+impl PluginAudioPorts for WxpExampleGainPlugin {
     fn audio_port_count(&self, _is_input: bool) -> u32 {
         1
     }
 
     fn audio_port_info(&self, index: u32, is_input: bool) -> Option<AudioPortInfo> {
-        let channel_count = self.shared.audio_channel_count();
+        let channel_count = self.audio_channel_count;
         (index == 0).then_some(if is_input {
             AudioPortInfo {
                 id: 1,
@@ -204,12 +210,12 @@ impl PluginAudioPorts for WxpExampleGainCore {
 // ---------------------------------------------------------------------------
 // 例えば host が「stereo から mono に切り替えたい」と提案してきたとき、
 // plugin はそれを受理できるかを `can_apply_*` で答え、`apply_*` で実際に反映する。
-impl PluginConfigurableAudioPorts for WxpExampleGainCore {
+impl PluginConfigurableAudioPorts for WxpExampleGainPlugin {
     fn can_apply_audio_port_configuration(
         &self,
         requests: &[AudioPortConfigurationRequest],
     ) -> bool {
-        let accepted = resolve_audio_channel_count(self.shared.audio_channel_count(), requests);
+        let accepted = resolve_audio_channel_count(self.audio_channel_count, requests);
         accepted.is_some()
     }
 
@@ -217,14 +223,11 @@ impl PluginConfigurableAudioPorts for WxpExampleGainCore {
         &mut self,
         requests: &[AudioPortConfigurationRequest],
     ) -> PluginResult<()> {
-        // gain DSP 自体は channel 数に依存しない実装になっているが、CLAP の port
-        // metadata は clap-wrapper が後から渡してくる host buffer と一致している
-        // 必要がある。negotiate した channel 数を shared state に保存し、後続の
-        // port 問い合わせや新しい Processor からも同じ値が見えるようにする。
-        let channel_count =
-            resolve_audio_channel_count(self.shared.audio_channel_count(), requests)
-                .ok_or(PluginError::InvalidState)?;
-        self.shared.set_audio_channel_count(channel_count);
+        // adapter 側が Processor の存在中は configuration apply を拒否するので、
+        // core の通常 field を更新すれば後続の port 問い合わせと次回 activate に反映される。
+        let channel_count = resolve_audio_channel_count(self.audio_channel_count, requests)
+            .ok_or(PluginError::InvalidState)?;
+        self.audio_channel_count = channel_count;
         Ok(())
     }
 }
@@ -234,7 +237,7 @@ impl PluginConfigurableAudioPorts for WxpExampleGainCore {
 // ---------------------------------------------------------------------------
 // host から見える parameter API。今回は gain ひとつだけなので、id が
 // `PARAM_GAIN_ID` 以外の問い合わせはすべて `InvalidParameter` を返す。
-impl PluginParameters for WxpExampleGainCore {
+impl PluginParameters for WxpExampleGainPlugin {
     fn parameter_count(&self) -> u32 {
         1
     }
@@ -257,7 +260,7 @@ impl PluginParameters for WxpExampleGainCore {
     }
 
     /// host が「今この parameter の値はいくつ?」と尋ねてきたときに答える。
-    fn parameter_base_value(&self, parameter_id: u32) -> PluginResult<f64> {
+    fn parameter_value(&self, parameter_id: u32) -> PluginResult<f64> {
         if parameter_id != PARAM_GAIN_ID {
             return Err(PluginError::InvalidParameter);
         }
@@ -270,7 +273,6 @@ impl PluginParameters for WxpExampleGainCore {
             return Err(PluginError::InvalidParameter);
         }
         let gain = self.shared.set_gain(event.value);
-        self.shared.mark_gui_notification_pending();
         Ok(gain as f64)
     }
 
@@ -304,7 +306,7 @@ impl PluginParameters for WxpExampleGainCore {
 // DAW がプロジェクトを保存するときに `save_state` が、開くときに `restore_state` が
 // 呼ばれる。bytes フォーマットは plugin 側で自由に決められるので、ここでは
 // JSON にしておく (人が読めるとデバッグが楽)。
-impl PluginStateSupport for WxpExampleGainCore {
+impl PluginStateSupport for WxpExampleGainPlugin {
     fn save_state(&mut self) -> PluginResult<PluginState> {
         let bytes = serde_json::to_vec(&SavedPluginState {
             gain: self.shared.gain(),

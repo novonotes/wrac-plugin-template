@@ -97,7 +97,7 @@ unsafe extern "C" fn params_get_value(
         let Some(parameters) = core.parameters() else {
             return false;
         };
-        let Ok(value) = parameters.parameter_base_value(param_id) else {
+        let Ok(value) = parameters.parameter_value(param_id) else {
             return false;
         };
         unsafe {

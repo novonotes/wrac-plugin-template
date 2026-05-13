@@ -324,7 +324,8 @@ pub trait PluginNotePorts {
 pub trait PluginParameters {
     fn parameter_count(&self) -> u32;
     fn parameter_info(&self, index: u32) -> Option<ParameterInfo>;
-    fn parameter_base_value(&self, parameter_id: u32) -> PluginResult<f64>;
+    /// Returns the parameter's current plain value, corresponding to CLAP `get_value`.
+    fn parameter_value(&self, parameter_id: u32) -> PluginResult<f64>;
     fn apply_parameter_value(&self, event: ParameterValueEvent) -> PluginResult<f64>;
     fn parameter_value_to_text(&self, parameter_id: u32, value: f64) -> PluginResult<String>;
     fn parameter_text_to_value(&self, parameter_id: u32, text: &str) -> PluginResult<f64>;

@@ -64,7 +64,6 @@ impl Processor for WxpExampleGainAudioProcessor {
             if let InputEvent::ParamValue(event) = event {
                 if event.parameter_id == PARAM_GAIN_ID {
                     gain = self.shared.set_gain(event.value);
-                    self.shared.mark_gui_notification_pending();
                 }
             }
         }

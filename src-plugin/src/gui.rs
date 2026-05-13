@@ -173,7 +173,7 @@ pub(crate) struct WxpExampleGainGuiRuntime {
     wxp_context: Option<WebContext>,
     // frontend からの command を受け取って Rust 側関数を呼ぶ dispatcher。
     command_handler: Rc<WxpCommandHandler>,
-    // automation 等で立った dirty flag を定期的に GUI に反映するための timer。
+    // shared state の現在値を定期的に GUI に反映するための timer。
     gui_update_timer: Timer,
     // 現在の論理サイズ。
     gui_size: LogicalSize<f64>,
@@ -252,7 +252,9 @@ impl WxpExampleGainGuiRuntime {
             .build_as_child(&parent)
             .map_err(|_| PluginError::Message("failed to build webview"))?;
 
-        // 33ms ≒ 30Hz で「automation で値が動いたか?」を確認し、必要なら GUI に反映する。
+        // 33ms ≒ 30Hz で現在値を GUI に流す。サンプルでは値が変わったかの dirty
+        // flag を持たず、GUI runtime が shared state を読む形にしておく方が構造を
+        // 追いやすい。
         //
         // 補足: CLAP には `request_callback()` で main thread に処理を戻す API も
         // あるが、clap-wrapper 経由で VST3/AU/AAX に流すと host ごとの dispatch
@@ -262,9 +264,7 @@ impl WxpExampleGainGuiRuntime {
             let shared = shared.clone();
             let gui_notifier = gui_notifier.clone();
             move || {
-                if shared.take_pending_gui_notification() {
-                    gui_notifier.notify_gain(shared.gain());
-                }
+                gui_notifier.notify_gain(shared.gain());
             }
         });
         gui_update_timer.start();
