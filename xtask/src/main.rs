@@ -7,13 +7,13 @@ use std::process::Command;
 
 use clap::{Args, Parser, Subcommand};
 
-const PLUGIN_NAME: &str = "WXP Example Gain";
-const CLAP_BUNDLE_NAME: &str = "WXP Example Gain.clap";
-const VST3_BUNDLE_NAME: &str = "WXP Example Gain.vst3";
-const AU_BUNDLE_NAME: &str = "WXP Example Gain.component";
+const PLUGIN_NAME: &str = "WRAC Gain";
+const CLAP_BUNDLE_NAME: &str = "WRAC Gain.clap";
+const VST3_BUNDLE_NAME: &str = "WRAC Gain.vst3";
+const AU_BUNDLE_NAME: &str = "WRAC Gain.component";
 const AU_TYPE: &str = "aufx";
-const AU_SUBTYPE: &str = "WxGn";
-const AU_MANUFACTURER: &str = "NvNt";
+const AU_SUBTYPE: &str = "WtGn";
+const AU_MANUFACTURER: &str = "YrCo";
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 

@@ -1,6 +1,6 @@
 # src-plugin
 
-`src-plugin` は WXP Example Gain 固有の plugin crate です。
+`src-plugin` は WRAC Gain 固有の plugin crate です。
 
 この crate には gain parameter、state serialization、audio processor、WebView の画面内容と command handler だけを置きます。CLAP C ABI、host callback、raw window handle 変換、run loop 上の GUI runtime 保持は下位 crate の責務です。
 

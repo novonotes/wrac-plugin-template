@@ -1,5 +1,5 @@
 [package]
-name = "wxp_example_gain_plugin"
+name = "wrac_gain_plugin"
 version = "0.1.0"
 edition = "2024"
 description = "Example gain plugin for the WRAC plugin template"

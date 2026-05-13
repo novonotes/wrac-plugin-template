@@ -1,4 +1,4 @@
-//! WXP Example Gain Plugin。
+//! WRAC Gain Plugin。
 //!
 //! このテンプレートを使うときの読み始めの crate です。シンプルな gain
 //! (音量) plugin の最小実装が入っており、`src-plugin` には製品固有のロジック

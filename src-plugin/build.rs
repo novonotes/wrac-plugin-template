@@ -31,8 +31,8 @@ fn main() {
         .expect("src-plugin must have a parent directory")
         .join("src-gui")
         .join("dist");
-    let out_zip = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"))
-        .join("wxp_example_gain_plugin_gui.zip");
+    let out_zip =
+        PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("wrac_gain_plugin_gui.zip");
 
     // release build の前に `npm run build` を回し忘れていた場合は早めに止める。
     if !gui_dist_dir.exists() {

@@ -16,7 +16,7 @@ use crate::plugin::{DEFAULT_GAIN, PARAM_GAIN_ID, clamp_gain};
 /// - GUI thread   : ユーザーが slider を動かして gain を書き換える
 /// - host thread  : [`wrac_clap_adapter::PluginParameters::parameter_value`] などで host が値を尋ねてくる
 ///
-/// そのため値の "Single Source of Truth (SoT)" を [`crate::plugin::WxpExampleGainPlugin`] の私有
+/// そのため値の "Single Source of Truth (SoT)" を [`crate::plugin::WracGainPlugin`] の私有
 /// field に置くのではなく、[`std::sync::Arc`]<[`SharedState`]> として共有する。lock 不要な
 /// [`AtomicF32`] を使うことで audio thread を待たせない実装になっている。
 pub(crate) struct SharedState {

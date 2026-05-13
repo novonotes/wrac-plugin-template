@@ -1,4 +1,4 @@
-//! WXP Example Gain の host-facing な plugin core 実装。
+//! WRAC Gain の host-facing な plugin core 実装。
 //!
 //! このファイルは host から見える plugin の契約をまとめる場所です。やっていることを
 //! 大雑把に並べると:
@@ -25,13 +25,13 @@ use wrac_clap_adapter::{
 };
 use wrac_wxp_gui::WxpGuiController;
 
-use crate::audio::WxpExampleGainAudioProcessor;
+use crate::audio::WracGainAudioProcessor;
 use crate::gui::{GuiStateNotifier, create_gui_integration};
 use crate::state::SharedState;
 
 // plugin を識別する reverse-DNS 形式の ID。DAW が plugin を一意に判別するために
 // 使うので、自分の plugin を作るときはここを必ず変更する。
-pub(crate) const PLUGIN_ID: &str = "com.novo-notes.wxp-example-gain";
+pub(crate) const PLUGIN_ID: &str = "com.your-company.wrac-gain";
 
 // 各 parameter にも host 内で一意の ID を割り当てる必要がある。
 // 新しい parameter を追加するときは、ここに `PARAM_*_ID` を増やし、下の
@@ -48,8 +48,8 @@ pub(crate) const MAX_GAIN: f32 = 2.0;
 // `wrac_clap_adapter` がこれを CLAP / AUv2 の descriptor 構造体へと変換する。
 pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     id: PLUGIN_ID,
-    name: "WXP Example Gain",
-    vendor: "NOVO NOTES",
+    name: "WRAC Gain",
+    vendor: "Your Company",
     url: "",
     manual_url: "",
     support_url: "",
@@ -60,10 +60,10 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     // manufacturer_code と plugin_subtype は 4 文字 ASCII の固有 ID で、
     // 同じ会社内で重複しないように決める必要がある。
     auv2: Some(Auv2Descriptor {
-        manufacturer_code: *b"NvNt",
-        manufacturer_name: "NOVO NOTES",
+        manufacturer_code: *b"YrCo",
+        manufacturer_name: "Your Company",
         plugin_type: *b"aufx", // "aufx" = audio effect
-        plugin_subtype: *b"WxGn",
+        plugin_subtype: *b"WtGn",
     }),
 };
 
@@ -72,7 +72,7 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
 /// host (DAW) が plugin を読み込むごとにこの struct が 1 つずつ作られる。
 /// audio 処理本体は [`PluginCore::activate`] で別途 [`Processor`] として切り出すので、
 /// この struct は lifecycle と、host に公開する extension trait 群を実装する。
-pub(crate) struct WxpExampleGainPlugin {
+pub(crate) struct WracGainPlugin {
     // audio thread / GUI / host から共有して触る状態。
     // 詳細は `SharedState` の doc を参照。
     shared: Arc<SharedState>,
@@ -98,7 +98,7 @@ pub(crate) struct SavedPluginState {
     pub(crate) gain: f32,
 }
 
-impl WxpExampleGainPlugin {
+impl WracGainPlugin {
     pub(crate) fn new(context: PluginCoreContext) -> Self {
         let shared = Arc::new(SharedState::new());
         let gui = create_gui_integration(shared.clone(), context.host_parameter_edit_notifier);
@@ -118,20 +118,18 @@ impl WxpExampleGainPlugin {
 /// host が新しい plugin instance を必要としたタイミングで adapter が呼び出し、
 /// trait object として [`PluginCore`] を返す。実装の差し替えはここを変えるだけ。
 pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCore> {
-    Box::new(WxpExampleGainPlugin::new(context))
+    Box::new(WracGainPlugin::new(context))
 }
 
 // ---------------------------------------------------------------------------
 // PluginCore: plugin の lifecycle と、提供する extension の宣言
 // ---------------------------------------------------------------------------
 // `PluginCore` は plugin 一個分の lifecycle 全体を見る trait。
-impl PluginCore for WxpExampleGainPlugin {
+impl PluginCore for WracGainPlugin {
     /// host が audio 処理を開始する直前に呼ばれる。
     /// ここで返した `Processor` が以降 audio thread 上で `process()` される。
     fn activate(&mut self, _context: ActivateContext) -> PluginResult<Box<dyn Processor>> {
-        Ok(Box::new(WxpExampleGainAudioProcessor::new(
-            self.shared.clone(),
-        )))
+        Ok(Box::new(WracGainAudioProcessor::new(self.shared.clone())))
     }
 
     /// host が audio 処理を停止したときに呼ばれる。
@@ -169,7 +167,7 @@ impl PluginCore for WxpExampleGainPlugin {
 // ---------------------------------------------------------------------------
 // gain plugin なので「main in 1 つ」「main out 1 つ」のシンプルな構成。
 // channel 数は configurable audio ports 経由で host が変更できる。
-impl PluginAudioPorts for WxpExampleGainPlugin {
+impl PluginAudioPorts for WracGainPlugin {
     fn audio_port_count(&self, _is_input: bool) -> u32 {
         1
     }
@@ -209,7 +207,7 @@ impl PluginAudioPorts for WxpExampleGainPlugin {
 // ---------------------------------------------------------------------------
 // 例えば host が「stereo から mono に切り替えたい」と提案してきたとき、
 // plugin はそれを受理できるかを `can_apply_*` で答え、`apply_*` で実際に反映する。
-impl PluginConfigurableAudioPorts for WxpExampleGainPlugin {
+impl PluginConfigurableAudioPorts for WracGainPlugin {
     fn can_apply_audio_port_configuration(
         &self,
         requests: &[AudioPortConfigurationRequest],
@@ -236,7 +234,7 @@ impl PluginConfigurableAudioPorts for WxpExampleGainPlugin {
 // ---------------------------------------------------------------------------
 // host から見える parameter API。template 利用時に parameter を増やす場合は、
 // ここが host に公開する schema と文字列表現の追加ポイントになる。
-impl PluginParameters for WxpExampleGainPlugin {
+impl PluginParameters for WracGainPlugin {
     fn parameter_count(&self) -> u32 {
         // 新しい parameter を追加するときは、この数と `parameter_info()` の match を
         // 一緒に更新する。
@@ -286,7 +284,7 @@ impl PluginParameters for WxpExampleGainPlugin {
 // DAW がプロジェクトを保存するときに `save_state` が、開くときに `restore_state` が
 // 呼ばれる。bytes フォーマットは plugin 側で自由に決められるので、ここでは
 // JSON にしておく (人が読めるとデバッグが楽)。
-impl PluginStateSupport for WxpExampleGainPlugin {
+impl PluginStateSupport for WracGainPlugin {
     fn save_state(&mut self) -> PluginResult<PluginState> {
         let bytes = serde_json::to_vec(&SavedPluginState {
             gain: self.shared.gain(),

@@ -1,7 +1,7 @@
 #!/bin/bash
-# uninstall.sh - Remove installed WXP Example Gain plugins
+# uninstall.sh - Remove installed WRAC Gain plugins
 #
-# Removes the WXP Example Gain plugin files installed by this repository's
+# Removes the WRAC Gain plugin files installed by this repository's
 # build/install scripts.
 #
 # Usage:
@@ -117,7 +117,7 @@ forget_macos_receipt() {
     sudo pkgutil --forget "$package_id" >/dev/null
 }
 
-echo "Uninstalling WXP Example Gain plugins"
+echo "Uninstalling WRAC Gain plugins"
 if [ "$DRY_RUN" = true ]; then
     echo "dry-run: no files will be removed"
 fi
@@ -125,26 +125,26 @@ echo ""
 
 case "$OS" in
     macos)
-        remove_path "$HOME/Library/Audio/Plug-Ins/CLAP/WXP Example Gain.clap"
-        remove_path "$HOME/Library/Audio/Plug-Ins/VST3/WXP Example Gain.vst3"
-        remove_path "$HOME/Library/Audio/Plug-Ins/Components/WXP Example Gain.component"
+        remove_path "$HOME/Library/Audio/Plug-Ins/CLAP/WRAC Gain.clap"
+        remove_path "$HOME/Library/Audio/Plug-Ins/VST3/WRAC Gain.vst3"
+        remove_path "$HOME/Library/Audio/Plug-Ins/Components/WRAC Gain.component"
 
-        remove_path "/Library/Audio/Plug-Ins/VST3/WXP Example Gain.vst3" true
-        remove_path "/Library/Audio/Plug-Ins/Components/WXP Example Gain.component" true
+        remove_path "/Library/Audio/Plug-Ins/VST3/WRAC Gain.vst3" true
+        remove_path "/Library/Audio/Plug-Ins/Components/WRAC Gain.component" true
 
-        forget_macos_receipt "WXP_EXAMPLE_GAIN_VST3"
-        forget_macos_receipt "WXP_EXAMPLE_GAIN_AU"
+        forget_macos_receipt "WRAC_GAIN_VST3"
+        forget_macos_receipt "WRAC_GAIN_AU"
         ;;
     windows)
-        remove_path "${LOCALAPPDATA}/Programs/Common/CLAP/WXP Example Gain.clap"
+        remove_path "${LOCALAPPDATA}/Programs/Common/CLAP/WRAC Gain.clap"
 
         if [ -n "${COMMONPROGRAMFILES:-}" ]; then
-            remove_path "${COMMONPROGRAMFILES}/VST3/WXP Example Gain.vst3"
+            remove_path "${COMMONPROGRAMFILES}/VST3/WRAC Gain.vst3"
         fi
-        remove_path "${LOCALAPPDATA}/Programs/Common/VST3/WXP Example Gain.vst3"
+        remove_path "${LOCALAPPDATA}/Programs/Common/VST3/WRAC Gain.vst3"
         ;;
     linux)
-        remove_path "$HOME/.clap/WXP Example Gain.clap"
+        remove_path "$HOME/.clap/WRAC Gain.clap"
         ;;
 esac
 

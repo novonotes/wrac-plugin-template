@@ -66,7 +66,7 @@ fi
 echo "Building VST3 / AU wrapper..."
 (
     cd "$WRAPPER_DIR"
-    ./build_wrapper_plugin.sh "$TARGET_DIR/bundled/WXP Example Gain.clap" "WXP Example Gain" "$BUILD_CONFIG"
+    ./build_wrapper_plugin.sh "$TARGET_DIR/bundled/WRAC Gain.clap" "WRAC Gain" "$BUILD_CONFIG"
 )
 
 echo "VST3 / AU wrapper build complete"

@@ -25,6 +25,9 @@ The WRAC stack is a technology stack for audio plugin development, built around 
 
 ## Contents
 
+The code in this repository implements a simple plugin called WRAC Gain.
+It is also structured so it can be used as a template.
+
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
 - CLAP plugin implementation in Rust using `clap-sys`
 - VST3 and AU plugin builds via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
@@ -37,7 +40,7 @@ cargo xtask build --release
 cargo xtask build --validate
 ```
 
-On macOS, `--validate` runs the VST3 validator and `auval -v aufx WxGn NvNt`.
+On macOS, `--validate` runs the VST3 validator and `auval -v aufx WtGn YrCo`.
 
 
 ## Setting Up a New Project

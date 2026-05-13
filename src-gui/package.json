@@ -1,5 +1,5 @@
 {
-  "name": "wxp-example-gain-plugin-gui",
+  "name": "wrac-gain-plugin-gui",
   "private": true,
   "version": "0.1.0",
   "type": "module",

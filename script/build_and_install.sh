@@ -69,7 +69,7 @@ if [[ "$OS" != "linux" && "${CLAP_ONLY:-0}" != "1" ]]; then
     echo "4. Installing VST3 / AU wrapper..."
     (
         cd "$WRAPPER_DIR"
-        ./install_wrapper_plugin.sh "$TARGET_DIR/bundled/WXP Example Gain.clap" "WXP Example Gain" "$BUILD_CONFIG"
+        ./install_wrapper_plugin.sh "$TARGET_DIR/bundled/WRAC Gain.clap" "WRAC Gain" "$BUILD_CONFIG"
     )
 
     if [[ "${BUILD_STANDALONE:-1}" == "1" ]]; then
@@ -92,13 +92,13 @@ fi
 echo ""
 echo -e "${GREEN}gain_plugin installation complete!${NC}"
 echo "Installed plugins:"
-echo "  - WXP Example Gain.clap (CLAP)"
+echo "  - WRAC Gain.clap (CLAP)"
 if [[ "$OS" != "linux" && "${CLAP_ONLY:-0}" != "1" ]]; then
-    echo "  - WXP Example Gain.vst3 (VST3)"
+    echo "  - WRAC Gain.vst3 (VST3)"
     if [[ "$OS" == "macos" ]]; then
-        echo "  - WXP Example Gain.component (AU)"
+        echo "  - WRAC Gain.component (AU)"
     fi
     if [[ "${BUILD_STANDALONE:-1}" == "1" ]]; then
-        echo "  - WXP Example Gain Standalone (build only)"
+        echo "  - WRAC Gain Standalone (build only)"
     fi
 fi

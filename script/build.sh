@@ -18,7 +18,7 @@
 #   Debug|Release - Build configuration (default: Debug)
 #
 # Output:
-#   target/bundled/WXP Example Gain.clap
+#   target/bundled/WRAC Gain.clap
 
 set -e  # Stop script on error
 set -u  # Treat unset variables as an error
@@ -100,14 +100,14 @@ echo "Building GUI..."
 # Step 2: Rust plugin build
 # ---------------------------------------------------------------------------
 # Shared libraries produced by cargo:
-#   macOS:   libwxp_example_gain_plugin.dylib
-#   Windows: wxp_example_gain_plugin.dll
-#   Linux:   libwxp_example_gain_plugin.so
+#   macOS:   libwrac_gain_plugin.dylib
+#   Windows: wrac_gain_plugin.dll
+#   Linux:   libwrac_gain_plugin.so
 echo "Building plugin..."
 (
     if [ "$OS" = "macos" ]; then
         MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}" \
-        WRY_OBJC_SUFFIX="${WRY_OBJC_SUFFIX:-WxpExampleGainPlugin}" \
+        WRY_OBJC_SUFFIX="${WRY_OBJC_SUFFIX:-WracGainPlugin}" \
         cargo build --target-dir "$TARGET_DIR" --manifest-path "$PLUGIN_ROOT/src-plugin/Cargo.toml" $CARGO_BUILD_FLAG
     else
         cargo build --target-dir "$TARGET_DIR" --manifest-path "$PLUGIN_ROOT/src-plugin/Cargo.toml" $CARGO_BUILD_FLAG
@@ -121,7 +121,7 @@ echo "Building plugin..."
 #   macOS:   macOS bundle (directory structure + Info.plist)
 #   Windows: rename .dll to .clap
 #   Linux:   rename .so to .clap
-PLUGIN_NAME="WXP Example Gain.clap"
+PLUGIN_NAME="WRAC Gain.clap"
 BUNDLE_DIR="$TARGET_DIR/bundled/$PLUGIN_NAME"
 
 echo "Creating bundle structure..."
@@ -142,15 +142,15 @@ case "$OS" in
 <plist>
   <dict>
     <key>CFBundleExecutable</key>
-    <string>WXP Example Gain</string>
+    <string>WRAC Gain</string>
     <key>CFBundleIconFile</key>
     <string></string>
     <key>CFBundleIdentifier</key>
-    <string>com.novo-notes.wxp-example-gain</string>
+    <string>com.your-company.wrac-gain</string>
     <key>CFBundleName</key>
-    <string>WXP Example Gain</string>
+    <string>WRAC Gain</string>
     <key>CFBundleDisplayName</key>
-    <string>WXP Example Gain</string>
+    <string>WRAC Gain</string>
     <key>CFBundlePackageType</key>
     <string>BNDL</string>
     <key>CFBundleSignature</key>
@@ -173,14 +173,14 @@ EOF
 
         # Copy the .dylib under the binary name without extension.
         # The CLAP host looks for the binary by the name specified in CFBundleExecutable.
-        cp "$BUILD_DIR/libwxp_example_gain_plugin.dylib" \
-            "$BUNDLE_DIR/Contents/MacOS/WXP Example Gain"
+        cp "$BUILD_DIR/libwrac_gain_plugin.dylib" \
+            "$BUNDLE_DIR/Contents/MacOS/WRAC Gain"
 
         # install_name_tool: rewrite the LC_ID_DYLIB (the dylib's self-identification path).
         # Using "@loader_path/..." allows self-referencing via a relative path within the bundle,
         # making it a portable bundle that does not depend on the installation path.
-        install_name_tool -id "@loader_path/WXP Example Gain" \
-            "$BUNDLE_DIR/Contents/MacOS/WXP Example Gain"
+        install_name_tool -id "@loader_path/WRAC Gain" \
+            "$BUNDLE_DIR/Contents/MacOS/WRAC Gain"
 
         # Ad-hoc sign the bundle so macOS validators and wrapper bundles can
         # verify nested code consistently during local development.
@@ -189,12 +189,12 @@ EOF
     windows)
         # On Windows, simply place the .dll as-is with the .clap extension.
         mkdir -p "$TARGET_DIR/bundled"
-        cp "$BUILD_DIR/wxp_example_gain_plugin.dll" "$BUNDLE_DIR"
+        cp "$BUILD_DIR/wrac_gain_plugin.dll" "$BUNDLE_DIR"
         ;;
     linux)
         # On Linux, similarly place the .so with the .clap extension.
         mkdir -p "$TARGET_DIR/bundled"
-        cp "$BUILD_DIR/libwxp_example_gain_plugin.so" "$BUNDLE_DIR"
+        cp "$BUILD_DIR/libwrac_gain_plugin.so" "$BUNDLE_DIR"
         ;;
 esac
 

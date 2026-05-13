@@ -24,17 +24,17 @@ use crate::state::SharedState;
 /// 中身は共有 state への [`Arc`] だけ。[`Processor`] instance は host が
 /// [`wrac_clap_adapter::PluginCore::deactivate`] するまで生き続け、その間に何度も
 /// [`Processor::process`] が呼ばれる。
-pub(crate) struct WxpExampleGainAudioProcessor {
+pub(crate) struct WracGainAudioProcessor {
     shared: Arc<SharedState>,
 }
 
-impl WxpExampleGainAudioProcessor {
+impl WracGainAudioProcessor {
     pub(crate) fn new(shared: Arc<SharedState>) -> Self {
         Self { shared }
     }
 }
 
-impl Processor for WxpExampleGainAudioProcessor {
+impl Processor for WracGainAudioProcessor {
     /// 1 ブロック分の音を処理する。host から渡される `context` には:
     /// - `audio` : 入出力 buffer (channel ごとの sample 列)
     /// - `events.input` : このブロック内で発生する parameter event の列

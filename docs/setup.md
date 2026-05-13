@@ -54,12 +54,14 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 
 | Kind | Current value | Example replacement |
 |------|--------------|---------------------|
-| Rust crate name | `wxp_example_gain_plugin` | `my_plugin` |
-| Plugin display name | `WXP Example Gain` | `My Plugin` |
-| Plugin ID (reverse-domain recommended) | `com.novo-notes.wxp-example-gain` | `com.your-company.my-plugin` |
-| kebab-case name in GUI / scripts / etc. | `wxp-example-gain-plugin` | `my-plugin` |
+| Rust crate name | `wrac_gain_plugin` | `my_plugin` |
+| Plugin display name | `WRAC Gain` | `My Plugin` |
+| Plugin ID (reverse-domain recommended) | `com.your-company.wrac-gain` | `com.your-company.my-plugin` |
+| kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
+| Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
 > **Important:** The plugin ID must be globally unique. It cannot be changed once published.
+> The repository URL points to this template by default. After generating a new project, update it to your own repository if you publish the crate metadata.
 
 **Steps:**
 
@@ -68,13 +70,16 @@ Check the target files and remaining count.
 Example using rg:
 
 ```sh
-rg --hidden "wxp_example_gain_plugin|WXP Example Gain|com\.novo-notes\.wxp-example-gain|wxp-example-gain-plugin" \
+rg --hidden "wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin" \
     --glob '!node_modules' --glob '!dist' --glob '!*.lock' \
-    --glob '!package-lock.json' --glob '!*.zip' --glob '!docs/setup.md'
+    --glob '!package-lock.json' --glob '!*.zip' \
+    --glob '!docs/setup.md' --glob '!docs/setup_JA.md'
+
+rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' --glob 'Cargo.toml'
 ```
 
 Once confirmed, **replace all occurrences** according to the table above.
-Re-run the same command after replacing and verify the output is zero matches.
+Re-run the same commands after replacing and verify the output is zero matches.
 
 ### 3. Build & Install
 

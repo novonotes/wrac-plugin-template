@@ -1,5 +1,5 @@
 /**
- * WXP Example Gain Plugin — Frontend (JavaScript side)
+ * WRAC Gain Plugin — Frontend (JavaScript side)
  *
  * The GUI of a wxp plugin is implemented as a regular web application.
  * Communication with the Rust side uses invoke() and Channel

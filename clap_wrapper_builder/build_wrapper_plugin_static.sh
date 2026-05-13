@@ -59,7 +59,7 @@ usage() {
     echo "Examples:"
     echo "  $0 example_plugin_nih.clap \"Example Plugin NIH\" Release"
     echo "  $0 \"XDevice Editor.clap\" \"XDevice Editor\" Debug"
-    echo "  $0 libexample_plugin_clack.a \"Example Plugin Clack Static\" Debug com.novo-notes.pulsus-gain-clack"
+    echo "  $0 libexample_plugin_clack.a \"Example Plugin Clack Static\" Debug com.your-company.example-plugin-clack"
     exit 1
 }
 

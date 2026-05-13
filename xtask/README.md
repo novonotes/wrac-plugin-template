@@ -12,5 +12,5 @@ cargo xtask validate
 
 `build` creates the CLAP bundle first and then builds VST3/AU wrappers through
 `clap_wrapper_builder`. On macOS, `validate` runs Steinberg's VST3 validator and
-`auval -v aufx WxGn NvNt`.
+`auval -v aufx WtGn YrCo`.
 

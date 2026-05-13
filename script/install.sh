@@ -45,7 +45,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PLUGIN_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 TARGET_DIR="${CARGO_TARGET_DIR:-$PLUGIN_ROOT/target}"
 
-BUNDLE_NAME="WXP Example Gain.clap"
+BUNDLE_NAME="WRAC Gain.clap"
 BUNDLE_PATH="$TARGET_DIR/bundled/${BUNDLE_NAME}"
 
 # ---------------------------------------------------------------------------

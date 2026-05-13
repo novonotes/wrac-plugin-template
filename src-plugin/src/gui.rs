@@ -1,4 +1,4 @@
-//! WXP Example Gain 固有の WebView GUI runtime。
+//! WRAC Gain 固有の WebView GUI runtime。
 //!
 //! GUI 本体は HTML/CSS/TypeScript で書かれており (`src-gui/` 以下)、
 //! これを embed した WebView を host window に貼り付けるのがこの module の
@@ -56,8 +56,7 @@ const MAX_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(720.0, 720.0);
 // release build 時のみ、`build.rs` が作った frontend zip を埋め込む。
 // debug build では Vite dev server (`http://127.0.0.1:5173/`) を見るので不要。
 #[cfg(not(debug_assertions))]
-const FRONTEND_ZIP: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/wxp_example_gain_plugin_gui.zip"));
+const FRONTEND_ZIP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wrac_gain_plugin_gui.zip"));
 
 pub(crate) struct GuiIntegration {
     pub(crate) controller: Arc<WxpGuiController>,
@@ -79,7 +78,7 @@ pub(crate) fn create_gui_integration(
     let controller = Arc::new(
         WxpGuiController::new(
             move |configuration, initial_size, parent| {
-                WxpExampleGainGuiRuntime::create(
+                WracGainGuiRuntime::create(
                     gui_shared.clone(),
                     gui_notifier.clone(),
                     gui_host_parameter_edit_notifier.clone(),
@@ -168,7 +167,7 @@ pub(crate) fn parameter_payload(parameter_id: u32, value: f32) -> serde_json::Va
 
 /// GUI window 1 つに対応する runtime。host が GUI を開くたびに 1 つ作られ、
 /// 閉じるときに drop される。
-pub(crate) struct WxpExampleGainGuiRuntime {
+pub(crate) struct WracGainGuiRuntime {
     // WebView 側 subscription への通知口。
     gui_notifier: Arc<GuiStateNotifier>,
     // 表示中の WebView。Option にしてあるのは Drop の順序を制御するため。
@@ -185,7 +184,7 @@ pub(crate) struct WxpExampleGainGuiRuntime {
     dpi_converter: DpiConverter,
 }
 
-impl WxpExampleGainGuiRuntime {
+impl WracGainGuiRuntime {
     /// host が「GUI を開いて」と要求してきたタイミングで `plugin.rs` の closure
     /// から呼ばれる factory。parent window に貼り付ける WebView を作って返す。
     pub(crate) fn create(
@@ -212,7 +211,7 @@ impl WxpExampleGainGuiRuntime {
         );
 
         // WebView の cache/cookie などを置く data directory。
-        let data_dir = std::env::temp_dir().join("wxp-example-gain-plugin");
+        let data_dir = std::env::temp_dir().join("wrac-gain-plugin");
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| PluginError::Message("failed to create GUI data directory"))?;
 
@@ -286,7 +285,7 @@ impl WxpExampleGainGuiRuntime {
 }
 
 // host から呼ばれる resize / scale / size 取得などの操作を実装する trait。
-impl WxpGuiRuntime for WxpExampleGainGuiRuntime {
+impl WxpGuiRuntime for WracGainGuiRuntime {
     /// host が表示倍率 (HiDPI 等) を伝えてきたときに呼ばれる。
     fn set_scale(&mut self, scale: f64) -> PluginResult<()> {
         self.dpi_converter.set_scale(scale);
@@ -317,7 +316,7 @@ impl WxpGuiRuntime for WxpExampleGainGuiRuntime {
 // host が GUI を閉じると runtime が drop される。
 // drop 順を field 宣言順に任せず、明示的に切断 → WebView 破棄 → context 破棄の
 // 順で進めることで、callback が解放後の object を触る事故を防ぐ。
-impl Drop for WxpExampleGainGuiRuntime {
+impl Drop for WracGainGuiRuntime {
     fn drop(&mut self) {
         // GUI が消えるので、shared state からも channel を外しておく。
         self.gui_notifier.clear_channel();
