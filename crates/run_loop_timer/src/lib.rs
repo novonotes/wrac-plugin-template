@@ -243,8 +243,7 @@ mod tests {
                 });
 
                 timer.start();
-                RunLoop::current().delay(Duration::from_millis(100)).await;
-                assert!(task_started.load(Ordering::SeqCst));
+                wait_until_true(&task_started).await;
             }
 
             RunLoop::current().delay(Duration::from_millis(300)).await;
@@ -259,5 +258,18 @@ mod tests {
     fn timer_panics_without_run_loop_in_debug() {
         let timer = Timer::new(Duration::from_millis(100), || {});
         timer.start();
+    }
+
+    async fn wait_until_true(flag: &AtomicBool) {
+        // Observe the event instead of assuming a fixed timer cadence. CFRunLoop
+        // timers can run slower in headless CI or host-specific GUI environments.
+        for _ in 0..50 {
+            if flag.load(Ordering::SeqCst) {
+                return;
+            }
+            RunLoop::current().delay(Duration::from_millis(20)).await;
+        }
+
+        panic!("condition was not observed before timeout");
     }
 }
