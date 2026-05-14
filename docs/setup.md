@@ -94,7 +94,7 @@ The built plugin will be installed to the following directories:
 | OS | Install path |
 |----|-------------|
 | macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
-| Windows | `%LOCALAPPDATA%/Programs/Common/CLAP/` |
+| Windows | `%LOCALAPPDATA%/Programs/Common/CLAP/` and `%LOCALAPPDATA%/Programs/Common/VST3/` |
 | Linux | `~/.clap/` |
 
 VST3 / AU / standalone are built where supported by the current OS. Standalone

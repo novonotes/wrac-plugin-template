@@ -388,13 +388,12 @@ enum PluginFormat {
 }
 
 fn install_dir(ctx: &Context, format: PluginFormat) -> Result<PathBuf> {
-    let home = home_dir()?;
-    // 旧 script と同じ user-local install 先に合わせる。
-    // system-wide へ書くと管理者権限や既存 plugin との衝突が発生しやすい。
     let dir = match (ctx.platform, format) {
-        (Platform::Macos, PluginFormat::Clap) => home.join("Library/Audio/Plug-Ins/CLAP"),
-        (Platform::Macos, PluginFormat::Vst3) => home.join("Library/Audio/Plug-Ins/VST3"),
-        (Platform::Macos, PluginFormat::Au) => home.join("Library/Audio/Plug-Ins/Components"),
+        (Platform::Macos, PluginFormat::Clap) => home_dir()?.join("Library/Audio/Plug-Ins/CLAP"),
+        (Platform::Macos, PluginFormat::Vst3) => home_dir()?.join("Library/Audio/Plug-Ins/VST3"),
+        (Platform::Macos, PluginFormat::Au) => {
+            home_dir()?.join("Library/Audio/Plug-Ins/Components")
+        }
         (Platform::Windows, PluginFormat::Clap) => local_app_data()?
             .join("Programs")
             .join("Common")
@@ -406,7 +405,7 @@ fn install_dir(ctx: &Context, format: PluginFormat) -> Result<PathBuf> {
         (Platform::Windows, PluginFormat::Au) => {
             return Err("AU is not supported on Windows".into());
         }
-        (Platform::Linux, PluginFormat::Clap) => home.join(".clap"),
+        (Platform::Linux, PluginFormat::Clap) => home_dir()?.join(".clap"),
         (Platform::Linux, PluginFormat::Vst3 | PluginFormat::Au) => {
             return Err("VST3/AU install is not supported on Linux".into());
         }

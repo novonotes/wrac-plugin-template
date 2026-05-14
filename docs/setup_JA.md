@@ -94,7 +94,7 @@ cargo xtask build --install
 | OS | インストール先 |
 |----|--------------|
 | macOS | `~/Library/Audio/Plug-Ins/CLAP/` |
-| Windows | `%LOCALAPPDATA%/Programs/Common/CLAP/` |
+| Windows | `%LOCALAPPDATA%/Programs/Common/CLAP/` および `%LOCALAPPDATA%/Programs/Common/VST3/` |
 | Linux | `~/.clap/` |
 
 VST3 / AU / standalone は現在の OS で対応している場合に同時にビルドされます。
