@@ -1195,6 +1195,8 @@ void ClapAsVst3::param_rescan(clap_param_rescan_flags flags)
     }
   }
 
+  // Some validators restore state before attaching a component handler. The
+  // parameter cache still needs the rescan above, but there is no host to notify.
   if (this->componentHandler)
   {
     this->componentHandler->restartComponent(vstflags);
