@@ -269,7 +269,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
         // template 利用者が wrapper SDK の warning に引きずられず build できるよう、ここだけ抑制する。
         build_cmd.args([
             "--",
-            "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32",
+            "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32 -Wno-perf-constraint-implies-noexcept",
         ]);
     }
 
