@@ -44,6 +44,17 @@ cargo xtask validate
 cargo xtask install
 ```
 
+対応フォーマット:
+
+| OS | `cargo xtask build` の対象 | `cargo xtask validate` の対象 |
+|----|---------------------------|-------------------------------|
+| macOS | CLAP / VST3 / AU / Standalone | VST3 / AU |
+| Windows | CLAP / VST3 / Standalone | VST3 |
+| Linux | CLAP | なし |
+
+`build --target` には `clap`、`vst3`、`au`、`standalone` をカンマ区切りで指定できます。
+ただし、OS が対応していないフォーマットを指定した場合はエラーになります。
+
 使い方:
 
 ```bash
