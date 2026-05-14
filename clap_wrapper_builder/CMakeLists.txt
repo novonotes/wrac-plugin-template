@@ -22,6 +22,7 @@ set(CLAP_WRAPPER_BUILDER_TARGET_LIB "" CACHE FILEPATH "Path to the static librar
 set(CLAP_WRAPPER_BUILDER_TARGET_NAME "" CACHE STRING "Internal CMake target name for the wrapper")
 set(CLAP_WRAPPER_BUILDER_OUTPUT_NAME "" CACHE STRING "Output plugin display/bundle name")
 set(CLAP_WRAPPER_BUILDER_STAGE_DIR "" CACHE PATH "Directory where built artifacts are staged")
+set(CLAP_WRAPPER_BUILDER_BUNDLE_VERSION "1.0.0" CACHE STRING "Version written into wrapped plugin bundles")
 option(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE "Build standalone app target in clap_wrapper_builder" OFF)
 option(CLAP_WRAPPER_BUILDER_BUILD_VST3 "Build VST3 target in clap_wrapper_builder" ON)
 if(APPLE)
@@ -124,7 +125,7 @@ endif()
 
 # Plugin bundle metadata
 set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
-set(BUNDLE_VERSION "1.0.0")
+set(BUNDLE_VERSION "${CLAP_WRAPPER_BUILDER_BUNDLE_VERSION}")
 
 # Create multi-format plugins using make_clapfirst_plugins
 set(CLAPFIRST_COMMON_ARGS

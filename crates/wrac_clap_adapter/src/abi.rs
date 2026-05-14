@@ -308,13 +308,19 @@ pub(crate) unsafe extern "C" fn auv2_get_info(
 ) -> bool {
     ffi_bool(|| {
         if index != 0 || info.is_null() {
+            log::warn!(
+                "auv2.get_info: invalid arguments index={index} info_is_null={}",
+                info.is_null()
+            );
             return false;
         }
 
         let Some(Auv2FactoryState { registration, .. }) = auv2_factory_state(factory) else {
+            log::warn!("auv2.get_info: invalid factory pointer");
             return false;
         };
         let Some(auv2) = registration.descriptor.auv2 else {
+            log::warn!("auv2.get_info: registration has no AUv2 descriptor");
             return false;
         };
 
@@ -337,12 +343,15 @@ pub(crate) unsafe extern "C" fn factory_get_plugin_descriptor(
     index: u32,
 ) -> *const clap_plugin_descriptor {
     if index != 0 {
+        log::warn!("factory.get_plugin_descriptor: invalid index={index}");
         return ptr::null();
     }
 
-    clap_factory_state(factory)
-        .map(|state| state.registration.storage().descriptor.clap_descriptor())
-        .unwrap_or(ptr::null())
+    let Some(state) = clap_factory_state(factory) else {
+        log::warn!("factory.get_plugin_descriptor: invalid factory pointer");
+        return ptr::null();
+    };
+    state.registration.storage().descriptor.clap_descriptor()
 }
 
 pub(crate) unsafe extern "C" fn factory_create_plugin(
@@ -352,18 +361,26 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
 ) -> *const clap_plugin {
     ffi_ptr(|| {
         if host.is_null() || plugin_id.is_null() {
+            log::warn!(
+                "factory.create_plugin: invalid arguments host_is_null={} plugin_id_is_null={}",
+                host.is_null(),
+                plugin_id.is_null()
+            );
             return ptr::null();
         }
         if !clap_version_is_compatible(unsafe { (*host).clap_version }) {
+            log::warn!("factory.create_plugin: incompatible CLAP version");
             return ptr::null();
         }
 
         let Some(factory_state) = clap_factory_state(factory) else {
+            log::warn!("factory.create_plugin: invalid factory pointer");
             return ptr::null();
         };
         let registration = factory_state.registration;
         if unsafe { CStr::from_ptr(plugin_id) }.to_bytes() != registration.descriptor.id.as_bytes()
         {
+            log::warn!("factory.create_plugin: requested unknown plugin id");
             return ptr::null();
         }
 
@@ -377,12 +394,19 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
 }
 
 unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
-    ffi_bool(|| unsafe { PluginInstance::from_plugin(plugin).is_some() })
+    ffi_bool(|| {
+        let initialized = unsafe { PluginInstance::from_plugin(plugin).is_some() };
+        if !initialized {
+            log::warn!("plugin.init: missing plugin instance");
+        }
+        initialized
+    })
 }
 
 unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
     ffi_unit(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("plugin.destroy: missing plugin instance");
             return;
         };
         let guard = instance.enter_lifecycle_blocking();
@@ -398,7 +422,9 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         }
 
         if let Some(processor) = instance.take_processor_blocking() {
-            let _ = instance.core.write().deactivate(processor);
+            if let Err(error) = instance.core.write().deactivate(processor) {
+                log::warn!("plugin.destroy: plugin deactivate failed: {error}");
+            }
         }
 
         drop(guard);
@@ -417,12 +443,15 @@ unsafe extern "C" fn plugin_activate(
 ) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("plugin.activate: missing plugin instance");
             return false;
         };
         let Some(_guard) = instance.try_enter_lifecycle() else {
+            log::warn!("plugin.activate: lifecycle is busy");
             return false;
         };
         if instance.has_processor_or_busy() {
+            log::warn!("plugin.activate: processor already exists or audio callback is busy");
             return false;
         }
 
@@ -432,7 +461,10 @@ unsafe extern "C" fn plugin_activate(
             max_frames_count,
         }) {
             Ok(processor) => processor,
-            Err(_) => return false,
+            Err(error) => {
+                log::warn!("plugin.activate: plugin activate failed: {error}");
+                return false;
+            }
         };
 
         instance.put_processor_blocking(processor);
@@ -443,13 +475,17 @@ unsafe extern "C" fn plugin_activate(
 unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     ffi_unit(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("plugin.deactivate: missing plugin instance");
             return;
         };
         let Some(_guard) = instance.try_enter_lifecycle() else {
+            log::warn!("plugin.deactivate: lifecycle is busy");
             return;
         };
         if let Some(processor) = instance.take_processor_blocking() {
-            let _ = instance.core.write().deactivate(processor);
+            if let Err(error) = instance.core.write().deactivate(processor) {
+                log::warn!("plugin.deactivate: plugin deactivate failed: {error}");
+            }
         }
     });
 }
@@ -457,12 +493,17 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("plugin.start_processing: missing plugin instance");
             return false;
         };
         // `start_processing` / `stop_processing` は wrapper format では VST3/AU 側の
         // activate と同期しないことがある。専用 flag は host 都合で audio を止める
         // 故障点になるため、処理可否は Processor の有無だけで判断する。
-        instance.has_processor_or_busy()
+        let can_process = instance.has_processor_or_busy();
+        if !can_process {
+            log::warn!("plugin.start_processing: no processor is available");
+        }
+        can_process
     })
 }
 
@@ -473,13 +514,19 @@ unsafe extern "C" fn plugin_stop_processing(_plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
     ffi_unit(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("plugin.reset: missing plugin instance");
             return;
         };
-        let _ = instance.with_processor_mut(|processor| {
+        let Some(()) = instance.with_processor_mut(|processor| {
             if let Some(processor) = processor {
                 processor.reset();
+            } else {
+                log::debug!("plugin.reset: no processor is available");
             }
-        });
+        }) else {
+            log::warn!("plugin.reset: processor is busy");
+            return;
+        };
     });
 }
 
@@ -489,10 +536,12 @@ unsafe extern "C" fn plugin_process(
 ) -> clap_process_status {
     ffi_status(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::error!("plugin.process: missing plugin instance");
             return CLAP_PROCESS_ERROR;
         };
 
         if process.is_null() {
+            log::warn!("plugin.process: null process pointer");
             return CLAP_PROCESS_SLEEP;
         }
         let process = unsafe { &*process };
@@ -503,7 +552,10 @@ unsafe extern "C" fn plugin_process(
             .drain_output_parameter_events(&mut events.output);
         let audio = match unsafe { audio_buffers(process) } {
             Ok(audio) => audio,
-            Err(_) => return CLAP_PROCESS_ERROR,
+            Err(error) => {
+                log::error!("plugin.process: invalid audio buffers: {error}");
+                return CLAP_PROCESS_ERROR;
+            }
         };
 
         // audio callback は `PluginCore` の lock を取らない。処理可能かどうかも別 flag ではなく
@@ -511,6 +563,7 @@ unsafe extern "C" fn plugin_process(
         // RT 経路では待たずに sleep/error へ倒す。
         let Some(result) = instance.with_processor_mut(|processor| {
             let Some(processor) = processor else {
+                log::debug!("plugin.process: no processor is available");
                 return CLAP_PROCESS_SLEEP;
             };
 
@@ -523,9 +576,13 @@ unsafe extern "C" fn plugin_process(
                 Ok(ProcessStatus::ContinueIfNotQuiet) => CLAP_PROCESS_CONTINUE_IF_NOT_QUIET,
                 Ok(ProcessStatus::Tail) => CLAP_PROCESS_TAIL,
                 Ok(ProcessStatus::Sleep) => CLAP_PROCESS_SLEEP,
-                Err(_) => CLAP_PROCESS_ERROR,
+                Err(error) => {
+                    log::error!("plugin.process: processor failed: {error}");
+                    CLAP_PROCESS_ERROR
+                }
             }
         }) else {
+            log::warn!("plugin.process: processor is busy");
             return CLAP_PROCESS_SLEEP;
         };
         result
@@ -538,10 +595,12 @@ unsafe extern "C" fn plugin_get_extension(
 ) -> *const c_void {
     ffi_ptr(|| {
         if id.is_null() {
+            log::warn!("plugin.get_extension: null extension id");
             return ptr::null();
         }
         let id = unsafe { CStr::from_ptr(id) };
         let Some(instance) = (unsafe { PluginInstance::from_plugin(_plugin) }) else {
+            log::warn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
         if id == CLAP_EXT_AUDIO_PORTS && instance.capabilities.audio_ports {

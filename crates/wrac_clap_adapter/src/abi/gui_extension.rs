@@ -41,6 +41,7 @@ unsafe extern "C" fn gui_is_api_supported(
             return false;
         };
         let Some(api) = gui_api_from_c(api) else {
+            log::warn!("gui.is_api_supported: invalid API pointer");
             return false;
         };
         gui.is_api_supported(api, is_floating)
@@ -54,12 +55,18 @@ unsafe extern "C" fn gui_get_preferred_api(
 ) -> bool {
     ffi_bool(|| {
         if api.is_null() || is_floating.is_null() {
+            log::warn!(
+                "gui.get_preferred_api: invalid output pointers api_is_null={} floating_is_null={}",
+                api.is_null(),
+                is_floating.is_null()
+            );
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
         let Some(configuration) = gui.preferred_api() else {
+            log::debug!("gui.get_preferred_api: plugin has no preferred API");
             return false;
         };
 
@@ -81,9 +88,16 @@ unsafe extern "C" fn gui_create(
             return false;
         };
         let Some(api) = gui_api_from_c(api) else {
+            log::warn!("gui.create: invalid API pointer");
             return false;
         };
-        gui.create(GuiConfiguration { api, is_floating }).is_ok()
+        match gui.create(GuiConfiguration { api, is_floating }) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.create: plugin create failed: {error}");
+                false
+            }
+        }
     })
 }
 
@@ -101,7 +115,13 @@ unsafe extern "C" fn gui_set_scale(plugin: *const clap_plugin, scale: f64) -> bo
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_scale") }) else {
             return false;
         };
-        gui.set_scale(scale).is_ok()
+        match gui.set_scale(scale) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.set_scale: plugin set_scale failed: {error}");
+                false
+            }
+        }
     })
 }
 
@@ -112,13 +132,22 @@ unsafe extern "C" fn gui_get_size(
 ) -> bool {
     ffi_bool(|| {
         if width.is_null() || height.is_null() {
+            log::warn!(
+                "gui.get_size: invalid output pointers width_is_null={} height_is_null={}",
+                width.is_null(),
+                height.is_null()
+            );
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
-        let Ok(size) = gui.get_size() else {
-            return false;
+        let size = match gui.get_size() {
+            Ok(size) => size,
+            Err(error) => {
+                log::warn!("gui.get_size: plugin get_size failed: {error}");
+                return false;
+            }
         };
         unsafe {
             *width = size.width;
@@ -143,12 +172,14 @@ unsafe extern "C" fn gui_get_resize_hints(
 ) -> bool {
     ffi_bool(|| {
         if hints.is_null() {
+            log::warn!("gui.get_resize_hints: null output pointer");
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
         let Some(resize_hints) = gui.resize_hints() else {
+            log::debug!("gui.get_resize_hints: plugin has no resize hints");
             return false;
         };
         unsafe {
@@ -169,6 +200,11 @@ unsafe extern "C" fn gui_adjust_size(
 ) -> bool {
     ffi_bool(|| {
         if width.is_null() || height.is_null() {
+            log::warn!(
+                "gui.adjust_size: invalid size pointers width_is_null={} height_is_null={}",
+                width.is_null(),
+                height.is_null()
+            );
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
@@ -180,8 +216,12 @@ unsafe extern "C" fn gui_adjust_size(
                 height: *height,
             }
         };
-        let Ok(adjusted) = gui.adjust_size(requested) else {
-            return false;
+        let adjusted = match gui.adjust_size(requested) {
+            Ok(adjusted) => adjusted,
+            Err(error) => {
+                log::warn!("gui.adjust_size: plugin adjust_size failed: {error}");
+                return false;
+            }
         };
         unsafe {
             *width = adjusted.width;
@@ -196,7 +236,13 @@ unsafe extern "C" fn gui_set_size(plugin: *const clap_plugin, width: u32, height
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_size") }) else {
             return false;
         };
-        gui.set_size(GuiSize { width, height }).is_ok()
+        match gui.set_size(GuiSize { width, height }) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.set_size: plugin set_size failed: {error}");
+                false
+            }
+        }
     })
 }
 
@@ -206,15 +252,23 @@ unsafe extern "C" fn gui_set_parent(
 ) -> bool {
     ffi_bool(|| {
         if window.is_null() {
+            log::warn!("gui.set_parent: null window pointer");
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_parent") }) else {
             return false;
         };
         let Some(parent) = (unsafe { clap_window_to_rust(&*window) }) else {
+            log::warn!("gui.set_parent: unsupported or invalid window API");
             return false;
         };
-        gui.set_parent(parent).is_ok()
+        match gui.set_parent(parent) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.set_parent: plugin set_parent failed: {error}");
+                false
+            }
+        }
     })
 }
 
@@ -224,27 +278,37 @@ unsafe extern "C" fn gui_set_transient(
 ) -> bool {
     ffi_bool(|| {
         if window.is_null() {
+            log::warn!("gui.set_transient: null window pointer");
             return false;
         }
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_transient") }) else {
             return false;
         };
         let Some(parent) = (unsafe { clap_window_to_rust(&*window) }) else {
+            log::warn!("gui.set_transient: unsupported or invalid window API");
             return false;
         };
-        gui.set_transient(parent).is_ok()
+        match gui.set_transient(parent) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.set_transient: plugin set_transient failed: {error}");
+                false
+            }
+        }
     })
 }
 
 unsafe extern "C" fn gui_suggest_title(plugin: *const clap_plugin, title: *const c_char) {
     ffi_unit(|| {
         if title.is_null() {
+            log::warn!("gui.suggest_title: null title pointer");
             return;
         }
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "suggest_title") }) else {
             return;
         };
         let Ok(title) = (unsafe { CStr::from_ptr(title) }).to_str() else {
+            log::warn!("gui.suggest_title: title is not valid UTF-8");
             return;
         };
         gui.suggest_title(title);
@@ -256,7 +320,13 @@ unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "show") }) else {
             return false;
         };
-        gui.show().is_ok()
+        match gui.show() {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.show: plugin show failed: {error}");
+                false
+            }
+        }
     })
 }
 
@@ -265,13 +335,26 @@ unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "hide") }) else {
             return false;
         };
-        gui.hide().is_ok()
+        match gui.hide() {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("gui.hide: plugin hide failed: {error}");
+                false
+            }
+        }
     })
 }
 
 unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginGui>> {
-    let instance = unsafe { PluginInstance::from_plugin(plugin) }?;
-    instance.gui.clone()
+    let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        log::warn!("gui.query: missing plugin instance");
+        return None;
+    };
+    let gui = instance.gui.clone();
+    if gui.is_none() {
+        log::debug!("gui.query: plugin has no GUI");
+    }
+    gui
 }
 
 struct GuiMutationAccess {
@@ -291,7 +374,10 @@ unsafe fn plugin_gui_mutation(
     plugin: *const clap_plugin,
     callback_name: &'static str,
 ) -> Option<GuiMutationAccess> {
-    let instance = unsafe { PluginInstance::from_plugin(plugin) }?;
+    let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        log::warn!("gui.{callback_name}: missing plugin instance");
+        return None;
+    };
     let Some(guard) = instance.gui_callback_busy.try_lock() else {
         log::error!("rejecting reentrant or concurrent CLAP GUI callback: {callback_name}");
         return None;

@@ -25,24 +25,42 @@ unsafe extern "C" fn configurable_audio_ports_can_apply_configuration(
 ) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("configurable_audio_ports.can_apply: missing plugin instance");
             return false;
         };
         // port layout は Processor の buffer view 契約を変える。別の active flag は持たず、
         // 実際に Processor が存在するかどうかだけで「今は交渉不可」を判断する。
         if instance.has_processor_or_busy() || instance.lifecycle_busy.load(Ordering::Acquire) {
+            log::warn!(
+                "configurable_audio_ports.can_apply: rejected while processor/lifecycle is busy"
+            );
             return false;
         }
         let Some(requests) = convert_requests(requests, request_count) else {
+            log::warn!(
+                "configurable_audio_ports.can_apply: invalid request pointer count={request_count}"
+            );
             return false;
         };
 
         let Some(mut core) = instance.core.try_write() else {
+            log::warn!(
+                "configurable_audio_ports.can_apply: core try_write failed thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(configurable_audio_ports) = core.configurable_audio_ports() else {
+            log::debug!(
+                "configurable_audio_ports.can_apply: plugin has no configurable audio ports"
+            );
             return false;
         };
-        configurable_audio_ports.can_apply_audio_port_configuration(&requests)
+        let can_apply = configurable_audio_ports.can_apply_audio_port_configuration(&requests);
+        log::debug!(
+            "configurable_audio_ports.can_apply: request_count={request_count} result={can_apply}"
+        );
+        can_apply
     })
 }
 
@@ -53,26 +71,47 @@ unsafe extern "C" fn configurable_audio_ports_apply_configuration(
 ) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("configurable_audio_ports.apply: missing plugin instance");
             return false;
         };
         // host が `can_apply` を省略しても、Processor が古い port view を使っている間に
         // layout を変えないよう `apply` 側でも同じ条件を確認する。
         if instance.has_processor_or_busy() || instance.lifecycle_busy.load(Ordering::Acquire) {
+            log::warn!(
+                "configurable_audio_ports.apply: rejected while processor/lifecycle is busy"
+            );
             return false;
         }
         let Some(requests) = convert_requests(requests, request_count) else {
+            log::warn!(
+                "configurable_audio_ports.apply: invalid request pointer count={request_count}"
+            );
             return false;
         };
 
         let Some(mut core) = instance.core.try_write() else {
+            log::warn!(
+                "configurable_audio_ports.apply: core try_write failed thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(configurable_audio_ports) = core.configurable_audio_ports() else {
+            log::debug!("configurable_audio_ports.apply: plugin has no configurable audio ports");
             return false;
         };
-        configurable_audio_ports
-            .apply_audio_port_configuration(&requests)
-            .is_ok()
+        match configurable_audio_ports.apply_audio_port_configuration(&requests) {
+            Ok(()) => {
+                log::debug!(
+                    "configurable_audio_ports.apply: applied request_count={request_count}"
+                );
+                true
+            }
+            Err(error) => {
+                log::warn!("configurable_audio_ports.apply: rejected by plugin: {error}");
+                false
+            }
+        }
     })
 }
 

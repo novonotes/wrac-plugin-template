@@ -42,6 +42,7 @@ impl ParameterEditQueue {
         // audio callback 上で UI thread と待ち合わないため、queue が一瞬 busy なら次回
         // flush/process へ回す。host への request_flush は edit 追加時点で発行済み。
         let Some(mut pending) = self.pending.try_lock() else {
+            log::warn!("parameter_edits.drain: pending queue try_lock failed; retrying later");
             return;
         };
 
@@ -65,6 +66,7 @@ impl ParameterEditQueue {
 
     fn request_flush(&self) {
         let Some(params) = self.host_params else {
+            log::debug!("parameter_edits.request_flush: host params extension unavailable");
             return;
         };
 
@@ -72,11 +74,14 @@ impl ParameterEditQueue {
             unsafe {
                 request_flush(params.host);
             }
+        } else {
+            log::debug!("parameter_edits.request_flush: host request_flush callback unavailable");
         }
     }
 
     pub(crate) fn rescan_values(&self) {
         let Some(params) = self.host_params else {
+            log::debug!("parameter_edits.rescan_values: host params extension unavailable");
             return;
         };
 
@@ -84,6 +89,8 @@ impl ParameterEditQueue {
             unsafe {
                 rescan(params.host, CLAP_PARAM_RESCAN_VALUES);
             }
+        } else {
+            log::debug!("parameter_edits.rescan_values: host rescan callback unavailable");
         }
     }
 }

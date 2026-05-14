@@ -52,9 +52,11 @@ impl<'a> InputEvents<'a> {
 
     pub fn len(&self) -> u32 {
         if self.raw.is_null() {
+            log::debug!("input_events.len: null input event list");
             return 0;
         }
         let Some(size) = (unsafe { (*self.raw).size }) else {
+            log::warn!("input_events.len: event list has no size callback");
             return 0;
         };
         unsafe { size(self.raw) }
@@ -66,11 +68,16 @@ impl<'a> InputEvents<'a> {
 
     pub fn get(&self, index: u32) -> Option<InputEvent> {
         if index >= self.len() || self.raw.is_null() {
+            log::warn!("input_events.get: invalid index={index}");
             return None;
         }
-        let get = unsafe { (*self.raw).get }?;
+        let Some(get) = (unsafe { (*self.raw).get }) else {
+            log::warn!("input_events.get: event list has no get callback index={index}");
+            return None;
+        };
         let header = unsafe { get(self.raw, index) };
         if header.is_null() {
+            log::warn!("input_events.get: host returned null event header index={index}");
             return None;
         }
         unsafe { InputEvent::from_header(&*header) }
@@ -133,10 +140,11 @@ impl<'a> OutputEvents<'a> {
 
     pub fn try_push(&mut self, event: OutputEvent) -> bool {
         let Some(try_push) = self.try_push_raw() else {
+            log::warn!("output_events.try_push: output event queue is unavailable");
             return false;
         };
 
-        match event {
+        let pushed = match event {
             OutputEvent::NoteOn(event) => {
                 let raw = event.to_raw(CLAP_EVENT_NOTE_ON);
                 unsafe { try_push(self.raw, &raw.header) }
@@ -173,7 +181,11 @@ impl<'a> OutputEvents<'a> {
                 let raw = event.to_raw(CLAP_EVENT_PARAM_GESTURE_END);
                 unsafe { try_push(self.raw, &raw.header) }
             }
+        };
+        if !pushed {
+            log::warn!("output_events.try_push: host rejected event");
         }
+        pushed
     }
 
     fn try_push_raw(
@@ -181,9 +193,14 @@ impl<'a> OutputEvents<'a> {
     ) -> Option<unsafe extern "C" fn(*const clap_output_events, *const clap_event_header) -> bool>
     {
         if self.raw.is_null() {
+            log::debug!("output_events.try_push_raw: null output event list");
             return None;
         }
-        unsafe { (*self.raw).try_push }
+        let try_push = unsafe { (*self.raw).try_push };
+        if try_push.is_none() {
+            log::warn!("output_events.try_push_raw: event list has no try_push callback");
+        }
+        try_push
     }
 }
 

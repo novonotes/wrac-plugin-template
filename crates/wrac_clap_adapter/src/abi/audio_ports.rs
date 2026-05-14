@@ -20,18 +20,29 @@ pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports
 unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: bool) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
         // wrapper format では、別の lifecycle callback が core write lock を持つ最中に
         // port metadata を問い合わせることがある。host 側 query path を plugin deadlock
         // に巻き込むより、この瞬間だけ「取得不可」と返す方が安全。
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "audio_ports.count: core try_read failed is_input={is_input} thread={:?}",
+                std::thread::current().id()
+            );
             return 0;
         };
         let Some(audio_ports) = core.audio_ports() else {
+            log::warn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
             return 0;
         };
-        audio_ports.audio_port_count(is_input)
+        let count = audio_ports.audio_port_count(is_input);
+        log::debug!(
+            "audio_ports.count: is_input={is_input} count={count} thread={:?}",
+            std::thread::current().id()
+        );
+        count
     })
 }
 
@@ -43,20 +54,38 @@ unsafe extern "C" fn audio_ports_get(
 ) -> bool {
     ffi_bool(|| {
         if info.is_null() {
+            log::warn!("audio_ports.get: null output pointer index={index} is_input={is_input}");
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!(
+                "audio_ports.get: missing plugin instance index={index} is_input={is_input}"
+            );
             return false;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "audio_ports.get: core try_read failed index={index} is_input={is_input} thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(audio_ports) = core.audio_ports() else {
+            log::warn!(
+                "audio_ports.get: plugin has no audio ports index={index} is_input={is_input}"
+            );
             return false;
         };
         let Some(port) = audio_ports.audio_port_info(index, is_input) else {
+            log::warn!("audio_ports.get: invalid index={index} is_input={is_input}");
             return false;
         };
+        log::debug!(
+            "audio_ports.get: index={index} is_input={is_input} id={} channels={} thread={:?}",
+            port.id,
+            port.channel_count,
+            std::thread::current().id()
+        );
 
         unsafe {
             (*info).id = port.id;

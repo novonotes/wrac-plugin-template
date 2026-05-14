@@ -8,14 +8,26 @@ use clap_sys::stream::{clap_istream, clap_ostream};
 
 pub(super) unsafe fn write_stream(stream: *const clap_ostream, bytes: &[u8]) -> bool {
     let Some(write) = (unsafe { (*stream).write }) else {
+        log::warn!(
+            "ffi.write_stream: stream has no write callback byte_len={}",
+            bytes.len()
+        );
         return false;
     };
     let written = unsafe { write(stream, bytes.as_ptr().cast(), bytes.len() as u64) };
-    written == bytes.len() as i64
+    let expected = bytes.len() as i64;
+    if written != expected {
+        log::warn!("ffi.write_stream: short write written={written} expected={expected}");
+        return false;
+    }
+    true
 }
 
 pub(super) unsafe fn read_stream_exact(stream: *const clap_istream, len: usize) -> Option<Vec<u8>> {
-    let read = unsafe { (*stream).read }?;
+    let Some(read) = (unsafe { (*stream).read }) else {
+        log::warn!("ffi.read_stream_exact: stream has no read callback byte_len={len}");
+        return None;
+    };
     let mut bytes = vec![0_u8; len];
     let mut offset = 0;
     while offset < len {
@@ -27,6 +39,9 @@ pub(super) unsafe fn read_stream_exact(stream: *const clap_istream, len: usize) 
             )
         };
         if read_count <= 0 {
+            log::warn!(
+                "ffi.read_stream_exact: read failed read_count={read_count} offset={offset} byte_len={len}"
+            );
             return None;
         }
         offset += read_count as usize;
@@ -47,6 +62,10 @@ pub(super) fn fill_c_char_array<const N: usize>(target: &mut [c_char; N], text: 
 
 pub(super) fn write_c_str_buffer(out_buffer: *mut c_char, capacity: u32, text: &str) -> bool {
     if out_buffer.is_null() || capacity == 0 {
+        log::warn!(
+            "ffi.write_c_str_buffer: invalid output buffer capacity={capacity} text_len={}",
+            text.len()
+        );
         return false;
     }
 

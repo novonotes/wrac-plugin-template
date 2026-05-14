@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 use clap_sys::factory::plugin_factory::clap_plugin_factory;
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::plugin_features::{
-    CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_STEREO,
+    CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_DISTORTION,
+    CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLUGIN_FEATURE_LIMITER, CLAP_PLUGIN_FEATURE_MONO,
+    CLAP_PLUGIN_FEATURE_STEREO, CLAP_PLUGIN_FEATURE_UTILITY,
 };
 use clap_sys::version::CLAP_VERSION;
 
@@ -31,7 +33,11 @@ pub struct PluginDescriptor {
 pub enum PluginFeature {
     AudioEffect,
     Instrument,
+    Distortion,
+    Limiter,
+    Mono,
     Stereo,
+    Utility,
 }
 
 impl PluginFeature {
@@ -39,7 +45,11 @@ impl PluginFeature {
         match self {
             Self::AudioEffect => CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
             Self::Instrument => CLAP_PLUGIN_FEATURE_INSTRUMENT,
+            Self::Distortion => CLAP_PLUGIN_FEATURE_DISTORTION,
+            Self::Limiter => CLAP_PLUGIN_FEATURE_LIMITER,
+            Self::Mono => CLAP_PLUGIN_FEATURE_MONO,
             Self::Stereo => CLAP_PLUGIN_FEATURE_STEREO,
+            Self::Utility => CLAP_PLUGIN_FEATURE_UTILITY,
         }
     }
 }

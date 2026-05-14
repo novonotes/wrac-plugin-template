@@ -4,7 +4,7 @@
 //! 大雑把に並べると:
 //!
 //! 1. plugin の自己紹介情報 ([`PLUGIN_DESCRIPTOR`]) を宣言する
-//! 2. parameter 定義 (gain ひとつだけ) を host に教える
+//! 2. parameter 定義 (gain と bypass) を host に教える
 //! 3. audio thread / GUI / host で共有する [`SharedState`] を作る
 //! 4. host から [`PluginCore::activate`] されたら audio 処理用の [`Processor`] を渡す
 //! 5. host から GUI を要求されたら `gui.rs` 側の controller を渡す
@@ -56,7 +56,11 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     support_url: "",
     version: env!("CARGO_PKG_VERSION"),
     description: "Simple gain plugin",
-    features: &[PluginFeature::AudioEffect, PluginFeature::Stereo],
+    features: &[
+        PluginFeature::AudioEffect,
+        PluginFeature::Utility,
+        PluginFeature::Stereo,
+    ],
     // AUv2 (macOS の Audio Unit v2) 用の追加情報。
     // manufacturer_code と plugin_subtype は 4 文字 ASCII の固有 ID で、
     // 同じ会社内で重複しないように決める必要がある。
@@ -133,16 +137,20 @@ pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCo
         PLUGIN_DESCRIPTOR.id,
         PLUGIN_DESCRIPTOR.name
     );
-    let gain = gain_parameter_info();
-    log::info!(
-        "host parameter schema: id={}, name={}, min={}, max={}, default={}, automatable={}",
-        gain.id,
-        gain.name,
-        gain.min_value,
-        gain.max_value,
-        gain.default_value,
-        gain.flags.is_automatable
-    );
+    for parameter in [gain_parameter_info(), bypass_parameter_info()] {
+        log::info!(
+            "host parameter schema: id={}, name={}, min={}, max={}, default={}, automatable={}, stepped={}, enum={}, bypass={}",
+            parameter.id,
+            parameter.name,
+            parameter.min_value,
+            parameter.max_value,
+            parameter.default_value,
+            parameter.flags.is_automatable,
+            parameter.flags.is_stepped,
+            parameter.flags.is_enum,
+            parameter.flags.is_bypass
+        );
+    }
     Box::new(WracGainPlugin::new(context))
 }
 
@@ -283,17 +291,23 @@ impl PluginParameters for WracGainPlugin {
     fn parameter_count(&self) -> u32 {
         // 新しい parameter を追加するときは、この数と `parameter_info()` の match を
         // 一緒に更新する。
+        log::debug!("parameter_count -> 2");
         2
     }
 
     fn parameter_info(&self, index: u32) -> Option<ParameterInfo> {
         // 新しい parameter を追加するときは、index と stable id の対応をここに追加する。
         // id は DAW project / automation に保存されるので、一度公開した値は変えない。
-        match index {
+        let info = match index {
             0 => Some(gain_parameter_info()),
             1 => Some(bypass_parameter_info()),
             _ => None,
-        }
+        };
+        log::debug!(
+            "parameter_info: index={index} -> {:?}",
+            info.as_ref().map(|info| (info.id, info.name))
+        );
+        info
     }
 
     /// host が「今この parameter の値はいくつ?」と尋ねてきたときに答える。
@@ -426,6 +440,9 @@ fn bypass_parameter_info() -> ParameterInfo {
         flags: ParameterFlags {
             is_automatable: true,
             is_stepped: true,
+            // Choice-style parameters should also be marked enum. Wrappers map this
+            // to host-native list metadata, and some generic editors rely on it.
+            is_enum: true,
             is_bypass: true,
             ..ParameterFlags::default()
         },

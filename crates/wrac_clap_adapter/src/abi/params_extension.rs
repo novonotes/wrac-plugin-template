@@ -33,14 +33,26 @@ pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
 unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("params.count: missing plugin instance");
             return 0;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "params.count: core try_read failed on thread {:?}",
+                std::thread::current().id()
+            );
             return 0;
         };
-        core.parameters()
-            .map(|parameters| parameters.parameter_count())
-            .unwrap_or(0)
+        let Some(parameters) = core.parameters() else {
+            log::warn!("params.count: plugin has no parameters");
+            return 0;
+        };
+        let count = parameters.parameter_count();
+        log::debug!(
+            "params.count: count={count} thread={:?}",
+            std::thread::current().id()
+        );
+        count
     })
 }
 
@@ -51,20 +63,35 @@ unsafe extern "C" fn params_get_info(
 ) -> bool {
     ffi_bool(|| {
         if param_info.is_null() {
+            log::warn!("params.get_info: null output pointer index={param_index}");
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("params.get_info: missing plugin instance index={param_index}");
             return false;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "params.get_info: core try_read failed index={param_index} thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(parameters) = core.parameters() else {
+            log::warn!("params.get_info: plugin has no parameters index={param_index}");
             return false;
         };
         let Some(info) = parameters.parameter_info(param_index) else {
+            log::warn!("params.get_info: invalid index={param_index}");
             return false;
         };
+        log::debug!(
+            "params.get_info: index={param_index} id={} name={} flags={} thread={:?}",
+            info.id,
+            info.name,
+            parameter_flags(info.flags),
+            std::thread::current().id()
+        );
 
         unsafe {
             (*param_info).id = info.id;
@@ -87,20 +114,32 @@ unsafe extern "C" fn params_get_value(
 ) -> bool {
     ffi_bool(|| {
         if out_value.is_null() {
+            log::warn!("params.get_value: null output pointer param_id={param_id}");
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("params.get_value: missing plugin instance param_id={param_id}");
             return false;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "params.get_value: core try_read failed param_id={param_id} thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(parameters) = core.parameters() else {
+            log::warn!("params.get_value: plugin has no parameters param_id={param_id}");
             return false;
         };
         let Ok(value) = parameters.parameter_value(param_id) else {
+            log::warn!("params.get_value: invalid param_id={param_id}");
             return false;
         };
+        log::debug!(
+            "params.get_value: param_id={param_id} value={value} thread={:?}",
+            std::thread::current().id()
+        );
         unsafe {
             *out_value = value;
         }
@@ -117,17 +156,28 @@ unsafe extern "C" fn params_value_to_text(
 ) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("params.value_to_text: missing plugin instance param_id={param_id}");
             return false;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "params.value_to_text: core try_read failed param_id={param_id} thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(parameters) = core.parameters() else {
+            log::warn!("params.value_to_text: plugin has no parameters param_id={param_id}");
             return false;
         };
         let Ok(text) = parameters.parameter_value_to_text(param_id, value) else {
+            log::warn!("params.value_to_text: invalid param_id={param_id} value={value}");
             return false;
         };
+        log::debug!(
+            "params.value_to_text: param_id={param_id} value={value} text={text} thread={:?}",
+            std::thread::current().id()
+        );
         write_c_str_buffer(out_buffer, out_buffer_capacity, &text)
     })
 }
@@ -140,23 +190,36 @@ unsafe extern "C" fn params_text_to_value(
 ) -> bool {
     ffi_bool(|| {
         if param_value_text.is_null() || out_value.is_null() {
+            log::warn!("params.text_to_value: null pointer param_id={param_id}");
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+            log::warn!("params.text_to_value: missing plugin instance param_id={param_id}");
             return false;
         };
         let Ok(text) = unsafe { CStr::from_ptr(param_value_text) }.to_str() else {
+            log::warn!("params.text_to_value: invalid utf8 param_id={param_id}");
             return false;
         };
         let Some(core) = instance.core.try_read() else {
+            log::warn!(
+                "params.text_to_value: core try_read failed param_id={param_id} thread={:?}",
+                std::thread::current().id()
+            );
             return false;
         };
         let Some(parameters) = core.parameters() else {
+            log::warn!("params.text_to_value: plugin has no parameters param_id={param_id}");
             return false;
         };
         let Ok(value) = parameters.parameter_text_to_value(param_id, text) else {
+            log::warn!("params.text_to_value: invalid param_id={param_id} text={text}");
             return false;
         };
+        log::debug!(
+            "params.text_to_value: param_id={param_id} text={text} value={value} thread={:?}",
+            std::thread::current().id()
+        );
         unsafe {
             *out_value = value;
         }
@@ -185,6 +248,11 @@ unsafe extern "C" fn params_flush(
                         .apply_input_parameter_events(parameters, &events.input);
                 }
                 drop(core);
+            } else {
+                log::warn!(
+                    "params.flush: core try_read failed thread={:?}",
+                    std::thread::current().id()
+                );
             }
             instance
                 .parameter_edits
