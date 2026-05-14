@@ -31,7 +31,6 @@ static ALLOC_DISABLER: AllocDisabler = AllocDisabler;
 mod audio;
 mod commands;
 mod gui;
-#[cfg(debug_assertions)]
 mod logging;
 mod plugin;
 mod state;

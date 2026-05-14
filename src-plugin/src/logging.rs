@@ -126,12 +126,7 @@ fn open_log_file(path: &Path) -> Option<File> {
         }
     }
 
-    match OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-    {
+    match OpenOptions::new().create(true).append(true).open(path) {
         Ok(file) => Some(file),
         Err(error) => {
             eprintln!(

@@ -129,7 +129,6 @@ impl WracGainPlugin {
 /// host が新しい plugin instance を必要としたタイミングで adapter が呼び出し、
 /// trait object として [`PluginCore`] を返す。実装の差し替えはここを変えるだけ。
 pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCore> {
-    #[cfg(debug_assertions)]
     crate::logging::init_debug_logging_once(PLUGIN_DESCRIPTOR.name);
 
     log::debug!(

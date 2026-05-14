@@ -3317,6 +3317,7 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "atomic_float",
+ "directories",
  "log",
  "novonotes_run_loop",
  "parking_lot",

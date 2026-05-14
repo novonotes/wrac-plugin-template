@@ -12,11 +12,13 @@
 //!   command、resize/scale の挙動など、製品ごとに変わる部分だけを書く
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use directories::ProjectDirs;
 use novonotes_run_loop::{RunLoop, RunLoopSender};
 use parking_lot::Mutex;
 use run_loop_timer::Timer;
@@ -34,7 +36,7 @@ use wxp::{
 };
 
 use crate::commands::register_commands;
-use crate::plugin::{PARAM_GAIN_ID, parameter_value_text};
+use crate::plugin::{PARAM_GAIN_ID, PLUGIN_ID, parameter_value_text};
 use crate::state::SharedState;
 
 // GUI window のサイズ範囲 (pixel)。host は initial size でウインドウを開き、
@@ -271,13 +273,15 @@ impl WracGainGuiRuntime {
             return Err(PluginError::Message("unsupported GUI configuration"));
         }
         log::debug!(
-            "creating GUI runtime: width={}, height={}",
+            "creating GUI runtime: width={}, height={}, configuration={configuration:?}",
             initial_size.width,
             initial_size.height
         );
 
         // WebView から呼べる parameter command を登録する。
+        log::debug!("creating GUI runtime: creating command handler");
         let command_handler = Rc::new(WxpCommandHandler::new());
+        log::debug!("creating GUI runtime: registering commands");
         register_commands(
             command_handler.clone(),
             dependencies.shared.clone(),
@@ -286,18 +290,26 @@ impl WracGainGuiRuntime {
             dependencies.host_gui_resize_requester,
             dependencies.resize_handle,
         );
+        log::debug!("creating GUI runtime: commands registered");
 
-        // WebView の cache/cookie などを置く data directory。
-        let data_dir = std::env::temp_dir().join("wrac-gain-plugin");
+        // WebView2 は同じ user data folder を別の Environment options で共有すると作成に
+        // 失敗し得るため、OS 標準のアプリデータ配下に plugin ID 単位で分離する。
+        let data_dir = webview_data_dir(PLUGIN_ID);
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| PluginError::Message("failed to create GUI data directory"))?;
         log::debug!("using GUI data directory: {}", data_dir.display());
 
+        log::debug!("creating GUI runtime: creating WebContext");
         let mut wxp_context = WebContext::new(data_dir);
         // 初期 scale は 1.0 とし、後で host から `set_scale` で書き換えられる。
         let dpi_converter = DpiConverter::new(1.0);
         let gui_size = gui_size_to_logical(initial_size);
         let bounds = dpi_converter.create_webview_bounds(gui_size);
+        log::debug!(
+            "creating GUI runtime: computed logical size: width={}, height={}",
+            gui_size.width,
+            gui_size.height
+        );
 
         // debug build では Vite dev server を見るので、frontend を変更しても
         // native plugin の再 build が不要になり開発体験が良くなる。
@@ -306,6 +318,7 @@ impl WracGainGuiRuntime {
         #[cfg(debug_assertions)]
         let builder = {
             let url = "http://127.0.0.1:5173/";
+            log::debug!("creating GUI runtime: configuring debug WebView builder: url={url}");
             WxpWebViewBuilder::new(&mut wxp_context)
                 .with_command_handler(command_handler.clone())
                 .with_devtools(cfg!(debug_assertions))
@@ -317,6 +330,7 @@ impl WracGainGuiRuntime {
         #[cfg(not(debug_assertions))]
         let builder = {
             let url = "wxp-plugin://localhost/";
+            log::debug!("creating GUI runtime: configuring release WebView builder: url={url}");
             WxpWebViewBuilder::new(&mut wxp_context)
                 .with_command_handler(command_handler.clone())
                 .with_devtools(cfg!(debug_assertions))
@@ -329,9 +343,11 @@ impl WracGainGuiRuntime {
         };
 
         // parent window 上に子として WebView を作る。これで host UI に埋め込まれる。
+        log::debug!("creating GUI runtime: build_as_child start");
         let web_view = builder
             .build_as_child(&parent)
             .map_err(|_| PluginError::Message("failed to build webview"))?;
+        log::debug!("creating GUI runtime: build_as_child completed");
 
         // 33ms ≒ 30Hz で現在値を GUI に流す。サンプルでは値が変わったかの dirty
         // flag を持たず、GUI runtime が shared state を読む形にしておく方が構造を
@@ -348,8 +364,11 @@ impl WracGainGuiRuntime {
                 gui_notifier.notify_parameter(PARAM_GAIN_ID, shared.gain());
             }
         });
+        log::debug!("creating GUI runtime: starting GUI update timer");
         gui_update_timer.start();
+        log::debug!("creating GUI runtime: GUI update timer started");
 
+        log::debug!("creating GUI runtime: completed");
         Ok(Self {
             gui_notifier: dependencies.gui_notifier,
             web_view: Some(web_view),
@@ -399,24 +418,52 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
     }
 
     fn show(&mut self) -> PluginResult<()> {
+        log::debug!("showing GUI runtime");
         if let Some(web_view) = &self.web_view {
             web_view
                 .set_visible(true)
                 .map_err(|_| PluginError::Message("failed to show webview"))?;
         }
         self.gui_update_timer.start();
+        log::debug!("showing GUI runtime completed");
         Ok(())
     }
 
     fn hide(&mut self) -> PluginResult<()> {
+        log::debug!("hiding GUI runtime");
         self.gui_update_timer.stop();
         if let Some(web_view) = &self.web_view {
             web_view
                 .set_visible(false)
                 .map_err(|_| PluginError::Message("failed to hide webview"))?;
         }
+        log::debug!("hiding GUI runtime completed");
         Ok(())
     }
+}
+
+fn webview_data_dir(plugin_id: &str) -> PathBuf {
+    let plugin_dir = sanitize_plugin_data_dir(plugin_id);
+    match ProjectDirs::from("com", "your-company", "wrac-gain") {
+        Some(dirs) => dirs.data_dir().join("webview").join(plugin_dir),
+        None => std::env::temp_dir()
+            .join("wrac-gain-plugin")
+            .join("webview")
+            .join(plugin_dir),
+    }
+}
+
+fn sanitize_plugin_data_dir(plugin_id: &str) -> String {
+    plugin_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 // host が GUI を閉じると runtime が drop される。
@@ -428,11 +475,15 @@ impl Drop for WracGainGuiRuntime {
         // timer callback は run loop と GUI subscription に依存する。native WebView を
         // 落とす前に止めて、破棄途中の GUI state を tick が見る余地をなくす。
         self.gui_update_timer.stop();
+        log::debug!("dropping GUI runtime: timer stopped");
         // GUI が消えるので、shared state からも channel を外しておく。
         self.gui_notifier.clear_subscriptions();
+        log::debug!("dropping GUI runtime: subscriptions cleared");
         // WebView → WebContext の順で drop。逆だと wry が context 不在で panic することがある。
         self.web_view = None;
+        log::debug!("dropping GUI runtime: webview dropped");
         self.wxp_context = None;
+        log::debug!("dropping GUI runtime: web context dropped");
         // `command_handler` と `gui_update_timer` は field drop に任せる。
         // 下記 2 行は「ここまで生かしたい」ことを明示するためのダミー read。
         let _ = Rc::strong_count(&self.command_handler);
