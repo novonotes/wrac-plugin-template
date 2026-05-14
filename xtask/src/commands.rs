@@ -565,10 +565,10 @@ fn installed_artifacts(ctx: &Context, target: PluginTarget) -> Result<Vec<PathBu
         PluginTarget::Vst3 => VST3_BUNDLE_NAME,
         PluginTarget::Au => AU_BUNDLE_NAME,
     };
-    Ok([InstallScope::User, InstallScope::System]
+    [InstallScope::User, InstallScope::System]
         .into_iter()
         .map(|scope| install_dir(ctx, scope, format).map(|dir| dir.join(bundle_name)))
-        .collect::<Result<Vec<_>>>()?)
+        .collect::<Result<Vec<_>>>()
 }
 
 pub(crate) fn validate(
