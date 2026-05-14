@@ -79,14 +79,16 @@ add_library(${PLUGIN_NAME_SAFE}_impl STATIC IMPORTED)
 if(MSVC)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
       IMPORTED_LOCATION "${CLAP_WRAPPER_BUILDER_TARGET_LIB}"
-      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib"
+      # Rust staticlibs do not carry native system-library dependencies into
+      # the final wrapper link, so keep the common Windows runtime deps explicit.
+      INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib;runtimeobject.lib;psapi.lib"
   )
 endif()
 
 if(APPLE)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
       IMPORTED_LOCATION "${CLAP_WRAPPER_BUILDER_TARGET_LIB}"
-      INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation"
+      INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation;-framework WebKit"
   )
 endif()
 # Generate the source file for the CLAP entry point.

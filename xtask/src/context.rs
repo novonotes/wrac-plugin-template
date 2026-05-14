@@ -100,9 +100,4 @@ impl Context {
         self.cargo_profile_dir(profile)
             .join(self.platform.dynamic_library_name())
     }
-
-    pub(crate) fn static_library(&self, profile: BuildProfile) -> PathBuf {
-        self.cargo_profile_dir(profile)
-            .join(self.platform.static_library_name())
-    }
 }

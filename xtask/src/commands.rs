@@ -34,13 +34,23 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     }
 
     build_gui(ctx)?;
-    build_rust_plugin(ctx, profile)?;
 
     if targets.contains(&Target::Clap) {
+        build_rust_plugin(ctx, profile, RustPluginBuild::Default)?;
         package_clap(ctx, profile)?;
     }
 
-    if targets.iter().any(|target| target.is_wrapper()) {
+    if ctx.platform == Platform::Macos {
+        if targets.contains(&Target::Vst3) {
+            build_rust_plugin(ctx, profile, RustPluginBuild::Vst3)?;
+            build_wrapper_set(ctx, profile, WrapperBuild::Vst3)?;
+        }
+        if targets.contains(&Target::Au) {
+            build_rust_plugin(ctx, profile, RustPluginBuild::Au)?;
+            build_wrapper_set(ctx, profile, WrapperBuild::Au)?;
+        }
+    } else if targets.iter().any(|target| target.is_wrapper()) {
+        build_rust_plugin(ctx, profile, RustPluginBuild::Default)?;
         build_wrapper_set(
             ctx,
             profile,
@@ -52,6 +62,7 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     }
 
     if targets.contains(&Target::Standalone) {
+        build_rust_plugin(ctx, profile, RustPluginBuild::Standalone)?;
         build_wrapper_set(ctx, profile, WrapperBuild::Standalone)?;
     }
 
@@ -84,13 +95,62 @@ fn npm_command(platform: Platform) -> &'static str {
     }
 }
 
-fn build_rust_plugin(ctx: &Context, profile: BuildProfile) -> Result<()> {
-    println!("Building Rust plugin...");
+#[derive(Debug, Clone, Copy)]
+enum RustPluginBuild {
+    Default,
+    Vst3,
+    Au,
+    Standalone,
+}
+
+impl RustPluginBuild {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Vst3 => "vst3",
+            Self::Au => "au",
+            Self::Standalone => "standalone",
+        }
+    }
+
+    fn cargo_target_dir(self, ctx: &Context) -> PathBuf {
+        match self {
+            Self::Default => ctx.target_dir.clone(),
+            Self::Vst3 | Self::Au | Self::Standalone => {
+                ctx.wrac_dir().join("cargo").join(self.label())
+            }
+        }
+    }
+
+    fn dynamic_library(self, ctx: &Context, profile: BuildProfile) -> PathBuf {
+        self.cargo_target_dir(ctx)
+            .join(profile.cargo_dir())
+            .join(ctx.platform.dynamic_library_name())
+    }
+
+    fn static_library(self, ctx: &Context, profile: BuildProfile) -> PathBuf {
+        self.cargo_target_dir(ctx)
+            .join(profile.cargo_dir())
+            .join(ctx.platform.static_library_name())
+    }
+
+    fn objc_suffix(self) -> &'static str {
+        match self {
+            Self::Default => "WracGainPlugin",
+            Self::Vst3 => "WracGainPluginVst3",
+            Self::Au => "WracGainPluginAu",
+            Self::Standalone => "WracGainPluginStandalone",
+        }
+    }
+}
+
+fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuild) -> Result<()> {
+    println!("Building Rust plugin ({})...", build.label());
     let mut command = Command::new("cargo");
     command
         .arg("build")
         .arg("--target-dir")
-        .arg(&ctx.target_dir)
+        .arg(build.cargo_target_dir(ctx))
         .arg("--manifest-path")
         .arg(ctx.plugin_manifest());
     if let Some(flag) = profile.cargo_flag() {
@@ -104,18 +164,18 @@ fn build_rust_plugin(ctx: &Context, profile: BuildProfile) -> Result<()> {
                 "MACOSX_DEPLOYMENT_TARGET",
                 env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
             )
-            .env(
-                "WRY_OBJC_SUFFIX",
-                env_value_or("WRY_OBJC_SUFFIX", "WracGainPlugin"),
-            );
+            .env("WRY_OBJC_SUFFIX", build.objc_suffix());
     }
     run(command.current_dir(&ctx.root))?;
 
-    ensure_exists(&ctx.dynamic_library(profile), "dynamic plugin library")?;
+    ensure_exists(
+        &build.dynamic_library(ctx, profile),
+        "dynamic plugin library",
+    )?;
     if ctx.platform.supports_wrappers() {
         // clap-wrapper は CLAP bundle ではなく Rust staticlib を直接 link する。
         // CLAP だけの platform では不要なので、wrapper 対応 OS の時だけ確認する。
-        ensure_exists(&ctx.static_library(profile), "static plugin library")?;
+        ensure_exists(&build.static_library(ctx, profile), "static plugin library")?;
     }
     Ok(())
 }
@@ -158,6 +218,8 @@ fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 enum WrapperBuild {
     Plugin { vst3: bool, au: bool },
+    Vst3,
+    Au,
     Standalone,
 }
 
@@ -165,17 +227,32 @@ impl WrapperBuild {
     fn purpose(self) -> &'static str {
         match self {
             Self::Plugin { .. } => "wrap",
+            Self::Vst3 => "wrap-vst3",
+            Self::Au => "wrap-au",
             Self::Standalone => "standalone",
+        }
+    }
+
+    fn rust_build(self) -> RustPluginBuild {
+        match self {
+            Self::Plugin { .. } => RustPluginBuild::Default,
+            Self::Vst3 => RustPluginBuild::Vst3,
+            Self::Au => RustPluginBuild::Au,
+            Self::Standalone => RustPluginBuild::Standalone,
         }
     }
 }
 
 fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) -> Result<()> {
-    ensure_exists(&ctx.static_library(profile), "static plugin library")?;
+    let rust_build = build.rust_build();
+    let static_library = rust_build.static_library(ctx, profile);
+    ensure_exists(&static_library, "static plugin library")?;
 
     let build_dir = ctx.cmake_dir(build.purpose(), profile);
     let stage_dir = match build {
-        WrapperBuild::Plugin { .. } => ctx.plugins_dir(profile),
+        WrapperBuild::Plugin { .. } | WrapperBuild::Vst3 | WrapperBuild::Au => {
+            ctx.plugins_dir(profile)
+        }
         WrapperBuild::Standalone => ctx.standalone_dir(profile),
     };
     fs::create_dir_all(&stage_dir)?;
@@ -191,7 +268,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
         .arg(&build_dir)
         .arg(format!(
             "-DCLAP_WRAPPER_BUILDER_TARGET_LIB={}",
-            ctx.static_library(profile).display()
+            static_library.display()
         ))
         .arg(format!("-DCLAP_WRAPPER_BUILDER_OUTPUT_NAME={PLUGIN_NAME}"))
         .arg(format!(
@@ -215,6 +292,18 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                     on_off(vst3)
                 ))
                 .arg(format!("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2={}", on_off(au)))
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
+        }
+        WrapperBuild::Vst3 => {
+            configure
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=ON")
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
+        }
+        WrapperBuild::Au => {
+            configure
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
         }
         WrapperBuild::Standalone => {
@@ -290,6 +379,14 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                 // AU は AudioComponentRegistrar 経由で読むため、local build でも署名済みにしておく。
                 codesign_nested_macos_bundle(&ctx.au_bundle(profile))?;
             }
+        }
+        WrapperBuild::Vst3 => {
+            ensure_exists(&ctx.vst3_bundle(profile), "VST3 artifact")?;
+            codesign_nested_macos_bundle(&ctx.vst3_bundle(profile))?;
+        }
+        WrapperBuild::Au => {
+            ensure_exists(&ctx.au_bundle(profile), "AU artifact")?;
+            codesign_nested_macos_bundle(&ctx.au_bundle(profile))?;
         }
         WrapperBuild::Standalone => {
             ensure_exists(&ctx.standalone_artifact(profile), "standalone artifact")?;
