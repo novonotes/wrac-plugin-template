@@ -76,10 +76,12 @@ endif()
 # Create the static library target
 # Set up the external static library as an imported library
 add_library(${PLUGIN_NAME_SAFE}_impl STATIC IMPORTED)
+set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
+    IMPORTED_LOCATION "${CLAP_WRAPPER_BUILDER_TARGET_LIB}"
+)
 
 if(MSVC)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
-      IMPORTED_LOCATION "${CLAP_WRAPPER_BUILDER_TARGET_LIB}"
       # Rust staticlibs do not carry native system-library dependencies into
       # the final wrapper link, so keep the common Windows runtime deps explicit.
       INTERFACE_LINK_LIBRARIES "ntdll.lib;ws2_32.lib;userenv.lib;bcrypt.lib;runtimeobject.lib;psapi.lib"
@@ -88,7 +90,6 @@ endif()
 
 if(APPLE)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
-      IMPORTED_LOCATION "${CLAP_WRAPPER_BUILDER_TARGET_LIB}"
       INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation;-framework WebKit"
   )
 endif()
@@ -227,7 +228,8 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
             )
         else()
             add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_vst3 POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${PLUGIN_NAME_SAFE}_vst3>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.vst3"
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.vst3"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PLUGIN_NAME_SAFE}_vst3>/../.." "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.vst3"
                 VERBATIM
             )
         endif()

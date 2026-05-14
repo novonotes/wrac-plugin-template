@@ -88,7 +88,7 @@ jobs:
             validate-targets: vst3
             verify: |
               test -f "target/wrac/plugins/release/WRAC Gain.clap"
-              test -f "target/wrac/plugins/release/WRAC Gain.vst3"
+              test -d "target/wrac/plugins/release/WRAC Gain.vst3"
           - os: windows-latest
             targets: clap,vst3,standalone
             validate-targets: vst3
