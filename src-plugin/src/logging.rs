@@ -4,14 +4,13 @@
 //! template shows logs immediately while developing a plugin in a DAW, where
 //! stderr is often not visible from an attached debugger.
 
-use std::ffi::CStr;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, Once};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{LevelFilter, Log, Metadata, Record};
+use time::{OffsetDateTime, macros::format_description};
 
 static INIT: Once = Once::new();
 static LOGGER: DebugFileLogger = DebugFileLogger {
@@ -184,41 +183,9 @@ fn sanitize_file_stem(value: &str) -> String {
 }
 
 fn local_timestamp_millis() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let seconds = now.as_secs() as libc::time_t;
-    let millis = now.subsec_millis();
-
-    let mut local_time = std::mem::MaybeUninit::<libc::tm>::uninit();
-    // Safety: `localtime_r` writes a `tm` into the provided pointer when it
-    // succeeds. On failure we fall back to epoch milliseconds below.
-    let local_time = unsafe {
-        let result = libc::localtime_r(&seconds, local_time.as_mut_ptr());
-        if result.is_null() {
-            return format!("{}.{millis:03}", now.as_secs());
-        }
-        local_time.assume_init()
-    };
-
-    let mut buffer = [0_i8; 32];
-    let format = c"%Y-%m-%d %H:%M:%S";
-    // Safety: `buffer` is writable and `format` is a NUL-terminated C string.
-    let written = unsafe {
-        libc::strftime(
-            buffer.as_mut_ptr(),
-            buffer.len(),
-            format.as_ptr(),
-            &local_time,
-        )
-    };
-    if written == 0 {
-        return format!("{}.{millis:03}", now.as_secs());
-    }
-
-    // Safety: `strftime` wrote a NUL-terminated string into `buffer`.
-    let timestamp = unsafe { CStr::from_ptr(buffer.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    format!("{timestamp}.{millis:03}")
+    let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let format =
+        format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]");
+    now.format(format)
+        .unwrap_or_else(|_| format!("{}.{:03}", now.unix_timestamp(), now.millisecond()))
 }
