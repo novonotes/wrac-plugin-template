@@ -10,8 +10,7 @@ use wxp::{WebViewRef, dpi::LogicalSize};
 
 use crate::dpi::DpiConverter;
 use crate::runtime::{
-    GuiRuntimeHandle, WxpGuiFactory, create_gui_runtime_handle, is_gui_thread,
-    release_gui_thread_ref,
+    GuiRuntimeHandle, GuiThreadLease, WxpGuiFactory, create_gui_runtime_handle, is_gui_thread,
 };
 use crate::window::StoredParentWindow;
 
@@ -42,9 +41,19 @@ struct HostGuiLayout {
 }
 
 struct GuiRuntimeState {
+    session: Option<GuiSession>,
+}
+
+// CLAP の `create()` は GUI session の開始だが、embedded WebView の native child は
+// parent handle がないと作れない。session と runtime を分けることで、`create()` 後の
+// size/scale query には答えつつ、parent が来るまで native object 作成を遅延できる。
+struct GuiSession {
+    configuration: GuiConfiguration,
     scale: f64,
     parent: Option<StoredParentWindow>,
+    parent_lease: Option<GuiThreadLease>,
     handle: Option<GuiRuntimeHandle>,
+    visible: bool,
 }
 
 #[derive(Clone)]
@@ -62,27 +71,13 @@ impl WxpGuiController {
             factory: Box::new(factory),
             layout: resize_handle.layout.clone(),
             scale: resize_handle.scale.clone(),
-            runtime: Mutex::new(GuiRuntimeState {
-                scale: 1.0,
-                parent: None,
-                handle: None,
-            }),
+            runtime: Mutex::new(GuiRuntimeState { session: None }),
         }
     }
 
-    fn destroy_runtime_and_parent_ref(&self) {
-        let (handle, release_parent_ref) = {
-            let mut state = self.runtime.lock();
-            let handle = state.handle.take();
-            let release_parent_ref = state.parent.take().is_some();
-            (handle, release_parent_ref)
-        };
-        if let Some(handle) = handle {
-            handle.destroy();
-        }
-        if release_parent_ref {
-            release_gui_thread_ref();
-        }
+    fn destroy_gui_session(&self) {
+        let session = { self.runtime.lock().session.take() };
+        drop_session(session);
     }
 
     fn create_runtime(
@@ -243,20 +238,39 @@ impl PluginGui for WxpGuiController {
         if !self.is_api_supported(configuration.api, configuration.is_floating) {
             return Err(PluginError::Message("unsupported GUI configuration"));
         }
+        self.destroy_gui_session();
+        let scale = *self.scale.lock();
+        self.runtime.lock().session = Some(GuiSession {
+            configuration,
+            scale,
+            parent: None,
+            parent_lease: None,
+            handle: None,
+            // 一部 wrapper は embedded view を parent に付けた時点で表示扱いにし、`show()`
+            // を呼ばない。初回 parent attach は表示状態として扱い、明示的な `hide()` を優先する。
+            visible: true,
+        });
         Ok(())
     }
 
     fn destroy(&self) {
-        self.destroy_runtime_and_parent_ref();
+        self.destroy_gui_session();
     }
 
     fn set_scale(&self, scale: f64) -> PluginResult<()> {
-        let handle = { self.runtime.lock().handle.clone() };
+        let handle = {
+            let mut state = self.runtime.lock();
+            if let Some(session) = &mut state.session {
+                session.scale = scale;
+                session.handle.clone()
+            } else {
+                None
+            }
+        };
         if let Some(handle) = handle {
             handle.set_scale(scale)?;
         }
         *self.scale.lock() = scale;
-        self.runtime.lock().scale = scale;
         Ok(())
     }
 
@@ -278,7 +292,13 @@ impl PluginGui for WxpGuiController {
 
     fn set_size(&self, size: GuiSize) -> PluginResult<()> {
         let size = self.layout.clamp_size(size);
-        let handle = { self.runtime.lock().handle.clone() };
+        let handle = {
+            self.runtime
+                .lock()
+                .session
+                .as_ref()
+                .and_then(|session| session.handle.clone())
+        };
         if let Some(handle) = handle {
             handle.set_size(size)?;
         }
@@ -287,45 +307,80 @@ impl PluginGui for WxpGuiController {
     }
 
     fn set_parent(&self, window: ClapWindow) -> PluginResult<()> {
-        // parent window は host UI thread に属する。WebView の生成自体は `show()` まで
-        // 遅らせるが、thread ownership は最初の `set_parent()` で固定しておく。
-        {
+        let parent = StoredParentWindow::from_clap_window(window);
+        let needs_parent_lease = {
             let state = self.runtime.lock();
-            if state.parent.is_some() {
+            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            if session.parent.is_some() {
                 if !is_gui_thread() {
                     return Err(PluginError::UnsupportedHostGuiThreadingModel);
                 }
+                false
             } else {
-                drop(state);
-                crate::runtime::acquire_gui_thread()?;
+                true
             }
-        }
+        };
 
-        let parent = StoredParentWindow::from_clap_window(window);
+        let parent_lease = needs_parent_lease
+            .then(GuiThreadLease::acquire)
+            .transpose()?;
+
         let old_handle = {
             let mut state = self.runtime.lock();
-            state.parent = Some(parent);
-            state.handle.take()
+            let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
+            // parent handle が変わると、既存 child WebView を安全に reparent できる保証が
+            // wxp/wry 側にない。古い runtime を先に落として、新しい parent 上に作り直す。
+            session.handle.take()
         };
         if let Some(handle) = old_handle {
             handle.destroy();
         }
 
-        let create = {
+        let (configuration, size, scale, visible) = {
             let state = self.runtime.lock();
-            // CLAP の GUI spec 上は `show()` が表示開始の合図だが、clap-wrapper の AUv2
-            // 経由では Logic Pro が embedded view を parent に付けた時点で表示扱いにし、
-            // `show()` を呼ばない経路がある。WebView 作成を `show()` だけに遅延すると
-            // host の空 container だけが表示されるため、parent が確定した時点で runtime を作る。
-            state
-                .handle
-                .is_none()
-                .then_some((self.layout.accepted_size(), parent, state.scale))
+            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            (
+                session.configuration,
+                self.layout.accepted_size(),
+                session.scale,
+                session.visible,
+            )
         };
-        if let Some((size, parent, scale)) = create {
-            let handle = self.create_runtime(default_gui_configuration(), size, parent, scale)?;
-            self.runtime.lock().handle = Some(handle);
+        // CLAP の GUI spec 上は `show()` が表示開始の合図だが、clap-wrapper の AUv2
+        // 経由では Logic Pro が embedded view を parent に付けた時点で表示扱いにし、
+        // `show()` を呼ばない経路がある。WebView 作成は parent が必要なのでここで行う。
+        let handle = match self.create_runtime(configuration, size, parent, scale) {
+            Ok(handle) => handle,
+            Err(error) => {
+                if needs_parent_lease {
+                    let mut state = self.runtime.lock();
+                    if let Some(session) = &mut state.session {
+                        session.parent = None;
+                        session.parent_lease = None;
+                    }
+                }
+                // parent attach 失敗後に parent lease だけ残ると、次回 GUI session が別 thread
+                // から来た時に不要に拒否される。失敗した attach は状態を進めない。
+                drop(parent_lease);
+                return Err(error);
+            }
+        };
+        if !visible {
+            if let Err(error) = handle.hide() {
+                // hidden 初期化に失敗した runtime は、session に入れず破棄する。半端な handle を
+                // 残すと以降の `show()`/`destroy()` が失敗済み WebView を操作してしまう。
+                handle.destroy();
+                drop(parent_lease);
+                return Err(error);
+            }
         }
+        let mut state = self.runtime.lock();
+        let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
+        session.parent = Some(parent);
+        if let Some(parent_lease) = parent_lease {
+            session.parent_lease = Some(parent_lease);
+        }
+        session.handle = Some(handle);
         Ok(())
     }
 
@@ -338,29 +393,40 @@ impl PluginGui for WxpGuiController {
     fn show(&self) -> PluginResult<()> {
         let action = {
             let state = self.runtime.lock();
-            if let Some(handle) = state.handle.clone() {
+            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            if let Some(handle) = session.handle.clone() {
                 ShowAction::ShowExisting(handle)
             } else {
-                let parent = state.parent.ok_or(PluginError::InvalidState)?;
+                let parent = session.parent.ok_or(PluginError::InvalidState)?;
                 ShowAction::Create {
+                    configuration: session.configuration,
                     size: self.layout.accepted_size(),
                     parent,
-                    scale: state.scale,
+                    scale: session.scale,
                 }
             }
         };
 
         match action {
-            ShowAction::ShowExisting(handle) => handle.show(),
+            ShowAction::ShowExisting(handle) => {
+                handle.show()?;
+                if let Some(session) = &mut self.runtime.lock().session {
+                    session.visible = true;
+                }
+                Ok(())
+            }
             ShowAction::Create {
+                configuration,
                 size,
                 parent,
                 scale,
             } => {
-                let handle =
-                    self.create_runtime(default_gui_configuration(), size, parent, scale)?;
+                let handle = self.create_runtime(configuration, size, parent, scale)?;
                 handle.show()?;
-                self.runtime.lock().handle = Some(handle);
+                let mut state = self.runtime.lock();
+                let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
+                session.handle = Some(handle);
+                session.visible = true;
                 Ok(())
             }
         }
@@ -368,16 +434,28 @@ impl PluginGui for WxpGuiController {
 
     fn hide(&self) -> PluginResult<()> {
         let handle = {
-            let mut state = self.runtime.lock();
-            state.handle.take()
+            let state = self.runtime.lock();
+            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            session.handle.clone()
         };
         if let Some(handle) = handle {
-            let _ = handle.hide();
-            // wxp の public handle は visible 切替を直接公開していない。`hide()` では
-            // runtime を破棄して、CLAP の「見えていない」状態を確実に満たす。
-            handle.destroy();
+            handle.hide()?;
+        }
+        if let Some(session) = &mut self.runtime.lock().session {
+            session.visible = false;
         }
         Ok(())
+    }
+}
+
+fn drop_session(session: Option<GuiSession>) {
+    if let Some(mut session) = session {
+        if let Some(handle) = session.handle.take() {
+            handle.destroy();
+        }
+        // runtime drop が終わってから parent lease を解放する。timer stop や WebView teardown が
+        // run loop 上で完了する前に owner thread を解放しないため。
+        drop(session.parent_lease.take());
     }
 }
 
@@ -390,13 +468,14 @@ fn clamp_size_with_limits(size: GuiSize, limits: GuiSizeLimits) -> GuiSize {
 
 impl Drop for WxpGuiController {
     fn drop(&mut self) {
-        self.destroy_runtime_and_parent_ref();
+        self.destroy_gui_session();
     }
 }
 
 enum ShowAction {
     ShowExisting(GuiRuntimeHandle),
     Create {
+        configuration: GuiConfiguration,
         size: GuiSize,
         parent: StoredParentWindow,
         scale: f64,

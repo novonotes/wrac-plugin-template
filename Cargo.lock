@@ -3393,7 +3393,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=c5cb77a66fe9600bf60bac828721ba26d510ff07#c5cb77a66fe9600bf60bac828721ba26d510ff07"
+source = "git+https://github.com/novonotes/wxp.git?branch=main#4c7b2c97a6fe1d4d55586f3ee1b0b2201bbe4773"
 dependencies = [
  "async-trait",
  "directories",

@@ -397,6 +397,26 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         }
         Ok(())
     }
+
+    fn show(&mut self) -> PluginResult<()> {
+        if let Some(web_view) = &self.web_view {
+            web_view
+                .set_visible(true)
+                .map_err(|_| PluginError::Message("failed to show webview"))?;
+        }
+        self.gui_update_timer.start();
+        Ok(())
+    }
+
+    fn hide(&mut self) -> PluginResult<()> {
+        self.gui_update_timer.stop();
+        if let Some(web_view) = &self.web_view {
+            web_view
+                .set_visible(false)
+                .map_err(|_| PluginError::Message("failed to hide webview"))?;
+        }
+        Ok(())
+    }
 }
 
 // host が GUI を閉じると runtime が drop される。
@@ -405,6 +425,9 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
 impl Drop for WracGainGuiRuntime {
     fn drop(&mut self) {
         log::debug!("dropping GUI runtime");
+        // timer callback は run loop と GUI subscription に依存する。native WebView を
+        // 落とす前に止めて、破棄途中の GUI state を tick が見る余地をなくす。
+        self.gui_update_timer.stop();
         // GUI が消えるので、shared state からも channel を外しておく。
         self.gui_notifier.clear_subscriptions();
         // WebView → WebContext の順で drop。逆だと wry が context 不在で panic することがある。
