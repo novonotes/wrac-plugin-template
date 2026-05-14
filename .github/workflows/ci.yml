@@ -44,7 +44,7 @@ jobs:
         os:
           - ubuntu-latest
           - windows-latest
-          - macos-14
+          - macos-latest
 
     steps:
       - name: Checkout repository
@@ -91,7 +91,7 @@ jobs:
               test -f "target/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac/plugins/release/WRAC Gain.vst3"
               test -f "target/wrac/standalone/release/WRAC Gain Standalone.exe"
-          - os: macos-14
+          - os: macos-latest
             targets: clap,vst3,au,standalone
             validate-targets: vst3,au
             verify: |
