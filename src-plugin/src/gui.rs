@@ -41,11 +41,11 @@ use crate::state::SharedState;
 // ユーザーがリサイズしたときは min..=max の範囲にクランプされる。
 const DEFAULT_GUI_SIZE: GuiSize = GuiSize {
     width: 320,
-    height: 340,
+    height: 380,
 };
 const MIN_GUI_SIZE: GuiSize = GuiSize {
     width: 320,
-    height: 340,
+    height: 380,
 };
 const MAX_GUI_SIZE: GuiSize = GuiSize {
     width: 720,
@@ -267,8 +267,14 @@ impl WracGainGuiRuntime {
         // このサンプルは embedded (parent に貼り付けるタイプ) しか対応していない。
         // floating window が必要な場合は別途実装する。
         if configuration.is_floating {
+            log::warn!("rejecting floating GUI configuration");
             return Err(PluginError::Message("unsupported GUI configuration"));
         }
+        log::debug!(
+            "creating GUI runtime: width={}, height={}",
+            initial_size.width,
+            initial_size.height
+        );
 
         // WebView から呼べる parameter command を登録する。
         let command_handler = Rc::new(WxpCommandHandler::new());
@@ -285,6 +291,7 @@ impl WracGainGuiRuntime {
         let data_dir = std::env::temp_dir().join("wrac-gain-plugin");
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| PluginError::Message("failed to create GUI data directory"))?;
+        log::debug!("using GUI data directory: {}", data_dir.display());
 
         let mut wxp_context = WebContext::new(data_dir);
         // 初期 scale は 1.0 とし、後で host から `set_scale` で書き換えられる。
@@ -359,6 +366,7 @@ impl WracGainGuiRuntime {
 impl WxpGuiRuntime for WracGainGuiRuntime {
     /// host が表示倍率 (HiDPI 等) を伝えてきたときに呼ばれる。
     fn set_scale(&mut self, scale: f64) -> PluginResult<()> {
+        log::debug!("setting GUI scale: scale={scale}");
         self.dpi_converter.set_scale(scale);
         Ok(())
     }
@@ -373,6 +381,13 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
             requested
                 .height
                 .clamp(MIN_LOGICAL_GUI_SIZE.height, MAX_LOGICAL_GUI_SIZE.height),
+        );
+        log::debug!(
+            "setting GUI size: requested_width={}, requested_height={}, applied_width={}, applied_height={}",
+            size.width,
+            size.height,
+            self.gui_size.width,
+            self.gui_size.height
         );
 
         if let Some(web_view) = &self.web_view {
@@ -389,6 +404,7 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
 // 順で進めることで、callback が解放後の object を触る事故を防ぐ。
 impl Drop for WracGainGuiRuntime {
     fn drop(&mut self) {
+        log::debug!("dropping GUI runtime");
         // GUI が消えるので、shared state からも channel を外しておく。
         self.gui_notifier.clear_subscriptions();
         // WebView → WebContext の順で drop。逆だと wry が context 不在で panic することがある。
