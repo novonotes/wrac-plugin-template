@@ -23,15 +23,6 @@ impl Target {
     pub(crate) fn is_wrapper(self) -> bool {
         matches!(self, Self::Vst3 | Self::Au)
     }
-
-    pub(crate) fn plugin_target(self) -> Option<PluginTarget> {
-        match self {
-            Self::Clap => Some(PluginTarget::Clap),
-            Self::Vst3 => Some(PluginTarget::Vst3),
-            Self::Au => Some(PluginTarget::Au),
-            Self::Standalone => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

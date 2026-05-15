@@ -47,7 +47,8 @@ cargo xtask install
 CLAP/VST3/AU/standalone on macOS, CLAP/VST3/standalone on Windows, and CLAP on
 Linux. Use `build --target` with a comma-separated list of `clap`, `vst3`,
 `au`, and `standalone` to build a smaller set. `install` and `uninstall` accept
-plugin formats only: `clap`, `vst3`, and `au`.
+plugin formats only: `clap`, `vst3`, and `au`. `install --scope` accepts `user`
+or `system`; `uninstall --scope` accepts `user`, `system`, or `all`.
 
 Plugin artifacts are staged under `target/wrac/plugins/<profile>/`, and
 standalone apps are staged under `target/wrac/standalone/<profile>/`. On macOS,

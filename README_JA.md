@@ -54,6 +54,7 @@ cargo xtask install
 
 `build --target` には `clap`、`vst3`、`au`、`standalone` をカンマ区切りで指定できます。
 ただし、OS が対応していないフォーマットを指定した場合はエラーになります。
+`install --scope` は `user` または `system`、`uninstall --scope` は `user`、`system`、`all` を指定できます。
 
 使い方:
 

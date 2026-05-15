@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
-use crate::cli::{BuildArgs, InstallScope};
+use crate::cli::{BuildArgs, InstallScope, UninstallScope};
 use crate::constants::{
     AU_BUNDLE_NAME, AU_MANUFACTURER, AU_MANUFACTURER_NAME, AU_SUBTYPE, AU_TYPE, CLAP_BUNDLE_NAME,
     CRATE_NAME, PLUGIN_ID, PLUGIN_NAME, STANDALONE_NAME, VST3_BUNDLE_NAME,
@@ -64,10 +64,6 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     if targets.contains(&Target::Standalone) {
         build_rust_plugin(ctx, profile, RustPluginBuild::Standalone)?;
         build_wrapper_set(ctx, profile, WrapperBuild::Standalone)?;
-    }
-
-    if args.install {
-        install_built_targets(ctx, profile, &targets)?;
     }
 
     print_outputs(ctx, profile, &targets);
@@ -133,15 +129,6 @@ impl RustPluginBuild {
             .join(profile.cargo_dir())
             .join(ctx.platform.static_library_name())
     }
-
-    fn objc_suffix(self) -> &'static str {
-        match self {
-            Self::Default => "WracGainPlugin",
-            Self::Vst3 => "WracGainPluginVst3",
-            Self::Au => "WracGainPluginAu",
-            Self::Standalone => "WracGainPluginStandalone",
-        }
-    }
 }
 
 fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuild) -> Result<()> {
@@ -157,14 +144,11 @@ fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuil
         command.arg(flag);
     }
     if ctx.platform == Platform::Macos {
-        // macOS の webview/Objective-C runtime は deployment target と class 名衝突に敏感。
         // CI や利用者環境の env を尊重しつつ、未指定時だけ template の安全な既定値を入れる。
-        command
-            .env(
-                "MACOSX_DEPLOYMENT_TARGET",
-                env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
-            )
-            .env("WRY_OBJC_SUFFIX", build.objc_suffix());
+        command.env(
+            "MACOSX_DEPLOYMENT_TARGET",
+            env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
+        );
     }
     run(command.current_dir(&ctx.root))?;
 
@@ -413,20 +397,6 @@ pub(crate) fn install(
     install_plugin_targets(ctx, profile, scope, &targets)
 }
 
-fn install_built_targets(ctx: &Context, profile: BuildProfile, targets: &[Target]) -> Result<()> {
-    // build target には standalone も含まれるが、install 先を持つのは plugin format だけ。
-    // CLI の --install は build の便利オプションなので、standalone を黙って除外する。
-    let targets: Vec<_> = targets
-        .iter()
-        .filter_map(|target| target.plugin_target())
-        .collect();
-    if targets.is_empty() {
-        println!("No plugin targets to install.");
-        return Ok(());
-    }
-    install_plugin_targets(ctx, profile, InstallScope::User, &targets)
-}
-
 fn install_plugin_targets(
     ctx: &Context,
     profile: BuildProfile,
@@ -452,13 +422,18 @@ fn install_plugin_targets(
     Ok(())
 }
 
-pub(crate) fn uninstall(ctx: &Context, requested: &[PluginTarget], dry_run: bool) -> Result<()> {
+pub(crate) fn uninstall(
+    ctx: &Context,
+    scope: UninstallScope,
+    requested: &[PluginTarget],
+    dry_run: bool,
+) -> Result<()> {
     let targets = resolve_plugin_targets(ctx.platform, requested)?;
 
     let mut removed = 0usize;
     let mut missing = 0usize;
     for target in targets {
-        for path in installed_artifacts(ctx, target)? {
+        for path in installed_artifacts(ctx, scope, target)? {
             if !path.exists() {
                 println!("Not found: {}", path.display());
                 missing += 1;
@@ -558,7 +533,11 @@ fn install_artifact(artifact: &Path, destination_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn installed_artifacts(ctx: &Context, target: PluginTarget) -> Result<Vec<PathBuf>> {
+fn installed_artifacts(
+    ctx: &Context,
+    scope: UninstallScope,
+    target: PluginTarget,
+) -> Result<Vec<PathBuf>> {
     let format = match target {
         PluginTarget::Clap => PluginFormat::Clap,
         PluginTarget::Vst3 => PluginFormat::Vst3,
@@ -569,10 +548,21 @@ fn installed_artifacts(ctx: &Context, target: PluginTarget) -> Result<Vec<PathBu
         PluginTarget::Vst3 => VST3_BUNDLE_NAME,
         PluginTarget::Au => AU_BUNDLE_NAME,
     };
-    [InstallScope::User, InstallScope::System]
-        .into_iter()
-        .map(|scope| install_dir(ctx, scope, format).map(|dir| dir.join(bundle_name)))
+    uninstall_scopes(scope)
+        .iter()
+        .copied()
+        .map(|install_scope| {
+            install_dir(ctx, install_scope, format).map(|dir| dir.join(bundle_name))
+        })
         .collect::<Result<Vec<_>>>()
+}
+
+fn uninstall_scopes(scope: UninstallScope) -> &'static [InstallScope] {
+    match scope {
+        UninstallScope::All => &[InstallScope::User, InstallScope::System],
+        UninstallScope::User => &[InstallScope::User],
+        UninstallScope::System => &[InstallScope::System],
+    }
 }
 
 pub(crate) fn validate(
