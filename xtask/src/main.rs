@@ -29,7 +29,7 @@ fn main() -> Result<()> {
             args.scope,
             &args.target,
         )?,
-        Commands::Uninstall(args) => uninstall(&ctx, &args.target, args.dry_run)?,
+        Commands::Uninstall(args) => uninstall(&ctx, args.scope, &args.target, args.dry_run)?,
         Commands::Validate(args) => {
             validate(&ctx, BuildProfile::from_release(args.release), &args.target)?
         }

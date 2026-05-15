@@ -21,6 +21,7 @@ Examples:
   cargo xtask build --target=au,standalone --release
 
 Notes:
+  Run `cargo xtask install` after building to install plugin artifacts.
   Run `cargo xtask validate` after building to validate VST3/AU artifacts.
   VST3/AU wrapper targets require clap-wrapper dependencies.";
 
@@ -54,11 +55,14 @@ Default targets by platform:
   Linux:   clap, vst3
 
 Examples:
+  cargo xtask uninstall
   cargo xtask uninstall --target=vst3
+  cargo xtask uninstall --scope=user
+  cargo xtask uninstall --scope=system
   cargo xtask uninstall --dry-run
 
 Notes:
-  uninstall removes both user-local and system-wide plugin artifacts.";
+  --scope defaults to all and removes both user-local and system-wide plugin artifacts.";
 
 const VALIDATE_AFTER_HELP: &str = "\
 Targets:
@@ -133,9 +137,6 @@ pub(crate) struct BuildArgs {
         long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, and standalone. Defaults to every target supported by the current OS."
     )]
     pub(crate) target: Vec<Target>,
-
-    #[arg(long, help = "Install plugin artifacts after a successful build.")]
-    pub(crate) install: bool,
 }
 
 #[derive(Debug, Args)]
@@ -168,8 +169,23 @@ pub(crate) enum InstallScope {
     System,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum UninstallScope {
+    All,
+    User,
+    System,
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct UninstallArgs {
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = UninstallScope::All,
+        help = "Uninstall location scope."
+    )]
+    pub(crate) scope: UninstallScope,
+
     #[arg(
         long,
         value_enum,

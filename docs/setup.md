@@ -86,7 +86,8 @@ Run the following from the repository root.
 
 ```sh
 cd /path/to/my_plugin
-cargo xtask build --install
+cargo xtask build
+cargo xtask install
 ```
 
 The built plugin will be installed to the following directories:
@@ -100,7 +101,8 @@ The built plugin will be installed to the following directories:
 On Windows, `cargo xtask install` installs to the user-local paths by default.
 Use `cargo xtask install --scope=system` to install to `%COMMONPROGRAMFILES%/CLAP/`
 and `%COMMONPROGRAMFILES%/VST3/` for hosts that only scan system-wide plug-in
-folders. `cargo xtask uninstall` removes both user-local and system-wide copies.
+folders. `cargo xtask uninstall` removes both user-local and system-wide copies by default;
+use `cargo xtask uninstall --scope=user` or `--scope=system` to remove only one scope.
 
 VST3 / AU / standalone are built where supported by the current OS. Standalone
 apps do not have a plugin install destination, so xtask prints their artifact

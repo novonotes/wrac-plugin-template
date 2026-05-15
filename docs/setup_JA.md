@@ -86,7 +86,8 @@ rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' -
 
 ```sh
 cd /path/to/my_plugin
-cargo xtask build --install
+cargo xtask build
+cargo xtask install
 ```
 
 以下のディレクトリにビルド済みプラグインがインストールされます:
@@ -100,7 +101,8 @@ cargo xtask build --install
 Windows では `cargo xtask install` は既定で user-local のパスにインストールします。
 system-wide のみをスキャンするホスト向けには `cargo xtask install --scope=system`
 を使うと `%COMMONPROGRAMFILES%/CLAP/` および `%COMMONPROGRAMFILES%/VST3/` に
-インストールできます。`cargo xtask uninstall` は user-local と system-wide の両方を削除します。
+インストールできます。`cargo xtask uninstall` は既定で user-local と system-wide の両方を削除し、
+`cargo xtask uninstall --scope=user` または `--scope=system` で片方だけを削除できます。
 
 VST3 / AU / standalone は現在の OS で対応している場合に同時にビルドされます。
 スタンドアローンアプリには plugin install 先がないため、xtask は artifact path を表示します。
