@@ -1390,7 +1390,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/run_loop.git?rev=2779a6400cc99a8728052ba4df1c475a492849de#2779a6400cc99a8728052ba4df1c475a492849de"
+source = "git+https://github.com/novonotes/wxp.git?rev=354d187b8b688b653bdb997f5da68aeff63aa7b0#354d187b8b688b653bdb997f5da68aeff63aa7b0"
 dependencies = [
  "core-foundation",
  "futures",
@@ -1913,9 +1913,9 @@ dependencies = [
 [[package]]
 name = "run_loop_timer"
 version = "0.1.0"
+source = "git+https://github.com/novonotes/wxp.git?rev=354d187b8b688b653bdb997f5da68aeff63aa7b0#354d187b8b688b653bdb997f5da68aeff63aa7b0"
 dependencies = [
  "novonotes_run_loop",
- "serial_test",
 ]
 
 [[package]]
@@ -1955,25 +1955,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "scc"
-version = "2.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc"
-dependencies = [
- "sdd",
-]
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "sdd"
-version = "3.0.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
 name = "selectors"
@@ -2056,32 +2041,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "serial_test"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "911bd979bf1070a3f3aa7b691a3b3e9968f339ceeec89e08c280a8a22207a32f"
-dependencies = [
- "futures-executor",
- "futures-util",
- "log",
- "once_cell",
- "parking_lot",
- "scc",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a7d91949b85b0d2fb687445e448b40d322b6b3e4af6b44a29b21d9a5f33e6d9"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -3183,7 +3142,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.55.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=eb86da648936dccd3486e6f3f6140be451daeaef#eb86da648936dccd3486e6f3f6140be451daeaef"
+source = "git+https://github.com/novonotes/wxp.git?rev=354d187b8b688b653bdb997f5da68aeff63aa7b0#354d187b8b688b653bdb997f5da68aeff63aa7b0"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3226,7 +3185,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=eb86da648936dccd3486e6f3f6140be451daeaef#eb86da648936dccd3486e6f3f6140be451daeaef"
+source = "git+https://github.com/novonotes/wxp.git?rev=354d187b8b688b653bdb997f5da68aeff63aa7b0#354d187b8b688b653bdb997f5da68aeff63aa7b0"
 dependencies = [
  "async-trait",
  "directories",

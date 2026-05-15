@@ -6,4 +6,3 @@
 
 - [wrac_clap_adapter](../crates/wrac_clap_adapter/README.md): PluginCore と extension の trait を定義し、その実装と CLAP の C ABI を接続します。
 - [wrac_wxp_gui](../crates/wrac_wxp_gui/README.md): WXP を CLAP GUI として扱うための helper です。
-- [run_loop_timer](../crates/run_loop_timer/README.md): `novonotes_run_loop` 上で繰り返し処理を実行する小さな timer crate です。
