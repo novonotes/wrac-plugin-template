@@ -48,12 +48,13 @@ cargo xtask install
 
 | OS | `cargo xtask build` の対象 | `cargo xtask validate` の対象 |
 |----|---------------------------|-------------------------------|
-| macOS | CLAP / VST3 / AU / Standalone | VST3 / AU |
-| Windows | CLAP / VST3 / Standalone | VST3 |
-| Linux | CLAP | なし |
+| macOS | CLAP / VST3 / AU / Standalone | CLAP / VST3 / AU |
+| Windows | CLAP / VST3 / Standalone | CLAP / VST3 |
+| Linux | CLAP / VST3 | CLAP / VST3 |
 
 `build --target` には `clap`、`vst3`、`au`、`standalone` をカンマ区切りで指定できます。
 ただし、OS が対応していないフォーマットを指定した場合はエラーになります。
+CLAP の検証は必要に応じて clap-validator 0.3.2 を `target/tools` にダウンロードして実行します。
 `install --scope` は `user` または `system`、`uninstall --scope` は `user`、`system`、`all` を指定できます。
 
 使い方:

@@ -22,7 +22,7 @@ Examples:
 
 Notes:
   Run `cargo xtask install` after building to install plugin artifacts.
-  Run `cargo xtask validate` after building to validate VST3/AU artifacts.
+  Run `cargo xtask validate` after building to validate CLAP/VST3/AU artifacts.
   VST3/AU wrapper targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
@@ -66,19 +66,21 @@ Notes:
 
 const VALIDATE_AFTER_HELP: &str = "\
 Targets:
-  vst3, au
+  clap, vst3, au
 
 Default targets by platform:
-  macOS:   vst3, au
-  Windows: vst3
-  Linux:   vst3
+  macOS:   clap, vst3, au
+  Windows: clap, vst3
+  Linux:   clap, vst3
 
 Examples:
   cargo xtask validate
   cargo xtask validate --release
+  cargo xtask validate --target=clap
   cargo xtask validate --target=vst3
 
 Notes:
+  CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
   AU validation fails if the same AU bundle exists under /Library/Audio/Plug-Ins/Components.";
@@ -112,7 +114,7 @@ pub(crate) enum Commands {
     )]
     Uninstall(UninstallArgs),
     #[command(
-        about = "Validate previously built VST3/AU artifacts.",
+        about = "Validate previously built CLAP/VST3/AU artifacts.",
         after_help = VALIDATE_AFTER_HELP
     )]
     Validate(ValidateArgs),
@@ -214,7 +216,7 @@ pub(crate) struct ValidateArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to validate, comma-separated.",
-        long_help = "Targets to validate, comma-separated. Supported values are vst3 and au. Defaults to every validation target supported by the current OS."
+        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, and au. Defaults to every validation target supported by the current OS."
     )]
     pub(crate) target: Vec<ValidateTarget>,
 }

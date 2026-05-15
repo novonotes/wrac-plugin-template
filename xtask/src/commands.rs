@@ -19,6 +19,8 @@ use crate::util::{
     remove_if_exists, run,
 };
 
+const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
+
 pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     let profile = BuildProfile::from_release(args.release);
     let targets = resolve_build_targets(ctx.platform, &args.target)?;
@@ -585,8 +587,19 @@ fn validate_targets(
     targets: &[ValidateTarget],
 ) -> Result<()> {
     if targets.is_empty() {
-        println!("No VST3/AU targets to validate.");
+        println!("No CLAP/VST3/AU targets to validate.");
         return Ok(());
+    }
+
+    if targets.contains(&ValidateTarget::Clap) {
+        let clap = ctx.clap_bundle(profile);
+        ensure_exists(&clap, "CLAP artifact")?;
+        let validator = ensure_clap_validator(ctx)?;
+        run(Command::new(validator)
+            .arg("validate")
+            .arg(&clap)
+            .arg("--only-failed")
+            .current_dir(&ctx.root))?;
     }
 
     if targets.contains(&ValidateTarget::Vst3) {
@@ -618,6 +631,76 @@ fn validate_targets(
     }
 
     Ok(())
+}
+
+fn ensure_clap_validator(ctx: &Context) -> Result<PathBuf> {
+    let validator_dir = ctx
+        .target_dir
+        .join("tools")
+        .join("clap-validator")
+        .join(CLAP_VALIDATOR_VERSION);
+    let validator = clap_validator_executable(ctx.platform, &validator_dir);
+    if validator.exists() {
+        return Ok(validator);
+    }
+
+    fs::create_dir_all(&validator_dir)?;
+    let archive_name = clap_validator_archive_name(ctx.platform);
+    let archive = validator_dir.join(archive_name);
+    if !archive.exists() {
+        let url = format!(
+            "https://github.com/free-audio/clap-validator/releases/download/{CLAP_VALIDATOR_VERSION}/{archive_name}"
+        );
+        run(Command::new("curl")
+            .args(["-L", "--fail", "-o"])
+            .arg(&archive)
+            .arg(url)
+            .current_dir(&ctx.root))?;
+    }
+
+    if archive_name.ends_with(".zip") {
+        run(Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Expand-Archive -Force -LiteralPath $args[0] -DestinationPath $args[1]",
+            ])
+            .arg(&archive)
+            .arg(&validator_dir)
+            .current_dir(&ctx.root))?;
+    } else {
+        run(Command::new("tar")
+            .args(["-xzf"])
+            .arg(&archive)
+            .arg("-C")
+            .arg(&validator_dir)
+            .current_dir(&ctx.root))?;
+    }
+
+    ensure_exists(&validator, "CLAP validator")?;
+    if ctx.platform != Platform::Windows {
+        run(Command::new("chmod")
+            .arg("+x")
+            .arg(&validator)
+            .current_dir(&ctx.root))?;
+    }
+    Ok(validator)
+}
+
+fn clap_validator_archive_name(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Macos => "clap-validator-0.3.2-macos-universal.tar.gz",
+        Platform::Windows => "clap-validator-0.3.2-windows.zip",
+        Platform::Linux => "clap-validator-0.3.2-ubuntu-18.04.tar.gz",
+    }
+}
+
+fn clap_validator_executable(platform: Platform, validator_dir: &Path) -> PathBuf {
+    match platform {
+        Platform::Macos => validator_dir.join("binaries").join("clap-validator"),
+        Platform::Windows => validator_dir.join("clap-validator.exe"),
+        Platform::Linux => validator_dir.join("clap-validator"),
+    }
 }
 
 fn ensure_no_system_au_conflict() -> Result<()> {

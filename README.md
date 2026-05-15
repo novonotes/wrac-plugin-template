@@ -44,17 +44,20 @@ cargo xtask install
 ```
 
 `cargo xtask build` builds every target supported by the current OS:
-CLAP/VST3/AU/standalone on macOS, CLAP/VST3/standalone on Windows, and CLAP on
-Linux. Use `build --target` with a comma-separated list of `clap`, `vst3`,
+CLAP/VST3/AU/standalone on macOS, CLAP/VST3/standalone on Windows, and CLAP/VST3
+on Linux. Use `build --target` with a comma-separated list of `clap`, `vst3`,
 `au`, and `standalone` to build a smaller set. `install` and `uninstall` accept
 plugin formats only: `clap`, `vst3`, and `au`. `install --scope` accepts `user`
 or `system`; `uninstall --scope` accepts `user`, `system`, or `all`.
 
 Plugin artifacts are staged under `target/wrac/plugins/<profile>/`, and
 standalone apps are staged under `target/wrac/standalone/<profile>/`. On macOS,
-`cargo xtask validate` runs the VST3 validator and `auval -v aufx WtGn YrCo`.
-AU validation installs the built component under `~/Library/Audio/Plug-Ins/Components/`
-and fails if the same bundle exists under `/Library/Audio/Plug-Ins/Components/`.
+`cargo xtask validate` runs clap-validator, the VST3 validator, and
+`auval -v aufx WtGn YrCo`. On Windows and Linux, validation runs clap-validator
+and the VST3 validator. CLAP validation downloads clap-validator 0.3.2 into
+`target/tools` when needed. AU validation installs the built component under
+`~/Library/Audio/Plug-Ins/Components/` and fails if the same bundle exists under
+`/Library/Audio/Plug-Ins/Components/`.
 
 
 ## Setting Up a New Project

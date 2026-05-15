@@ -52,6 +52,7 @@ impl PluginTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum ValidateTarget {
+    Clap,
     Vst3,
     Au,
 }
@@ -59,6 +60,7 @@ pub(crate) enum ValidateTarget {
 impl ValidateTarget {
     pub(crate) fn display(self) -> &'static str {
         match self {
+            Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
             Self::Au => "AU",
         }
@@ -66,6 +68,7 @@ impl ValidateTarget {
 
     pub(crate) fn target(self) -> Target {
         match self {
+            Self::Clap => Target::Clap,
             Self::Vst3 => Target::Vst3,
             Self::Au => Target::Au,
         }
@@ -131,12 +134,15 @@ impl Platform {
     }
 
     pub(crate) fn default_validate_targets(self) -> Vec<ValidateTarget> {
-        // validate は既に build 済みの wrapper artifact を確認する command。
-        // CLAP にはここで呼ぶ外部 validator がないため、VST3/AU だけを対象にする。
+        // validate は既に build 済みの plugin artifact を外部 validator で確認する command。
         match self {
-            Self::Macos => vec![ValidateTarget::Vst3, ValidateTarget::Au],
-            Self::Windows => vec![ValidateTarget::Vst3],
-            Self::Linux => vec![ValidateTarget::Vst3],
+            Self::Macos => vec![
+                ValidateTarget::Clap,
+                ValidateTarget::Vst3,
+                ValidateTarget::Au,
+            ],
+            Self::Windows => vec![ValidateTarget::Clap, ValidateTarget::Vst3],
+            Self::Linux => vec![ValidateTarget::Clap, ValidateTarget::Vst3],
         }
     }
 

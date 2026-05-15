@@ -14,11 +14,23 @@ pub(super) unsafe fn write_stream(stream: *const clap_ostream, bytes: &[u8]) -> 
         );
         return false;
     };
-    let written = unsafe { write(stream, bytes.as_ptr().cast(), bytes.len() as u64) };
-    let expected = bytes.len() as i64;
-    if written != expected {
-        log::warn!("ffi.write_stream: short write written={written} expected={expected}");
-        return false;
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let written = unsafe {
+            write(
+                stream,
+                bytes[offset..].as_ptr().cast(),
+                (bytes.len() - offset) as u64,
+            )
+        };
+        if written <= 0 {
+            log::warn!(
+                "ffi.write_stream: write failed written={written} offset={offset} byte_len={}",
+                bytes.len()
+            );
+            return false;
+        }
+        offset += written as usize;
     }
     true
 }
