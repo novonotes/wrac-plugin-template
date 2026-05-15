@@ -57,28 +57,18 @@ const CLAP_PLUGIN_FACTORY_INFO_AUV2: &CStr = c"clap.plugin-factory-info-as-auv2.
 
 /// CLAP instance と Rust core の同期境界。
 ///
-/// wrapper format では、Native CLAP なら `[main-thread]` 扱いの query/state callback
-/// が別 thread から呼ばれることがある。
-///
-/// そのため、この型は「lifecycle を守る lock」と「host-facing callback から直接読める
-/// capability」を明確に分ける。`PluginCore` lock は `activate()` / `deactivate()` のように
-/// processor 所有権を動かす callback だけで使い、parameter / state / port query は instance
-/// 作成時に固定した `Arc` capability を読む。
-///
-/// この分離がないと、たとえば wrapper が `activate()` 中に parameter query や state save を
-/// 再入させたとき、adapter は core lock を取れずに「parameter なし」「state 保存失敗」のような
-/// host-visible な欠落を返すことになる。クラッシュ回避としては安全でも、ユーザーの project
-/// data や host routing には悪い結果になる。
+/// 設計の要: 「lifecycle lock」と「host-facing callback が直接読む capability」を
+/// 分ける。`core` lock は processor 所有権を動かす `activate`/`deactivate` だけで
+/// 使い、parameter/state/port query は instance 作成時に固定した `Arc` を読む。
+/// 分けないと、wrapper が `activate()` 中に query を再入させたとき core lock を
+/// 取れず「parameter なし」「state 保存失敗」を host に返してしまう (crash は
+/// しないが project data や routing を壊す)。
 pub(crate) struct PluginInstance {
     plugin: clap_plugin,
-    // `PluginCore` は processor lifecycle の所有者です。host-facing capability は instance
-    // 作成時に Arc として固定し、query/state callback が lifecycle lock と競合して
-    // host-visible metadata や state を欠落させないようにする。
+    // processor lifecycle の所有者。lock を取るのは activate/deactivate だけ。
     core: RwLock<Box<dyn PluginCore>>,
-    // `get_extension()` は thread-safe callback なので、ここで `PluginCore` lock を取らない。
-    // instance 作成時点の capability に固定し、以後は immutable な function table だけを返す。
-    // capability の有無を runtime state と連動させないことで、host が query した瞬間だけ
-    // extension が消えるような不安定な見え方を避ける。
+    // capability の有無は instance 作成時に固定する。runtime state と連動させると
+    // 「query した瞬間だけ extension が消える」不安定な見え方になるため。
     capabilities: PluginCapabilities,
     audio_ports: Option<Arc<dyn PluginAudioPorts>>,
     configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPorts>>,
@@ -86,15 +76,12 @@ pub(crate) struct PluginInstance {
     parameters: Option<Arc<dyn PluginParameters>>,
     state: Option<Arc<dyn PluginStateSupport>>,
     gui: Option<Arc<dyn PluginGui>>,
-    // GUI mutation callback は native UI lifecycle に触れる。wrapper が再入・並行
-    // 呼び出ししてきた場合は待たずに失敗させ、host 依存の deadlock を避ける。
-    // GUI query callback はこの guard を通らず、実装側の host-facing/static state だけを読む。
+    // GUI mutation callback の再入 guard。再入時は待たず失敗させ deadlock を避ける
+    // (GUI query callback はこの guard を通らない)。
     gui_callback_busy: Mutex<()>,
     parameter_edits: Arc<ParameterEditQueue>,
-    // `process()` の再入や lifecycle callback との競合は host が避けるべきだが、
-    // wrapper host では CLAP の thread/lifecycle 注釈が崩れることがある。adapter の
-    // soundness をそこへ委ねないため、RT 経路では lock せず atomic guard が取れた
-    // callback だけに `Processor` への一時的な `&mut` を作らせる。
+    // wrapper が thread/lifecycle 注釈を崩しても soundness を保つため、RT 経路は
+    // lock せず atomic guard が取れた callback だけ `Processor` への `&mut` を作る。
     processor: UnsafeCell<Option<Box<dyn Processor>>>,
     processor_busy: AtomicBool,
     lifecycle_busy: AtomicBool,
@@ -119,21 +106,16 @@ unsafe impl Sync for PluginInstance {}
 impl PluginInstance {
     fn new(registration: &'static PluginRegistration, host: *const clap_host) -> Box<Self> {
         let parameter_edits = Arc::new(ParameterEditQueue::new(host));
-        // notifier は instance ごとに作り、core 生成時に safe proxy として渡す。
-        // 製品側 GUI はこれを保持しても host pointer や CLAP event lifetime を知らずに済む。
+        // notifier は safe proxy として渡す。製品 GUI は host pointer や CLAP event
+        // lifetime を知らずにこれを保持できる。
         let context = PluginCoreContext {
             host_parameter_edit_notifier: parameter_edits.clone(),
             host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
         };
         let core = (registration.create)(context);
-        // wrapper は軽量 query の途中で `get_extension()` を呼ぶことがある。ここで
-        // `PluginCore` の lock を待つと host 側の再入順に依存するため、capability は
-        // callback が走り始める前の instance 作成時点で固定する。
-        //
-        // 重要なのは、ここで得た Arc を adapter が SoT にしないことです。adapter は
-        // capability への入口だけを保持し、実際の parameter 値、project state、port layout の
-        // SoT は plugin 実装側の store に残す。製品 plugin はそれぞれの store に対して
-        // realtime-safe / non-realtime-safe の境界を自分で設計できる。
+        // capability は callback 開始前のここで固定する (get_extension 中に core
+        // lock を待つと host の再入順に依存するため)。得た Arc は入口にすぎず、
+        // 値の SoT は plugin 実装側の store に残る。
         let audio_ports = core.audio_ports();
         let configurable_audio_ports = core.configurable_audio_ports();
         let note_ports = core.note_ports();

@@ -28,13 +28,10 @@ unsafe extern "C" fn configurable_audio_ports_can_apply_configuration(
             log::warn!("configurable_audio_ports.can_apply: missing plugin instance");
             return false;
         };
-        // port layout は Processor の buffer view 契約を変えるため、active 中の変更は拒否する。
-        //
-        // WRAC adapter では `start_processing()` / `stop_processing()` を active 判定の SoT に
-        // しない。wrapper によってはそれらを省略・遅延するため、ここでは実際の Processor の
-        // 有無と lifecycle callback 中かどうかだけを見る。これにより、plugin 実装側は
-        // `activate()` で layout を snapshot して Processor に渡せば、その Processor が生きている
-        // 間に layout store が書き換わらない前提を置ける。
+        // layout は Processor の buffer view 契約を変えるので active 中は拒否。
+        // active 判定は実際の Processor の有無と lifecycle busy だけで行う
+        // (wrapper は start/stop_processing を省略・遅延し得るため SoT にしない)。
+        // これで plugin 側は「Processor 生存中は layout 不変」を前提にできる。
         if instance.has_processor_or_busy() || instance.lifecycle_busy.load(Ordering::Acquire) {
             log::warn!(
                 "configurable_audio_ports.can_apply: rejected while processor/lifecycle is busy"
@@ -84,11 +81,9 @@ unsafe extern "C" fn configurable_audio_ports_apply_configuration(
             return false;
         };
 
-        // host が `can_apply` を省略しても、Processor が古い port view を使っている間に
-        // layout を変えないよう `apply` 側でも同じ条件を確認する。確認と実際の apply は
-        // 同じ lifecycle guard の内側で行う。そうしないと、processor 不在確認の直後に
-        // `activate()` が古い layout を snapshot し、その後この callback が layout store を
-        // 書き換える race が残る。
+        // host が `can_apply` を省いても安全なよう `apply` でも同条件を再確認する。
+        // 確認と apply を同じ lifecycle guard 内で行わないと、processor 不在確認の
+        // 直後に `activate()` が古い layout を snapshot する race が残る。
         let Some(_guard) = instance.try_enter_lifecycle() else {
             log::warn!("configurable_audio_ports.apply: rejected while lifecycle is busy");
             return false;
@@ -148,8 +143,8 @@ fn convert_port_type(port_type: *const std::ffi::c_char) -> AudioPortType {
     } else if port_type == CLAP_PORT_STEREO {
         AudioPortType::Stereo
     } else {
-        // CLAP の port_type 文字列は callback 中だけ有効な借用値です。`AudioPortType::Other`
-        // として製品側へ渡すと lifetime を偽るため、未知 type は channel_count だけで判断させる。
+        // port_type 文字列は callback 中だけ有効。`Other` で製品へ渡すと lifetime を
+        // 偽ることになるので、未知 type は channel_count だけで判断させる。
         AudioPortType::Unspecified
     }
 }

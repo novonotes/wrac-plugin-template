@@ -1,15 +1,13 @@
-//! WRAC Gain 固有の WebView GUI runtime。
+//! この plugin 固有の WebView GUI runtime。
 //!
-//! GUI 本体は HTML/CSS/TypeScript で書かれており (`src-gui/` 以下)、
-//! これを embed した WebView を host window に貼り付けるのがこの module の
-//! 役目。WebView との通信は [`wxp`] crate の command/channel 機構を使い、
-//! frontend から `set_parameter_value` などの command を invoke できる。
+//! GUI 本体は `src-gui/` の HTML/CSS/TypeScript。この module はそれを embed した
+//! WebView を host window に貼り付け、[`wxp`] の command/channel で frontend と
+//! 通信する。
 //!
 //! 役割分担:
-//! - `wrac_wxp_gui`: host UI thread の所有、callback dispatch、parent window
-//!   の raw handle 変換などの厄介な部分を引き受ける
-//! - この module    : WebView の内容 (URL / 埋め込み zip)、register する
-//!   command、resize/scale の挙動など、製品ごとに変わる部分だけを書く
+//! - `wrac_wxp_gui`: host UI thread の所有、callback dispatch、parent handle 変換
+//!   といった format 共通の厄介事
+//! - この module    : WebView の中身・登録 command・resize/scale など製品固有部分
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -39,8 +37,7 @@ use crate::commands::register_commands;
 use crate::plugin::{PARAM_GAIN_ID, PLUGIN_ID, parameter_value_text};
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
-// GUI window のサイズ範囲 (pixel)。host は initial size でウインドウを開き、
-// ユーザーがリサイズしたときは min..=max の範囲にクランプされる。
+// GUI window のサイズ範囲 (pixel)。host は default で開き、resize は min..=max に clamp。
 const DEFAULT_GUI_SIZE: GuiSize = GuiSize {
     width: 320,
     height: 380,
@@ -58,8 +55,7 @@ const MAX_GUI_SIZE: GuiSize = GuiSize {
 const MIN_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(320.0, 340.0);
 const MAX_LOGICAL_GUI_SIZE: LogicalSize<f64> = LogicalSize::new(720.0, 720.0);
 
-// release build 時のみ、`build.rs` が作った frontend zip を埋め込む。
-// debug build では Vite dev server (`http://127.0.0.1:5173/`) を見るので不要。
+// release のみ frontend zip を埋め込む。debug は Vite dev server を見るので不要。
 #[cfg(not(debug_assertions))]
 const FRONTEND_ZIP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wrac_gain_plugin_gui.zip"));
 
@@ -78,10 +74,8 @@ struct GuiRuntimeDependencies {
     resize_handle: WxpGuiResizeHandle,
 }
 
-/// plugin core から使う GUI extension 一式を作る。
-///
-/// `plugin.rs` 側には GUI window のサイズ制約や WebView runtime の詳細を置かず、
-/// host-facing な core 実装から GUI 固有の組み立てを切り離す。
+/// plugin core が使う GUI extension 一式を組み立てる。
+/// GUI 固有の詳細を `plugin.rs` から切り離すための入口。
 pub(crate) fn create_gui_integration(
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
@@ -123,10 +117,7 @@ pub(crate) fn create_gui_integration(
     }
 }
 
-/// WebView 側へ GUI state を push するための通知口。
-///
-/// [`Channel`] と UI run loop の扱いは GUI runtime 固有なので、共有 state ではなく
-/// GUI module に閉じ込める。通知タイミング自体は呼び出し元が決める。
+/// WebView 側へ GUI state を push する通知口。通知タイミングは呼び出し元が決める。
 pub(crate) struct GuiStateNotifier {
     next_subscription_id: AtomicU64,
     subscriptions: Mutex<HashMap<GuiSubscriptionId, GuiSubscription>>,
@@ -134,9 +125,9 @@ pub(crate) struct GuiStateNotifier {
 
 /// WebView 側 subscriber 1 つぶんの登録情報。
 ///
-/// `kind` で「何の stream を購読しているか」、`channel` で「どこに送るか」を分けて持つ。
-/// こうしておけば、同じ GUI が parameter / meter / analyzer などを個別に購読・解除でき、
-/// 古い cleanup が新しい購読を巻き込んで消してしまう事故も起きない。
+/// `kind` (何の stream か) と `channel` (送り先) を分けて持つことで、parameter /
+/// meter / analyzer などを個別に購読・解除でき、古い cleanup が別の購読を
+/// 巻き込んで消す事故も防げる。
 #[derive(Clone)]
 struct GuiSubscription {
     kind: GuiSubscriptionKind,
@@ -159,11 +150,9 @@ impl GuiSubscriptionId {
     }
 }
 
-/// 購読の種類。現状は parameter 変化通知のみ。
-///
-/// meter や analyzer などの stream を足すときは、ここに variant を追加し、
-/// `notify_*` 側でその variant を持つ subscription にだけ配信すればよい。
-/// Channel そのものを増やすのではなく、種別で振り分ける形にしておく狙い。
+/// 購読の種類。meter や analyzer の stream を足すときは variant を追加し、
+/// `notify_*` でその variant の subscription にだけ配信する
+/// (Channel を増やさず種別で振り分ける設計)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GuiSubscriptionKind {
     Parameters,
@@ -187,8 +176,8 @@ impl GuiStateNotifier {
     }
 
     fn subscribe(&self, kind: GuiSubscriptionKind, channel: Channel) -> GuiSubscriptionId {
-        // id は Rust 側で採番する。wxp の Channel id とは独立させることで、
-        // transport (Channel) と購読 lifecycle を別々に管理できる。
+        // id は wxp の Channel id とは独立に採番。transport と購読 lifecycle を
+        // 別々に管理するため。
         let id = GuiSubscriptionId(self.next_subscription_id.fetch_add(1, Ordering::Relaxed));
         self.subscriptions.lock().insert(
             id,
@@ -224,8 +213,8 @@ impl GuiStateNotifier {
     }
 
     fn notify(&self, kind: GuiSubscriptionKind, payload: serde_json::Value) {
-        // lock を握ったまま送信しない。送り先の処理が再び notifier を触りに来ても
-        // deadlock しないように、配信対象を先に clone してから lock を離す。
+        // 送り先が notifier を再入しても deadlock しないよう、配信対象を
+        // clone してから lock を離す。
         let subscriptions: Vec<_> = self
             .subscriptions
             .lock()
@@ -240,9 +229,9 @@ impl GuiStateNotifier {
 
         for subscription in subscriptions {
             let payload = payload.clone();
-            // WebView channel は GUI runtime と同じ UI thread 上で扱う必要がある。
-            // host / audio thread から直接 send すると native UI の thread affinity を
-            // 破るので、いったん run loop に戻してから channel に渡す。
+            // WebView channel は GUI runtime と同じ UI thread でしか触れない。
+            // host/audio thread から直接送ると thread affinity を破るので、
+            // 必ず run loop に戻してから channel に渡す。
             subscription.sender.send(move || {
                 let _ = subscription.channel.send(payload);
             });
@@ -250,10 +239,8 @@ impl GuiStateNotifier {
     }
 }
 
-/// WebView へ送る JSON payload。GUI (TypeScript 側) はこの形を期待している。
-///
-/// 新しい parameter を追加しても payload の形は変えず、`parameterId` と `text` の中身だけを
-/// 増やす。UI 側は parameter id ごとに表示先を選べばよい。
+/// WebView へ送る JSON payload。TypeScript 側はこの形を期待する。
+/// 新しい parameter でも payload の形は変えず `parameterId` で振り分ける。
 pub(crate) fn parameter_payload(parameter_id: u32, value: f32) -> serde_json::Value {
     json!({
         "type": "parameter-value",
@@ -270,24 +257,18 @@ pub(crate) fn editor_page_payload(editor_page: EditorPage) -> serde_json::Value 
     })
 }
 
-/// GUI window 1 つに対応する runtime。host が GUI を開くたびに 1 つ作られ、
-/// 閉じるときに drop される。
+/// GUI window 1 つ分の runtime。host が GUI を開くたびに作られ、閉じると drop。
 pub(crate) struct WracGainGuiRuntime {
-    // WebView 側 subscription への通知口。
     gui_notifier: Arc<GuiStateNotifier>,
-    // `WxpWebView` は native WebView の寿命を所有する !Send + !Sync token。host からの操作は
-    // runtime が載っている GUI thread で受け、必要なときだけ dispatch handle に変換して post する。
-    // Option にしてあるのは Drop の順序を制御するため。
+    // native WebView の寿命を持つ !Send + !Sync token。Drop 順を制御するため Option。
     web_view: Option<WxpWebView>,
-    // wxp の WebContext。WebView より長く生かしておく必要があるので保持する。
+    // WebView より長く生かす必要があるので保持する (Drop 順は下の Drop 実装参照)。
     wxp_context: Option<WebContext>,
-    // frontend からの command を受け取って Rust 側関数を呼ぶ dispatcher。
     command_handler: Rc<WxpCommandHandler>,
-    // shared state の現在値を定期的に GUI に反映するための timer。
+    // shared state の現在値を定期的に GUI へ反映する timer。
     gui_update_timer: Timer,
-    // 現在の論理サイズ。
     gui_size: LogicalSize<f64>,
-    // DPI スケール (1.0, 1.5, 2.0 など) を考慮した bounds 変換に使う。
+    // DPI スケールを考慮した bounds 変換に使う。
     dpi_converter: DpiConverter,
 }
 
@@ -346,10 +327,8 @@ impl WracGainGuiRuntime {
             gui_size.height
         );
 
-        // debug build では Vite dev server を見るので、frontend を変更しても
-        // native plugin の再 build が不要になり開発体験が良くなる。
-        // release build では DAW 環境で外部 dev server に依存できないので、
-        // `build.rs` で固めた zip を WebView に直接 serve させる。
+        // debug は Vite dev server を見る (frontend 変更で native の再 build 不要)。
+        // release は dev server に依存できないので build.rs が固めた zip を serve する。
         #[cfg(debug_assertions)]
         let builder = {
             let url = "http://127.0.0.1:5173/";
@@ -384,14 +363,10 @@ impl WracGainGuiRuntime {
             .map_err(|_| PluginError::Message("failed to build webview"))?;
         log::debug!("creating GUI runtime: build_as_child completed");
 
-        // 33ms ≒ 30Hz で現在値を GUI に流す。サンプルでは値が変わったかの dirty
-        // flag を持たず、GUI runtime が shared state を読む形にしておく方が構造を
-        // 追いやすい。
-        //
-        // 補足: CLAP には `request_callback()` で main thread に処理を戻す API も
-        // あるが、clap-wrapper 経由で VST3/AU/AAX に流すと host ごとの dispatch
-        // 実装に依存してしまう。host の癖で GUI だけ古い値を出し続ける問題を防ぐ
-        // ため、GUI runtime 自身の run loop 上で timer を回して定期的に回収する。
+        // 33ms ≒ 30Hz で現在値を GUI に流す。dirty flag を持たず毎回 shared state
+        // を読む方が構造が単純。CLAP の `request_callback()` は wrapper 経由だと
+        // host の dispatch 実装に依存し GUI だけ値が古くなることがあるので、
+        // GUI runtime 自身の run loop の timer で定期回収する。
         let gui_update_timer = Timer::new(Duration::from_millis(33), {
             let shared = dependencies.shared.clone();
             let gui_notifier = dependencies.gui_notifier.clone();
@@ -523,9 +498,8 @@ fn sanitize_plugin_data_dir(plugin_id: &str) -> String {
         .collect()
 }
 
-// host が GUI を閉じると runtime が drop される。
-// drop 順を field 宣言順に任せず、明示的に切断 → WebView 破棄 → context 破棄の
-// 順で進めることで、callback が解放後の object を触る事故を防ぐ。
+// drop 順を field 宣言順に任せず、切断 → WebView 破棄 → context 破棄の順に
+// 明示する。callback が解放済み object を触る事故を防ぐため。
 impl Drop for WracGainGuiRuntime {
     fn drop(&mut self) {
         log::debug!("dropping GUI runtime");

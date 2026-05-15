@@ -8,10 +8,8 @@ use raw_window_handle::{
 };
 use wrac_clap_adapter::{ClapWindow, PluginError, PluginResult};
 
-/// host から渡された親 window を `raw-window-handle` として公開する wrapper。
-///
-/// platform pointer の意味づけを製品 GUI へ漏らすと、製品側に CLAP の handle lifetime
-/// と platform 分岐が広がる。ここで一度だけ変換し、wxp には `HasWindowHandle` として渡す。
+/// host の親 window を `raw-window-handle` として公開する wrapper。
+/// platform 分岐と handle lifetime をここで一度だけ吸収し、製品へ漏らさない。
 #[derive(Debug)]
 pub struct ParentWindowHandle {
     raw: RawWindowHandle,

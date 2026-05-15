@@ -29,9 +29,9 @@ impl Error for AudioBufferError {}
 
 /// 1 回の `process()` だけで借りる audio buffer。
 ///
-/// CLAP の audio は port -> channel -> samples の非 interleaved 構造です。ここでは
-/// raw pointer を保持したまま callback lifetime に縛り、channel へ降りる時点で
-/// in-place alias を判定して safe slice へ変換する。
+/// CLAP audio は port → channel → samples の非 interleaved 構造。raw pointer を
+/// callback lifetime に縛ったまま保持し、channel へ降りる時点で in-place alias を
+/// 判定して safe slice へ変換する。
 pub struct AudioProcessBuffer<'a> {
     inputs: &'a [clap_audio_buffer],
     outputs: &'a mut [clap_audio_buffer],

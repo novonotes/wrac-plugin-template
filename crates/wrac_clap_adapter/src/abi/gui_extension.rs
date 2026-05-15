@@ -382,9 +382,8 @@ unsafe fn plugin_gui_mutation(
         log::error!("rejecting reentrant or concurrent CLAP GUI callback: {callback_name}");
         return None;
     };
-    // GUI runtime は独自の thread-affinity と同期規則を持つ。adapter 向け handle を
-    // 保持しておくことで、GUI callback を無関係な `PluginCore` lifecycle/state lock
-    // と結合させない。
+    // GUI callback を `PluginCore` の lifecycle/state lock と結合させないため、
+    // capability handle だけを取り出す (GUI runtime は独自の thread 規則を持つ)。
     instance
         .gui
         .clone()

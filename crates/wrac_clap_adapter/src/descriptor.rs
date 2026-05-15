@@ -64,9 +64,8 @@ pub struct Auv2Descriptor {
 
 /// plugin binary に固定される descriptor と factory 関数。
 ///
-/// CLAP factory callback は `clap_entry` 経由で任意のタイミングに呼ばれるため、
-/// registration は per-instance state ではなく static に置く。ここを不変にしておくと、
-/// global mutable registry や descriptor pointer のリークに頼らず C ABI に渡せる。
+/// factory callback は任意タイミングで呼ばれるので static に置く。不変にすることで
+/// global mutable registry や pointer リークに頼らず C ABI に渡せる。
 pub struct PluginRegistration {
     pub(crate) descriptor: PluginDescriptor,
     pub(crate) create: CreatePluginCore,

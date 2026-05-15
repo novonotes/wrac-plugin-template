@@ -1,26 +1,22 @@
-//! WRAC Gain Plugin。
+//! WRAC Gain plugin —— このテンプレートの読み始めの crate。
 //!
-//! このテンプレートを使うときの読み始めの crate です。シンプルな gain
-//! (音量) plugin の最小実装が入っており、`src-plugin` には製品固有のロジック
-//! (parameter / state / DSP / GUI) だけが置かれます。
-//!
-//! 公開される CLAP ABI (C 言語側から見える plugin entry point) は
-//! `wrac_clap_adapter` という別 crate が提供してくれます。FFI や CLAP wrapper
-//! まわりの面倒な不変条件はそちら側に閉じ込めてあるので、ここでは Rust 側で
-//! 安全に書けるコードに集中できます。
+//! 最小構成の gain (音量) plugin です。`src-plugin` には製品固有のロジック
+//! (parameter / state / DSP / GUI) だけを置き、CLAP ABI や FFI の面倒な不変条件は
+//! 別 crate `wrac_clap_adapter` に閉じ込めてあります。プラグインを作るときは
+//! 基本的にこの crate の各ファイルを書き換えていきます。
 //!
 //! ファイル構成:
-//! - `plugin.rs`   : plugin の中心。parameter / state save-restore / `PluginCore` 実装。
+//! - `plugin.rs`   : host から見える plugin の契約。parameter / state / `PluginCore`。
 //! - `state.rs`    : audio / GUI / host で共有する lock-free な state。
-//! - `audio.rs`  : audio thread 上で動く DSP (gain を掛けるだけ)。
-//! - `gui.rs`    : WebView ベースの GUI runtime (HTML/JS で UI を作る)。
+//! - `audio.rs`    : audio thread 上で動く DSP (このサンプルでは gain を掛けるだけ)。
+//! - `gui.rs`      : WebView ベースの GUI runtime。
 //! - `commands.rs` : WebView frontend から呼べる Rust command。
 //!
-//! ログは `log` facade を使います。
-//! debug build ではテンプレート用の簡易 logger を 初期化し、
-//! stderr と repository root の `.log/WRAC Gain Latest.log` の両方へ出します。
-//! 製品固有の logger へ差し替える運用を想定しています。
+//! ログは `log` facade 経由。`logging.rs` は debug build 用の簡易 logger で、
+//! 製品では独自 logger に差し替える前提です。
 
+// debug build では allocator を差し替え、audio thread での allocation を
+// 即座に検出する (使い方は audio.rs の process() を参照)。
 #[cfg(debug_assertions)]
 use assert_no_alloc::*;
 
@@ -35,9 +31,8 @@ mod logging;
 mod plugin;
 mod state;
 
-// CLAP entry point (`clap_entry`) を export する macro。
-// adapter 側が C ABI / factory / lifecycle をすべて生成してくれるので、ここでは
-// 「どんな plugin か」を表す descriptor と、core を生成する関数を渡すだけで済む。
+// CLAP entry point を export する。C ABI / factory / lifecycle は adapter が生成するので、
+// ここでは「どんな plugin か」(descriptor) と「core の作り方」(create) を渡すだけ。
 wrac_clap_adapter::export_clap_plugin! {
     descriptor: crate::plugin::PLUGIN_DESCRIPTOR,
     create: crate::plugin::create_plugin_core,

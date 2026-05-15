@@ -1,7 +1,7 @@
-//! audio / GUI / host から共有される plugin state。
+//! audio / GUI / host が共有する plugin state。
 //!
-//! この module は「値の SoT」と「状態不整合を防ぐ最小限の操作」だけを持つ。
-//! GUI への配送や host への edit 通知は、それぞれ `gui.rs` / `commands.rs` 側で扱う。
+//! ここは「値の SoT」と「不整合を防ぐ最小限の操作」だけを持つ。GUI への配送や
+//! host への edit 通知は `gui.rs` / `commands.rs` の責務。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -11,10 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::plugin::{DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain};
 
-/// DAW project に保存するが、audio thread からは読まない editor state。
-///
-/// window size のような host 管理の state ではなく、plugin UI 内の表示ページを例にしている。
-/// 製品 plugin では IR path、track color、editor-only preference などもこの系統に入る。
+/// project に保存するが audio thread からは読まない editor state の例。
+/// 製品では IR path、track color、editor-only preference などがこの系統。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum EditorPage {
@@ -45,19 +43,16 @@ impl EditorPage {
     }
 }
 
-/// DAW project に保存する non-realtime state。
-///
-/// audio thread はこの型も [`ProjectStateStore`] の lock も触らない。保存時は短く clone し、
-/// 復元時は decode/validate 済みの snapshot を短く commit するだけにしておく。
+/// project に保存する non-realtime state。
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ProjectState {
     pub(crate) editor_page: EditorPage,
 }
 
-/// ProjectState の SoT。
+/// [`ProjectState`] の SoT。audio thread はこの lock を触らない。
 ///
-/// `RwLock` は non-realtime state の snapshot/commit だけに使う。lock 中で serialize、
-/// host callback、GUI 同期 dispatch、file IO などを行わないことが重要。
+/// lock は snapshot / commit だけに使い、lock 中に serialize・host callback・
+/// GUI dispatch・file IO を挟まないこと (lock 保持時間を最短に保つため)。
 pub(crate) struct ProjectStateStore {
     state: RwLock<ProjectState>,
 }
@@ -92,22 +87,16 @@ pub(crate) struct ParameterStateSnapshot {
     pub(crate) bypass: bool,
 }
 
-/// audio processor / GUI / host からの問い合わせ が共有する thread-safe な state。
+/// realtime parameter の現在値。3 つの thread から並行に触られる:
+/// - audio thread: `process()` で gain を読んで音に掛ける
+/// - GUI thread  : slider 操作で書き換える
+/// - host thread : `parameter_value()` などで host が問い合わせる
 ///
-/// gain の値などは複数の thread から触られる:
-/// - audio thread : [`wrac_clap_adapter::Processor::process`] の中で gain を読んで音に掛ける
-/// - GUI thread   : ユーザーが slider を動かして gain を書き換える
-/// - host thread  : [`wrac_clap_adapter::PluginParameters::parameter_value`] などで host が値を尋ねてくる
-///
-/// そのため realtime/current parameter values は [`std::sync::Arc`]<[`SharedState`]> として
-/// 共有する。lock 不要な [`AtomicF32`] を使うことで audio thread を待たせない。
-///
-/// DAW project に保存する non-realtime state は [`ProjectStateStore`] に分ける。`save_state()`
-/// は `SharedState` の parameter snapshot と `ProjectStateStore` の project snapshot を合成する。
+/// audio thread が lock を待たないよう、lock ではなく atomic を使う。
+/// project にだけ残す non-realtime state は [`ProjectStateStore`] 側に分離する。
 pub(crate) struct SharedState {
-    // gain の現在値 (線形 amplitude)。lock-free に読み書きする。
+    // 線形 amplitude。
     gain: AtomicF32,
-    // host の bypass parameter。audio thread から読むので lock-free に保持する。
     bypass: AtomicBool,
 }
 
@@ -128,8 +117,8 @@ impl SharedState {
     }
 
     pub(crate) fn snapshot_parameters(&self) -> ParameterStateSnapshot {
-        // Gain では parameter 同士に強い transaction 境界がないため、単純な atomic load で十分。
-        // 複数 field の完全一貫 snapshot が必要な製品では、この関数の中に seqlock 風の
+        // gain/bypass 間に transaction 境界が無いので単純な atomic load で十分。
+        // 複数 field の完全一貫 snapshot が要る製品では、ここに seqlock 風の
         // generation check を閉じ込める。
         ParameterStateSnapshot {
             gain: self.gain(),
@@ -143,10 +132,8 @@ impl SharedState {
         self.bypass.store(snapshot.bypass, Ordering::Release);
     }
 
-    /// 指定された parameter の現在値を返す。
-    ///
-    /// 新しい parameter を追加するときは、この `match parameter_id` に読み出し処理を
-    /// 追加する。GUI command は parameter id だけを見るので、command 名は増やさなくてよい。
+    /// parameter の現在値。新しい parameter は match に追加する
+    /// (GUI command は id だけを見るので command 名は増えない)。
     pub(crate) fn parameter_value(&self, parameter_id: u32) -> Option<f32> {
         match parameter_id {
             PARAM_GAIN_ID => Some(self.gain()),
@@ -155,14 +142,12 @@ impl SharedState {
         }
     }
 
-    /// 外部から来た parameter 値を有効範囲に収めて SoT に保存する。
-    ///
-    /// 新しい parameter を追加するときは、この `match parameter_id` に保存処理を
-    /// 追加する。各 parameter の clamp / normalization はここで完結させる。
+    /// 外部から来た値を範囲に収めて SoT に保存する。各 parameter の clamp /
+    /// normalization はここで完結させる。新しい parameter は match に追加する。
     pub(crate) fn set_parameter_value(&self, parameter_id: u32, value: f64) -> Option<f32> {
         match parameter_id {
             PARAM_GAIN_ID => {
-                // 範囲外の値が automation/UI から来ても問題ないように、必ず clamp してから保存する。
+                // automation/UI から範囲外が来ても安全なよう必ず clamp。
                 let gain = clamp_gain(value as f32);
                 self.gain.store(gain, Ordering::Release);
                 Some(gain)

@@ -9,12 +9,11 @@ use crate::{
     ParameterValueEvent, PluginParameters,
 };
 
-/// UI 由来の parameter edit を、host が受け取れるタイミングまで保持する queue。
+/// UI 由来の parameter edit を host が受け取れるまで保持する queue。
 ///
-/// CLAP の output event queue は `flush()` / `process()` callback 中にしか存在しない。
-/// 製品 GUI から直接 CLAP event を作らせると callback lifetime を越えた pointer を扱う
-/// ことになるため、adapter 内では意味情報だけを保存し、出力 queue が来た時点で
-/// CLAP event に変換する。
+/// CLAP output queue は `flush()`/`process()` callback 中しか存在しない。GUI に
+/// 直接 CLAP event を作らせると callback lifetime 越えの pointer を握ることになるので、
+/// adapter は意味情報だけ保存し、出力 queue が来た時点で CLAP event へ変換する。
 pub(crate) struct ParameterEditQueue {
     pending: Mutex<VecDeque<ParameterEditEvent>>,
     host_params: Option<HostParams>,

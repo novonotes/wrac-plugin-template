@@ -80,12 +80,10 @@ unsafe extern "C" {
 fn global_mouse_location() -> Option<GlobalMouseLocation> {
     #[cfg(target_os = "macos")]
     {
-        // The resize grip lives inside the WebView, but the host owns the native
-        // editor window being resized. Hosts such as Logic can move/relayout that
-        // WebView during the same drag, which makes WebView pointer coordinates jump
-        // relative to the changing child view instead of tracking the physical mouse.
-        // Reading the OS cursor here gives the resize code one stable coordinate
-        // space: the desktop, outside both the WebView and the host's layout updates.
+        // resize grip は WebView 内にあるが、リサイズ対象の editor window は host が
+        // 所有する。Logic などはドラッグ中にその WebView を動かすため、WebView 座標は
+        // 物理マウスではなく動く子 view に対して飛んでしまう。OS カーソルを直接読めば、
+        // WebView と host の layout 更新の外にある安定した座標系 (デスクトップ) を使える。
         let event = unsafe { CGEventCreate(std::ptr::null()) };
         if event.is_null() {
             return None;
@@ -117,21 +115,19 @@ pub(crate) fn register_commands(
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     gui_resize_handle: WxpGuiResizeHandle,
 ) {
-    // GUI 初期化のどこまで到達したかを native log から追えるようにする。
-    // WebView console は DAW 環境で見えないことが多いため、frontend 起点の診断ログを
-    // plugin 側 logger に橋渡しする command を用意しておく。
+    // WebView console は DAW では見えないことが多い。frontend のログを
+    // plugin 側 logger に橋渡しし、GUI 初期化の進行を native log で追えるようにする。
     command_handler.register_sync("write_to_log", move |ctx| {
         let message = ctx.arg::<String>("message").map_err(|e| e.to_string())?;
         log::info!("frontend: {message}");
         Ok::<_, String>(json!({ "ok": true }))
     });
 
-    // Split the resize drag into two responsibilities. JS owns the gesture lifetime
-    // because pointer capture/release is a browser concept, but Rust owns the resize
-    // coordinates on macOS because the browser's coordinate space is the surface the
-    // host is actively moving. The drag id ties those browser triggers to this native
-    // snapshot so every resize request can be recomputed from the original desktop
-    // cursor position instead of accumulating WebView-local pointer noise.
+    // resize ドラッグを 2 責務に分ける。ジェスチャの寿命は JS が持つ (pointer
+    // capture/release は browser の概念)。macOS の座標は Rust が持つ (browser の
+    // 座標系こそ host が動かしている面だから)。drag id がブラウザ側トリガと
+    // この native snapshot を結び付け、毎回の resize 要求を元のデスクトップ
+    // カーソル位置から再計算できる (WebView 内座標の誤差を累積しない)。
     let native_resize_drag = Rc::new(RefCell::new(None::<NativeResizeDrag>));
 
     // editor page は音に関係しない project state。audio thread が読む SharedState とは

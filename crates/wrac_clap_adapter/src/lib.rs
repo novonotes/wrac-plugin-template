@@ -1,8 +1,8 @@
-//! CLAP ABI と WRAC plugin core を接続する adapter crate。
+//! CLAP ABI と plugin core を繋ぐ adapter crate。
 //!
-//! 製品 crate はこの crate の safe trait を実装し、`export_clap_plugin!` で CLAP
-//! entry を宣言する。`clap-sys`、raw pointer、CLAP event 変換、host callback は
-//! adapter 内部に閉じる。
+//! 製品 crate は [`api`] の safe trait を実装し、[`export_clap_plugin!`] で CLAP
+//! entry を宣言するだけでよい。`clap-sys`・raw pointer・event 変換・host callback
+//! は adapter 内部に閉じる。trait の契約は `api.rs` を参照。
 
 mod abi;
 mod api;
@@ -45,9 +45,9 @@ macro_rules! export_clap_plugin {
     (descriptor: $descriptor:expr, create: $create:path $(,)?) => {
         #[allow(non_snake_case)]
         mod __wrac_clap_export {
-            // CLAP entry symbol は plugin binary ごとに 1 つ必要になるため、adapter crate
-            // 側ではなく製品 crate 側で展開する。これにより adapter は再利用可能なまま、
-            // descriptor と factory callback の静的 lifetime を binary に閉じ込められる。
+            // CLAP entry symbol は binary ごとに 1 つ必要なので、adapter ではなく
+            // 製品 crate 側で展開する。adapter は再利用可能なまま、descriptor と
+            // factory の static lifetime を binary に閉じ込められる。
             static WRAC_CLAP_PLUGIN_REGISTRATION: $crate::__private::PluginRegistration =
                 $crate::__private::PluginRegistration::new($descriptor, $create);
 

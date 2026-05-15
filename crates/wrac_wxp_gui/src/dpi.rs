@@ -38,11 +38,9 @@ pub fn gui_size_to_logical(size: GuiSize) -> LogicalSize<f64> {
     LogicalSize::new(size.width as f64, size.height as f64)
 }
 
-/// wxp 側の logical size を CLAP GUI size へ戻す helper。
-///
-/// 現在の sample は host-facing size を `GuiSize` で持つが、template 利用者が
-/// WebView/layout 由来の `LogicalSize` を resize request や state に戻す場面で
-/// platform ごとの変換を散らさずに済むよう public API として残している。
+/// wxp の logical size を CLAP `GuiSize` へ戻す helper。
+/// WebView/layout 由来のサイズを resize request や state に返すとき、platform
+/// ごとの変換を製品側に散らさないよう public API として残している。
 pub fn logical_size_to_gui(size: LogicalSize<f64>) -> GuiSize {
     GuiSize {
         width: size.width as u32,
