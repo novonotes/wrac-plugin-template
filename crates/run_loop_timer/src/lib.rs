@@ -251,8 +251,10 @@ mod tests {
                 wait_until_true(&task_started).await;
             }
 
-            RunLoop::current().delay(Duration::from_millis(300)).await;
-            assert!(task_completed.load(Ordering::SeqCst));
+            // Dropping the timer must not cancel a task that has already been spawned, but the
+            // completion delay is still driven by the platform run loop. Wait for the observable
+            // condition instead of assuming CI delivers the 200ms delay within a fixed margin.
+            wait_until_true(&task_completed).await;
         });
     }
 

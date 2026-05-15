@@ -32,7 +32,7 @@ use wrac_wxp_gui::{
     WxpGuiRuntime, gui_size_to_logical,
 };
 use wxp::{
-    Channel, WebContext, WebViewRef, WxpCommandHandler, WxpWebViewBuilder, dpi::LogicalSize,
+    Channel, WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize,
 };
 
 use crate::commands::register_commands;
@@ -243,8 +243,10 @@ pub(crate) fn parameter_payload(parameter_id: u32, value: f32) -> serde_json::Va
 pub(crate) struct WracGainGuiRuntime {
     // WebView 側 subscription への通知口。
     gui_notifier: Arc<GuiStateNotifier>,
-    // 表示中の WebView。Option にしてあるのは Drop の順序を制御するため。
-    web_view: Option<WebViewRef>,
+    // `WxpWebView` は native WebView の寿命を所有する !Send + !Sync token。host からの操作は
+    // runtime が載っている GUI thread で受け、必要なときだけ dispatch handle に変換して post する。
+    // Option にしてあるのは Drop の順序を制御するため。
+    web_view: Option<WxpWebView>,
     // wxp の WebContext。WebView より長く生かしておく必要があるので保持する。
     wxp_context: Option<WebContext>,
     // frontend からの command を受け取って Rust 側関数を呼ぶ dispatcher。
@@ -410,8 +412,11 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         );
 
         if let Some(web_view) = &self.web_view {
+            // wxp は native WebView の直接操作を owner から分離している。ここは GUI thread 上だが、
+            // stale-close checks と post/enqueue semantics を同じ経路に揃えるため dispatch 経由にする。
             web_view
-                .set_bounds(self.dpi_converter.create_webview_bounds(self.gui_size))
+                .dispatch()
+                .post_set_bounds(self.dpi_converter.create_webview_bounds(self.gui_size))
                 .map_err(|_| PluginError::Message("failed to resize webview"))?;
         }
         Ok(())
@@ -420,8 +425,11 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
     fn show(&mut self) -> PluginResult<()> {
         log::debug!("showing GUI runtime");
         if let Some(web_view) = &self.web_view {
+            // show/hide は host lifecycle と競合しやすいので、owner を直接触らず wxp 側の
+            // close-aware dispatch path に寄せる。
             web_view
-                .set_visible(true)
+                .dispatch()
+                .post_set_visible(true)
                 .map_err(|_| PluginError::Message("failed to show webview"))?;
         }
         self.gui_update_timer.start();
@@ -433,8 +441,11 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         log::debug!("hiding GUI runtime");
         self.gui_update_timer.stop();
         if let Some(web_view) = &self.web_view {
+            // hide は destroy 直前に呼ばれることがある。dispatch は WebView が閉じていれば
+            // WebViewClosed を返し、native object の寿命を延ばさない。
             web_view
-                .set_visible(false)
+                .dispatch()
+                .post_set_visible(false)
                 .map_err(|_| PluginError::Message("failed to hide webview"))?;
         }
         log::debug!("hiding GUI runtime completed");

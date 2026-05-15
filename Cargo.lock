@@ -3183,7 +3183,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.55.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=518cf7ad0332c02900b85e5ba23e14ec0cb484d7#518cf7ad0332c02900b85e5ba23e14ec0cb484d7"
+source = "git+https://github.com/novonotes/wxp.git?rev=eb86da648936dccd3486e6f3f6140be451daeaef#eb86da648936dccd3486e6f3f6140be451daeaef"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3226,7 +3226,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=518cf7ad0332c02900b85e5ba23e14ec0cb484d7#518cf7ad0332c02900b85e5ba23e14ec0cb484d7"
+source = "git+https://github.com/novonotes/wxp.git?rev=eb86da648936dccd3486e6f3f6140be451daeaef#eb86da648936dccd3486e6f3f6140be451daeaef"
 dependencies = [
  "async-trait",
  "directories",

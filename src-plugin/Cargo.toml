@@ -24,7 +24,7 @@ time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 run_loop_timer = { path = "../crates/run_loop_timer" }
 wrac_clap_adapter = { path = "../crates/wrac_clap_adapter" }
 wrac_wxp_gui = { path = "../crates/wrac_wxp_gui" }
-wxp = { git = "https://github.com/novonotes/wxp.git", rev = "518cf7ad0332c02900b85e5ba23e14ec0cb484d7" }
+wxp = { git = "https://github.com/novonotes/wxp.git", rev = "eb86da648936dccd3486e6f3f6140be451daeaef" }
 
 [lints.rust]
 unreachable_pub = "deny"
