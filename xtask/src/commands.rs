@@ -133,15 +133,6 @@ impl RustPluginBuild {
             .join(profile.cargo_dir())
             .join(ctx.platform.static_library_name())
     }
-
-    fn objc_suffix(self) -> &'static str {
-        match self {
-            Self::Default => "WracGainPlugin",
-            Self::Vst3 => "WracGainPluginVst3",
-            Self::Au => "WracGainPluginAu",
-            Self::Standalone => "WracGainPluginStandalone",
-        }
-    }
 }
 
 fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuild) -> Result<()> {
@@ -157,14 +148,11 @@ fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuil
         command.arg(flag);
     }
     if ctx.platform == Platform::Macos {
-        // macOS の webview/Objective-C runtime は deployment target と class 名衝突に敏感。
         // CI や利用者環境の env を尊重しつつ、未指定時だけ template の安全な既定値を入れる。
-        command
-            .env(
-                "MACOSX_DEPLOYMENT_TARGET",
-                env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
-            )
-            .env("WRY_OBJC_SUFFIX", build.objc_suffix());
+        command.env(
+            "MACOSX_DEPLOYMENT_TARGET",
+            env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
+        );
     }
     run(command.current_dir(&ctx.root))?;
 
