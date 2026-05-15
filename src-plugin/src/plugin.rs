@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use wrac_clap_adapter::{
     ActivateContext, AudioPortConfigurationRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
@@ -83,14 +84,28 @@ pub(crate) struct WracGainPlugin {
     // audio thread / GUI / host から共有して触る状態。
     // 詳細は `SharedState` の doc を参照。
     shared: Arc<SharedState>,
-    // 現在の audio channel 数 (mono なら 1、stereo なら 2)。
-    // configurable audio ports は adapter 側で inactive 時だけ受け付けるので、
-    // audio thread と共有する atomic state にはしない。
-    audio_channel_count: u32,
+    // Port layout は activate 前後の host query / configurable ports で使う非 RT 状態。
+    //
+    // 製品 plugin では channel count や speaker layout を DSP が参照することがよくありますが、
+    // audio thread からこの store を直接読ませないのが重要です。layout 変更は host との交渉で
+    // 決まる non-realtime な出来事で、処理中に RwLock を読みに行くと priority inversion や
+    // callback 再入時の停止要因になります。
+    //
+    // そのため、この store は「次に activate する processor 用の設定」として扱い、`activate()`
+    // で値を snapshot して [`WracGainAudioProcessor`] へ渡します。
+    audio_layout: Arc<AudioLayoutStore>,
+    // Host-facing capability は `PluginCore` の borrow と切り離して Arc で持つ。
+    // wrapper が lifecycle callback 中に query を再入させても、adapter は core lock を取らずに
+    // ここへ到達できる。
+    audio_ports: Arc<WracGainAudioPorts>,
+    configurable_audio_ports: Arc<WracGainConfigurableAudioPorts>,
+    parameters: Arc<WracGainParameters>,
     // WebView による GUI を CLAP の GUI extension として扱うための helper。
     // `Arc` にしているのは host が `plugin_gui` を複数回問い合わせるため。
     gui: Arc<WxpGuiController>,
     // Project state は lifecycle 用の PluginCore lock から切り離して保存・復元する。
+    // project save はユーザーデータ保護の経路なので、active 中や wrapper 再入中でも
+    // committed snapshot を返せる専用 capability にしている。
     state_support: Arc<WracGainStateSupport>,
 }
 
@@ -98,6 +113,57 @@ struct WracGainStateSupport {
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     gui_notifier: Arc<GuiStateNotifier>,
+}
+
+/// Host と交渉した audio layout の SoT。
+///
+/// この store は non-realtime 専用です。`audio_ports.get()` のような host query と
+/// `configurable_audio_ports.apply()` はここを読み書きしますが、`Processor::process()` は
+/// 読みません。
+///
+/// 製品 plugin で stereo/mono 以外の layout、sidechain、ambisonics などを扱う場合も、
+/// まずはこのような layout store に「次の processor をどう作るか」を記録し、`activate()`
+/// で DSP 用の immutable/snapshot state に変換するのが基本です。
+struct AudioLayoutStore {
+    channel_count: RwLock<u32>,
+}
+
+impl AudioLayoutStore {
+    fn new(channel_count: u32) -> Self {
+        Self {
+            channel_count: RwLock::new(channel_count),
+        }
+    }
+
+    fn channel_count(&self) -> u32 {
+        *self.channel_count.read()
+    }
+
+    fn set_channel_count(&self, channel_count: u32) {
+        *self.channel_count.write() = channel_count;
+    }
+}
+
+struct WracGainAudioPorts {
+    layout: Arc<AudioLayoutStore>,
+}
+
+/// Host からの layout 変更要求を `AudioLayoutStore` に反映する capability。
+///
+/// この型が `&self` で更新できるようにしているのは、adapter が capability を `Arc` で固定し、
+/// `PluginCore` の `&mut self` lifecycle lock を通らずに呼ぶためです。active 中に変更してよい
+/// という意味ではなく、adapter 側が Processor の有無を見て inactive 時だけ呼びます。
+struct WracGainConfigurableAudioPorts {
+    layout: Arc<AudioLayoutStore>,
+}
+
+/// Host-facing parameter API。
+///
+/// Parameter schema/value は DAW の generic editor、automation、state restore 後の rescan から
+/// 並行に読まれます。ここは `SharedState` の atomic parameter SoT だけを触り、GUI runtime や
+/// project-only state には入らないようにしておくと、host query が lifecycle に巻き込まれません。
+struct WracGainParameters {
+    shared: Arc<SharedState>,
 }
 
 /// DAW project に保存される plugin state の serialize 形式。
@@ -117,6 +183,16 @@ pub(crate) struct SavedPluginState {
 impl WracGainPlugin {
     pub(crate) fn new(context: PluginCoreContext) -> Self {
         let shared = Arc::new(SharedState::new());
+        let audio_layout = Arc::new(AudioLayoutStore::new(2));
+        let audio_ports = Arc::new(WracGainAudioPorts {
+            layout: audio_layout.clone(),
+        });
+        let configurable_audio_ports = Arc::new(WracGainConfigurableAudioPorts {
+            layout: audio_layout.clone(),
+        });
+        let parameters = Arc::new(WracGainParameters {
+            shared: shared.clone(),
+        });
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
             project_state.clone(),
@@ -132,8 +208,10 @@ impl WracGainPlugin {
 
         Self {
             shared,
-            // template の default は stereo。host が configure してくれば書き換わる。
-            audio_channel_count: 2,
+            audio_layout,
+            audio_ports,
+            configurable_audio_ports,
+            parameters,
             gui: gui.controller,
             state_support,
         }
@@ -177,14 +255,28 @@ impl PluginCore for WracGainPlugin {
     /// host が audio 処理を開始する直前に呼ばれる。
     /// ここで返した `Processor` が以降 audio thread 上で `process()` される。
     fn activate(&mut self, context: ActivateContext) -> PluginResult<Box<dyn Processor>> {
+        // ここが non-RT layout store と RT processor の境界です。
+        //
+        // adapter は Processor が存在する active 期間中の configurable-audio-ports apply を
+        // 拒否します。そのため、このタイミングで snapshot した channel count は、この
+        // Processor が deactivate されるまで変わらない layout 契約として扱えます。
+        //
+        // Processor に Arc<AudioLayoutStore> を渡すと、将来の DSP 実装者が process() 中に
+        // うっかり lock を読む余地が残ります。activate() で必要な値だけを copy して渡せば、
+        // audio thread 側は immutable な設定として扱えるため、realtime safety の責務が
+        // コード構造として見えます。
+        let audio_channel_count = self.audio_layout.channel_count();
         log::debug!(
             "activating audio processor: sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}",
             context.sample_rate,
             context.min_frames_count,
             context.max_frames_count,
-            self.audio_channel_count
+            audio_channel_count
         );
-        Ok(Box::new(WracGainAudioProcessor::new(self.shared.clone())))
+        Ok(Box::new(WracGainAudioProcessor::new(
+            self.shared.clone(),
+            audio_channel_count,
+        )))
     }
 
     /// host が audio 処理を停止したときに呼ばれる。
@@ -197,16 +289,16 @@ impl PluginCore for WracGainPlugin {
     // 以下は CLAP の各 extension の宣言。Some を返すと「この extension を実装している」、
     // None を返すと「未対応」になる。実装本体は別 impl ブロックに書く。
 
-    fn audio_ports(&self) -> Option<&dyn PluginAudioPorts> {
-        Some(self)
+    fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPorts>> {
+        Some(self.audio_ports.clone())
     }
 
-    fn configurable_audio_ports(&mut self) -> Option<&mut dyn PluginConfigurableAudioPorts> {
-        Some(self)
+    fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPorts>> {
+        Some(self.configurable_audio_ports.clone())
     }
 
-    fn parameters(&self) -> Option<&dyn PluginParameters> {
-        Some(self)
+    fn parameters(&self) -> Option<Arc<dyn PluginParameters>> {
+        Some(self.parameters.clone())
     }
 
     fn state(&self) -> Option<Arc<dyn PluginStateSupport>> {
@@ -223,13 +315,13 @@ impl PluginCore for WracGainPlugin {
 // ---------------------------------------------------------------------------
 // gain plugin なので「main in 1 つ」「main out 1 つ」のシンプルな構成。
 // channel 数は configurable audio ports 経由で host が変更できる。
-impl PluginAudioPorts for WracGainPlugin {
+impl PluginAudioPorts for WracGainAudioPorts {
     fn audio_port_count(&self, _is_input: bool) -> u32 {
         1
     }
 
     fn audio_port_info(&self, index: u32, is_input: bool) -> Option<AudioPortInfo> {
-        let channel_count = self.audio_channel_count;
+        let channel_count = self.layout.channel_count();
         (index == 0).then_some(if is_input {
             AudioPortInfo {
                 id: 1,
@@ -263,36 +355,37 @@ impl PluginAudioPorts for WracGainPlugin {
 // ---------------------------------------------------------------------------
 // 例えば host が「stereo から mono に切り替えたい」と提案してきたとき、
 // plugin はそれを受理できるかを `can_apply_*` で答え、`apply_*` で実際に反映する。
-impl PluginConfigurableAudioPorts for WracGainPlugin {
+impl PluginConfigurableAudioPorts for WracGainConfigurableAudioPorts {
     fn can_apply_audio_port_configuration(
         &self,
         requests: &[AudioPortConfigurationRequest],
     ) -> bool {
-        let accepted = resolve_audio_channel_count(self.audio_channel_count, requests);
+        let accepted = resolve_audio_channel_count(self.layout.channel_count(), requests);
         accepted.is_some()
     }
 
     fn apply_audio_port_configuration(
-        &mut self,
+        &self,
         requests: &[AudioPortConfigurationRequest],
     ) -> PluginResult<()> {
-        // adapter 側が Processor の存在中は configuration apply を拒否するので、
-        // core の通常 field を更新すれば後続の port 問い合わせと次回 activate に反映される。
+        // adapter 側が Processor の存在中は configuration apply を拒否する。ここは非 RT
+        // query 専用 store だけを更新し、audio thread は activate 時の snapshot を使う。
+        let previous_channel_count = self.layout.channel_count();
         let channel_count =
-            resolve_audio_channel_count(self.audio_channel_count, requests).ok_or_else(|| {
+            resolve_audio_channel_count(previous_channel_count, requests).ok_or_else(|| {
                 log::warn!(
                     "rejecting unsupported audio port configuration: request_count={}, current_channel_count={}",
                     requests.len(),
-                    self.audio_channel_count
+                    previous_channel_count
                 );
                 PluginError::InvalidState
             })?;
         log::debug!(
             "applying audio port configuration: previous_channel_count={}, channel_count={}",
-            self.audio_channel_count,
+            previous_channel_count,
             channel_count
         );
-        self.audio_channel_count = channel_count;
+        self.layout.set_channel_count(channel_count);
         Ok(())
     }
 }
@@ -302,7 +395,7 @@ impl PluginConfigurableAudioPorts for WracGainPlugin {
 // ---------------------------------------------------------------------------
 // host から見える parameter API。template 利用時に parameter を増やす場合は、
 // ここが host に公開する schema と文字列表現の追加ポイントになる。
-impl PluginParameters for WracGainPlugin {
+impl PluginParameters for WracGainParameters {
     fn parameter_count(&self) -> u32 {
         // 新しい parameter を追加するときは、この数と `parameter_info()` の match を
         // 一緒に更新する。

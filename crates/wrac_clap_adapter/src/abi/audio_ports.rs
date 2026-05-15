@@ -23,17 +23,7 @@ unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: boo
             log::warn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
-        // wrapper format では、別の lifecycle callback が core write lock を持つ最中に
-        // port metadata を問い合わせることがある。host 側 query path を plugin deadlock
-        // に巻き込むより、この瞬間だけ「取得不可」と返す方が安全。
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "audio_ports.count: core try_read failed is_input={is_input} thread={:?}",
-                std::thread::current().id()
-            );
-            return 0;
-        };
-        let Some(audio_ports) = core.audio_ports() else {
+        let Some(audio_ports) = instance.audio_ports.as_ref() else {
             log::warn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
             return 0;
         };
@@ -63,14 +53,7 @@ unsafe extern "C" fn audio_ports_get(
             );
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "audio_ports.get: core try_read failed index={index} is_input={is_input} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(audio_ports) = core.audio_ports() else {
+        let Some(audio_ports) = instance.audio_ports.as_ref() else {
             log::warn!(
                 "audio_ports.get: plugin has no audio ports index={index} is_input={is_input}"
             );

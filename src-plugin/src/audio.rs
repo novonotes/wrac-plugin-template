@@ -21,16 +21,35 @@ use crate::state::SharedState;
 
 /// [`wrac_clap_adapter::PluginCore::activate`] で生成され、host の audio thread に所有される DSP 実体。
 ///
-/// 中身は共有 state への [`Arc`] だけ。[`Processor`] instance は host が
-/// [`wrac_clap_adapter::PluginCore::deactivate`] するまで生き続け、その間に何度も
-/// [`Processor::process`] が呼ばれる。
+/// [`Processor`] instance は host が [`wrac_clap_adapter::PluginCore::deactivate`] するまで
+/// 生き続け、その間に何度も [`Processor::process`] が呼ばれる。
+///
+/// この型に入れる field は「audio thread が待たずに読めるもの」だけにします。
+/// `shared` は atomic parameter store なので process 中に読めます。一方で
+/// `audio_channel_count` は [`PluginCore::activate`](wrac_clap_adapter::PluginCore::activate)
+/// 時点で non-realtime layout store から copy した snapshot です。
+///
+/// この snapshot が適切なのは、adapter が Processor の存在中に configurable-audio-ports の
+/// layout apply を拒否するからです。つまり、layout store は次回 activate 用には更新されますが、
+/// すでに走っている Processor の契約は途中で書き換わりません。
+///
+/// 製品 plugin で layout に応じて DSP graph や channel mapping を変える場合も、ここに
+/// `Arc<RwLock<Layout>>` を渡すのではなく、activate 時に必要な設定へ変換して processor に
+/// 持たせるのが安全です。
 pub(crate) struct WracGainAudioProcessor {
     shared: Arc<SharedState>,
+    // Gain の DSP 自体は channel count を必要としないが、template として
+    // 「layout は activate 時に snapshot して Processor field にする」形を示すために保持する。
+    // debug build では host から来た実 buffer がこの snapshot と合っているかを検査する。
+    audio_channel_count: u32,
 }
 
 impl WracGainAudioProcessor {
-    pub(crate) fn new(shared: Arc<SharedState>) -> Self {
-        Self { shared }
+    pub(crate) fn new(shared: Arc<SharedState>, audio_channel_count: u32) -> Self {
+        Self {
+            shared,
+            audio_channel_count,
+        }
     }
 }
 
@@ -62,6 +81,12 @@ impl Processor for WracGainAudioProcessor {
 
 impl WracGainAudioProcessor {
     fn process_no_alloc(&mut self, mut context: ProcessContext<'_>) -> PluginResult<ProcessStatus> {
+        #[cfg(debug_assertions)]
+        assert_audio_layout_matches_processor_snapshot(
+            &mut context.audio,
+            self.audio_channel_count,
+        );
+
         // ブロック開始時点の gain。event が来るたびに更新される。
         let mut gain = self.shared.gain();
         let mut bypass = self.shared.bypass();
@@ -115,6 +140,36 @@ impl WracGainAudioProcessor {
         // 入力が無音でなければ次のブロックも処理を続けてほしい、という宣言。
         // `Quiet` を返すと host が optimization の判断材料に使う。
         Ok(ProcessStatus::ContinueIfNotQuiet)
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_audio_layout_matches_processor_snapshot(
+    audio: &mut AudioProcessBuffer<'_>,
+    expected_channel_count: u32,
+) {
+    // Port layout は `activate()` 時に non-RT store から snapshot して Processor へ渡す。
+    // audio thread では store の lock を読まず、この snapshot と実 buffer の整合だけを見る。
+    //
+    // これは adapter の buffer validation を補うものではなく、activate 時に取得した layout
+    // snapshot を Processor 側でどう使うかを示すデモです。実際の製品 DSP が channel count を
+    // 必要としないなら、この assertion 自体は削って構いません。host/wrapper 由来の不正 buffer
+    // から memory safety を守る責務は adapter 側にあります。
+    debug_assert_eq!(
+        audio.port_pair_count(),
+        1,
+        "WRAC Gain expects exactly one main audio port pair"
+    );
+
+    for port_index in 0..audio.port_pair_count() {
+        let Some(port_pair) = audio.port_pair(port_index) else {
+            continue;
+        };
+        debug_assert_eq!(
+            port_pair.channel_pair_count(),
+            expected_channel_count as usize,
+            "audio buffer channel count must match the layout captured at activate()"
+        );
     }
 }
 

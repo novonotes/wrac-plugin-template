@@ -15,16 +15,7 @@ unsafe extern "C" fn note_ports_count(plugin: *const clap_plugin, is_input: bool
             log::warn!("note_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
-        // note port query は軽量 metadata call です。wrapper 経由では lifecycle/state
-        // 作業と競合し得るため、この path では `PluginCore` を待たない。
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "note_ports.count: core try_read failed is_input={is_input} thread={:?}",
-                std::thread::current().id()
-            );
-            return 0;
-        };
-        let Some(note_ports) = core.note_ports() else {
+        let Some(note_ports) = instance.note_ports.as_ref() else {
             log::debug!("note_ports.count: plugin has no note ports is_input={is_input}");
             return 0;
         };
@@ -52,14 +43,7 @@ unsafe extern "C" fn note_ports_get(
             log::warn!("note_ports.get: missing plugin instance index={index} is_input={is_input}");
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "note_ports.get: core try_read failed index={index} is_input={is_input} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(note_ports) = core.note_ports() else {
+        let Some(note_ports) = instance.note_ports.as_ref() else {
             log::debug!(
                 "note_ports.get: plugin has no note ports index={index} is_input={is_input}"
             );

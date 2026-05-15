@@ -45,7 +45,8 @@ use crate::descriptor::{
 use crate::host_gui::HostGuiResizeRequest;
 use crate::params::ParameterEditQueue;
 use crate::{
-    ActivateContext, PluginCore, PluginCoreContext, PluginGui, PluginStateSupport, ProcessContext,
+    ActivateContext, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore, PluginCoreContext,
+    PluginGui, PluginNotePorts, PluginParameters, PluginStateSupport, ProcessContext,
     ProcessStatus, Processor,
 };
 
@@ -57,18 +58,32 @@ const CLAP_PLUGIN_FACTORY_INFO_AUV2: &CStr = c"clap.plugin-factory-info-as-auv2.
 /// CLAP instance と Rust core の同期境界。
 ///
 /// wrapper format では、Native CLAP なら `[main-thread]` 扱いの query/state callback
-/// が別 thread から呼ばれることがある。そのため `PluginCore` は lock で守り、
-/// audio callback が直接必要とする state は `Processor` / notifier 側へ分離する。
+/// が別 thread から呼ばれることがある。
+///
+/// そのため、この型は「lifecycle を守る lock」と「host-facing callback から直接読める
+/// capability」を明確に分ける。`PluginCore` lock は `activate()` / `deactivate()` のように
+/// processor 所有権を動かす callback だけで使い、parameter / state / port query は instance
+/// 作成時に固定した `Arc` capability を読む。
+///
+/// この分離がないと、たとえば wrapper が `activate()` 中に parameter query や state save を
+/// 再入させたとき、adapter は core lock を取れずに「parameter なし」「state 保存失敗」のような
+/// host-visible な欠落を返すことになる。クラッシュ回避としては安全でも、ユーザーの project
+/// data や host routing には悪い結果になる。
 pub(crate) struct PluginInstance {
     plugin: clap_plugin,
-    // `PluginCore` は lifecycle と mutable extension state の所有者です。wrapper format では
-    // CLAP の thread annotation と違う順序・thread で callback が再入することがあるため、
-    // query / flush は `try_read()`、state / configurable ports は `try_write()` に寄せる。
-    // lock cycle を待つより、その callback だけ失敗値を返して host 依存の deadlock を避ける。
+    // `PluginCore` は processor lifecycle の所有者です。host-facing capability は instance
+    // 作成時に Arc として固定し、query/state callback が lifecycle lock と競合して
+    // host-visible metadata や state を欠落させないようにする。
     core: RwLock<Box<dyn PluginCore>>,
     // `get_extension()` は thread-safe callback なので、ここで `PluginCore` lock を取らない。
     // instance 作成時点の capability に固定し、以後は immutable な function table だけを返す。
+    // capability の有無を runtime state と連動させないことで、host が query した瞬間だけ
+    // extension が消えるような不安定な見え方を避ける。
     capabilities: PluginCapabilities,
+    audio_ports: Option<Arc<dyn PluginAudioPorts>>,
+    configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPorts>>,
+    note_ports: Option<Arc<dyn PluginNotePorts>>,
+    parameters: Option<Arc<dyn PluginParameters>>,
     state: Option<Arc<dyn PluginStateSupport>>,
     gui: Option<Arc<dyn PluginGui>>,
     // GUI mutation callback は native UI lifecycle に触れる。wrapper が再入・並行
@@ -110,17 +125,26 @@ impl PluginInstance {
             host_parameter_edit_notifier: parameter_edits.clone(),
             host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
         };
-        let mut core = (registration.create)(context);
+        let core = (registration.create)(context);
         // wrapper は軽量 query の途中で `get_extension()` を呼ぶことがある。ここで
         // `PluginCore` の lock を待つと host 側の再入順に依存するため、capability は
         // callback が走り始める前の instance 作成時点で固定する。
+        //
+        // 重要なのは、ここで得た Arc を adapter が SoT にしないことです。adapter は
+        // capability への入口だけを保持し、実際の parameter 値、project state、port layout の
+        // SoT は plugin 実装側の store に残す。製品 plugin はそれぞれの store に対して
+        // realtime-safe / non-realtime-safe の境界を自分で設計できる。
+        let audio_ports = core.audio_ports();
+        let configurable_audio_ports = core.configurable_audio_ports();
+        let note_ports = core.note_ports();
+        let parameters = core.parameters();
         let state = core.state();
         let gui = core.gui();
         let capabilities = PluginCapabilities {
-            audio_ports: core.audio_ports().is_some(),
-            configurable_audio_ports: core.configurable_audio_ports().is_some(),
-            note_ports: core.note_ports().is_some(),
-            parameters: core.parameters().is_some(),
+            audio_ports: audio_ports.is_some(),
+            configurable_audio_ports: configurable_audio_ports.is_some(),
+            note_ports: note_ports.is_some(),
+            parameters: parameters.is_some(),
             state: state.is_some(),
             gui: gui.is_some(),
         };
@@ -143,6 +167,10 @@ impl PluginInstance {
             },
             core: RwLock::new(core),
             capabilities,
+            audio_ports,
+            configurable_audio_ports,
+            note_ports,
+            parameters,
             state,
             gui,
             gui_callback_busy: Mutex::new(()),
@@ -481,10 +509,9 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
             log::warn!("plugin.deactivate: missing plugin instance");
             return;
         };
-        let Some(_guard) = instance.try_enter_lifecycle() else {
-            log::warn!("plugin.deactivate: lifecycle is busy");
-            return;
-        };
+        // deactivate は host へ完了を返す前に Processor を必ず回収したい cleanup callback。
+        // wrapper が lifecycle callback を並行させても、ここでは待って破棄漏れを避ける。
+        let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
             if let Err(error) = instance.core.write().deactivate(processor) {
                 log::warn!("plugin.deactivate: plugin deactivate failed: {error}");

@@ -27,23 +27,15 @@ pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
 };
 
 // VST3/AU/AAX wrapper では parameter query が CLAP の `[main-thread]` 前提から外れて
-// 呼ばれることがある。ここは read lock と `PluginCore` の `&self` API だけに寄せ、
-// GUI/runtime 所有権や lifecycle mutation に入らない。state restore などの write 側と
-// 競合した場合も待たず、host へ「今は取得不可」を返す。
+// 呼ばれることがある。parameters capability は instance 作成時に固定した Arc を直接読み、
+// GUI/runtime 所有権や lifecycle mutation に入らない。
 unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
             log::warn!("params.count: missing plugin instance");
             return 0;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "params.count: core try_read failed on thread {:?}",
-                std::thread::current().id()
-            );
-            return 0;
-        };
-        let Some(parameters) = core.parameters() else {
+        let Some(parameters) = instance.parameters.as_ref() else {
             log::warn!("params.count: plugin has no parameters");
             return 0;
         };
@@ -70,14 +62,7 @@ unsafe extern "C" fn params_get_info(
             log::warn!("params.get_info: missing plugin instance index={param_index}");
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "params.get_info: core try_read failed index={param_index} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(parameters) = core.parameters() else {
+        let Some(parameters) = instance.parameters.as_ref() else {
             log::warn!("params.get_info: plugin has no parameters index={param_index}");
             return false;
         };
@@ -121,14 +106,7 @@ unsafe extern "C" fn params_get_value(
             log::warn!("params.get_value: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "params.get_value: core try_read failed param_id={param_id} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(parameters) = core.parameters() else {
+        let Some(parameters) = instance.parameters.as_ref() else {
             log::warn!("params.get_value: plugin has no parameters param_id={param_id}");
             return false;
         };
@@ -159,14 +137,7 @@ unsafe extern "C" fn params_value_to_text(
             log::warn!("params.value_to_text: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "params.value_to_text: core try_read failed param_id={param_id} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(parameters) = core.parameters() else {
+        let Some(parameters) = instance.parameters.as_ref() else {
             log::warn!("params.value_to_text: plugin has no parameters param_id={param_id}");
             return false;
         };
@@ -201,14 +172,7 @@ unsafe extern "C" fn params_text_to_value(
             log::warn!("params.text_to_value: invalid utf8 param_id={param_id}");
             return false;
         };
-        let Some(core) = instance.core.try_read() else {
-            log::warn!(
-                "params.text_to_value: core try_read failed param_id={param_id} thread={:?}",
-                std::thread::current().id()
-            );
-            return false;
-        };
-        let Some(parameters) = core.parameters() else {
+        let Some(parameters) = instance.parameters.as_ref() else {
             log::warn!("params.text_to_value: plugin has no parameters param_id={param_id}");
             return false;
         };
@@ -238,21 +202,12 @@ unsafe extern "C" fn params_flush(
         };
         unsafe {
             let mut events = crate::ProcessEvents::from_raw(in_events, out_events);
-            // wrapper 固有の realtime-ish path から `flush()` が来ることがある。ここで
-            // lifecycle/state 側の core write lock を待つと adapter が避けたい host 依存の
-            // deadlock を再導入するため、input event の取りこぼしを待機より優先する。
-            if let Some(core) = instance.core.try_read() {
-                if let Some(parameters) = core.parameters() {
-                    instance
-                        .parameter_edits
-                        .apply_input_parameter_events(parameters, &events.input);
-                }
-                drop(core);
+            if let Some(parameters) = instance.parameters.as_ref() {
+                instance
+                    .parameter_edits
+                    .apply_input_parameter_events(parameters.as_ref(), &events.input);
             } else {
-                log::warn!(
-                    "params.flush: core try_read failed thread={:?}",
-                    std::thread::current().id()
-                );
+                log::warn!("params.flush: plugin has no parameters");
             }
             instance
                 .parameter_edits
