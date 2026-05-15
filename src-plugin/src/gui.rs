@@ -488,13 +488,26 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
 
 fn webview_data_dir(plugin_id: &str) -> PathBuf {
     let plugin_dir = sanitize_plugin_data_dir(plugin_id);
-    match ProjectDirs::from("com", "your-company", "wrac-gain") {
+    // WebView user-data も plugin_id 由来にする。ここだけ template 名を持つと、
+    // rename 後の plugin が旧 plugin と cookie/cache/storage を共有してしまう。
+    match project_dirs_from_plugin_id(plugin_id) {
         Some(dirs) => dirs.data_dir().join("webview").join(plugin_dir),
         None => std::env::temp_dir()
-            .join("wrac-gain-plugin")
+            .join(plugin_dir)
             .join("webview")
-            .join(plugin_dir),
+            .join("data"),
     }
+}
+
+fn project_dirs_from_plugin_id(plugin_id: &str) -> Option<ProjectDirs> {
+    let mut parts = plugin_id.split('.');
+    let qualifier = parts.next()?;
+    let organization = parts.next()?;
+    let application = parts.collect::<Vec<_>>().join("-");
+    if application.is_empty() {
+        return None;
+    }
+    ProjectDirs::from(qualifier, organization, &application)
 }
 
 fn sanitize_plugin_data_dir(plugin_id: &str) -> String {

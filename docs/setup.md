@@ -44,7 +44,30 @@ cd my_plugin
 git submodule update --init --recursive
 ```
 
-### 2. Bulk Replace Identifiers
+### 2. Configure Plugin Identity
+
+Plugin identity is centralized in `src-plugin/Cargo.toml`.
+Edit `[package.metadata.wrac]` first.
+
+```toml
+[package.metadata.wrac]
+plugin_id = "com.your-company.my-plugin"
+plugin_name = "My Plugin"
+company_name = "Your Company"
+auv2_type = "aufx"
+auv2_subtype = "MyPl"
+auv2_manufacturer_code = "YrCo"
+standalone_name = "My Plugin Standalone"
+```
+
+These values drive the Rust plugin descriptor, GUI About page, bundle names,
+standalone app name, wrapper build arguments, CLAP Info.plist, AUv2 validation,
+WebView data directory namespace, and debug log app name.
+
+> **Important:** The plugin ID must be globally unique. It cannot be changed once published.
+> AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
+
+### 3. Bulk Replace Remaining Identifiers
 
 Several kinds of identifiers are scattered throughout the repository.
 Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and replace them all at once.
@@ -54,13 +77,11 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 | Kind | Current value | Example replacement |
 |------|--------------|---------------------|
 | Rust crate name | `wrac_gain_plugin` | `my_plugin` |
-| Plugin display name | `WRAC Gain` | `My Plugin` |
-| Plugin ID (reverse-domain recommended) | `com.your-company.wrac-gain` | `com.your-company.my-plugin` |
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
-> **Important:** The plugin ID must be globally unique. It cannot be changed once published.
-> The repository URL points to this template by default. After generating a new project, update it to your own repository if you publish the crate metadata.
+The repository URL points to this template by default. After generating a new
+project, update it to your own repository if you publish the crate metadata.
 
 **Steps:**
 
@@ -80,7 +101,7 @@ rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' -
 Once confirmed, **replace all occurrences** according to the table above.
 Re-run the same commands after replacing and verify the output is zero matches.
 
-### 3. Build & Install
+### 4. Build & Install
 
 Run the following from the repository root.
 
@@ -108,7 +129,7 @@ VST3 / AU / standalone are built where supported by the current OS. Standalone
 apps do not have a plugin install destination, so xtask prints their artifact
 path instead.
 
-### 4. Verify
+### 5. Verify
 
 Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).
 Before launching the plugin in your DAW, start the dev server with the following commands.
@@ -123,7 +144,7 @@ Launch your DAW and try inserting the plugin.
 Some DAWs may require a plugin rescan.
 The GUI supports hot reload — try editing the HTML files.
 
-### 5. Debug
+### 6. Debug
 
 Attaching a debugger to a DAW can be difficult, so we recommend debugging as a standalone application first.
 In VS Code, select the "Debug gain plugin standalone" configuration and run it.

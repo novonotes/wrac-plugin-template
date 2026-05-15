@@ -1,11 +1,1 @@
-pub(crate) const PLUGIN_NAME: &str = "WRAC Gain";
-pub(crate) const PLUGIN_ID: &str = "com.your-company.wrac-gain";
 pub(crate) const CRATE_NAME: &str = "wrac_gain_plugin";
-pub(crate) const CLAP_BUNDLE_NAME: &str = "WRAC Gain.clap";
-pub(crate) const VST3_BUNDLE_NAME: &str = "WRAC Gain.vst3";
-pub(crate) const AU_BUNDLE_NAME: &str = "WRAC Gain.component";
-pub(crate) const STANDALONE_NAME: &str = "WRAC Gain Standalone";
-pub(crate) const AU_TYPE: &str = "aufx";
-pub(crate) const AU_SUBTYPE: &str = "WtGn";
-pub(crate) const AU_MANUFACTURER: &str = "YrCo";
-pub(crate) const AU_MANUFACTURER_NAME: &str = "Your Company";

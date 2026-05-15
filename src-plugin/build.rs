@@ -24,14 +24,23 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let manifest_path = manifest_dir.join("Cargo.toml");
     // Cargo.toml の [package.metadata.wrac] を plugin identity の SoT にする。
-    // Rust の descriptor と GUI の About が別々の値を持つと、テンプレートを改名した時に
-    // 片方だけ古い表示になるため、build.rs から compile-time env として Rust へ渡す。
+    // descriptor / AUv2 codes / GUI / xtask が別々の値を持つと、テンプレートを
+    // 改名した時に一部 artifact だけ古い名前で出るため、Rust へ compile-time env で渡す。
     let metadata = read_wrac_metadata(&manifest_path).expect("failed to read WRAC metadata");
     println!("cargo:rustc-env=WRAC_PLUGIN_ID={}", metadata.plugin_id);
     println!("cargo:rustc-env=WRAC_PLUGIN_NAME={}", metadata.plugin_name);
     println!(
         "cargo:rustc-env=WRAC_COMPANY_NAME={}",
         metadata.company_name
+    );
+    println!("cargo:rustc-env=WRAC_AUV2_TYPE={}", metadata.auv2_type);
+    println!(
+        "cargo:rustc-env=WRAC_AUV2_SUBTYPE={}",
+        metadata.auv2_subtype
+    );
+    println!(
+        "cargo:rustc-env=WRAC_AUV2_MANUFACTURER_CODE={}",
+        metadata.auv2_manufacturer_code
     );
 
     // debug build 時は zip を作らない (Vite dev server を使うため)。
@@ -62,6 +71,9 @@ struct WracMetadata {
     plugin_id: String,
     plugin_name: String,
     company_name: String,
+    auv2_type: String,
+    auv2_subtype: String,
+    auv2_manufacturer_code: String,
 }
 
 fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
@@ -72,10 +84,23 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         .ok_or_else(|| missing_metadata("plugin_name"))?;
     let company_name = read_toml_string(&manifest, "package.metadata.wrac", "company_name")
         .ok_or_else(|| missing_metadata("company_name"))?;
+    let auv2_type = read_toml_string(&manifest, "package.metadata.wrac", "auv2_type")
+        .ok_or_else(|| missing_metadata("auv2_type"))?;
+    let auv2_subtype = read_toml_string(&manifest, "package.metadata.wrac", "auv2_subtype")
+        .ok_or_else(|| missing_metadata("auv2_subtype"))?;
+    let auv2_manufacturer_code =
+        read_toml_string(&manifest, "package.metadata.wrac", "auv2_manufacturer_code")
+            .ok_or_else(|| missing_metadata("auv2_manufacturer_code"))?;
+    validate_four_ascii("auv2_type", &auv2_type)?;
+    validate_four_ascii("auv2_subtype", &auv2_subtype)?;
+    validate_four_ascii("auv2_manufacturer_code", &auv2_manufacturer_code)?;
     Ok(WracMetadata {
         plugin_id,
         plugin_name,
         company_name,
+        auv2_type,
+        auv2_subtype,
+        auv2_manufacturer_code,
     })
 }
 
@@ -112,6 +137,17 @@ fn parse_toml_basic_string(value: &str) -> Option<String> {
     let value = value.strip_prefix('"')?;
     let value = value.strip_suffix('"')?;
     Some(value.replace("\\\"", "\"").replace("\\\\", "\\"))
+}
+
+fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
+    if value.len() == 4 && value.is_ascii() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("package.metadata.wrac.{key} must be exactly 4 ASCII bytes"),
+        ))
+    }
 }
 
 /// `src_dir` 以下を丸ごと deflate 圧縮の zip にまとめて `out_zip` に書き出す。

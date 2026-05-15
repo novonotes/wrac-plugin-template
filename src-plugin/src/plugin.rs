@@ -33,11 +33,14 @@ use crate::state::{
 };
 
 // plugin identity は src-plugin/Cargo.toml の [package.metadata.wrac] から来る。
-// GUI 側も同じ metadata を読むことで、host-facing descriptor と About 表示の
-// 改名漏れを防ぐ。
+// GUI / xtask / wrapper build も同じ metadata を読むことで、host-facing descriptor と
+// bundle 名や About 表示の改名漏れを防ぐ。
 pub(crate) const PLUGIN_ID: &str = env!("WRAC_PLUGIN_ID");
 pub(crate) const PLUGIN_NAME: &str = env!("WRAC_PLUGIN_NAME");
 pub(crate) const COMPANY_NAME: &str = env!("WRAC_COMPANY_NAME");
+const AUV2_TYPE: [u8; 4] = four_char_code(env!("WRAC_AUV2_TYPE"));
+const AUV2_SUBTYPE: [u8; 4] = four_char_code(env!("WRAC_AUV2_SUBTYPE"));
+const AUV2_MANUFACTURER_CODE: [u8; 4] = four_char_code(env!("WRAC_AUV2_MANUFACTURER_CODE"));
 
 // 各 parameter にも host 内で一意の ID を割り当てる必要がある。
 // 新しい parameter を追加するときは、ここに `PARAM_*_ID` を増やし、下の
@@ -71,12 +74,20 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     // manufacturer_code と plugin_subtype は 4 文字 ASCII の固有 ID で、
     // 同じ会社内で重複しないように決める必要がある。
     auv2: Some(Auv2Descriptor {
-        manufacturer_code: *b"YrCo",
+        manufacturer_code: AUV2_MANUFACTURER_CODE,
         manufacturer_name: COMPANY_NAME,
-        plugin_type: *b"aufx", // "aufx" = audio effect
-        plugin_subtype: *b"WtGn",
+        plugin_type: AUV2_TYPE,
+        plugin_subtype: AUV2_SUBTYPE,
     }),
 };
+
+const fn four_char_code(value: &str) -> [u8; 4] {
+    let bytes = value.as_bytes();
+    if bytes.len() != 4 {
+        panic!("AUv2 code must be exactly 4 ASCII bytes");
+    }
+    [bytes[0], bytes[1], bytes[2], bytes[3]]
+}
 
 /// plugin 1 instance を表す型。
 ///

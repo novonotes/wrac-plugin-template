@@ -6,6 +6,7 @@ mod cli;
 mod commands;
 mod constants;
 mod context;
+mod metadata;
 mod profile;
 mod targets;
 mod util;

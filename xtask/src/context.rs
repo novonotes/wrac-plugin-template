@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::Result;
-use crate::constants::{AU_BUNDLE_NAME, CLAP_BUNDLE_NAME, STANDALONE_NAME, VST3_BUNDLE_NAME};
+use crate::metadata::PluginMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 
@@ -11,6 +11,7 @@ pub(crate) struct Context {
     pub(crate) platform: Platform,
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
+    pub(crate) metadata: PluginMetadata,
 }
 
 impl Context {
@@ -32,12 +33,16 @@ impl Context {
         let wrapper_dir = env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| root.join("clap_wrapper_builder"));
+        // Plugin identity は src-plugin/Cargo.toml の [package.metadata.wrac] を SoT にする。
+        // xtask が bundle 名や wrapper 引数を別に持つと、rename 時に build artifact だけ古い名前になる。
+        let metadata = PluginMetadata::read(&root.join("src-plugin").join("Cargo.toml"))?;
 
         Ok(Self {
             root,
             platform: Platform::detect()?,
             target_dir,
             wrapper_dir,
+            metadata,
         })
     }
 
@@ -76,22 +81,25 @@ impl Context {
     }
 
     pub(crate) fn clap_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile).join(CLAP_BUNDLE_NAME)
+        self.plugins_dir(profile)
+            .join(self.metadata.clap_bundle_name())
     }
 
     pub(crate) fn vst3_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile).join(VST3_BUNDLE_NAME)
+        self.plugins_dir(profile)
+            .join(self.metadata.vst3_bundle_name())
     }
 
     pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile).join(AU_BUNDLE_NAME)
+        self.plugins_dir(profile)
+            .join(self.metadata.au_bundle_name())
     }
 
     pub(crate) fn standalone_artifact(&self, profile: BuildProfile) -> PathBuf {
         let filename = if self.platform == Platform::Macos {
-            format!("{STANDALONE_NAME}.app")
+            format!("{}.app", self.metadata.standalone_name)
         } else {
-            format!("{STANDALONE_NAME}.exe")
+            format!("{}.exe", self.metadata.standalone_name)
         };
         self.standalone_dir(profile).join(filename)
     }
