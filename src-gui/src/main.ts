@@ -264,6 +264,7 @@ function renderEditorPage(page: EditorPage): void {
     ? `v${__WRAC_PLUGIN_METADATA__.version}`
     : "×";
   headerAction.disabled = showControls;
+  headerAction.classList.toggle("is-close", !showControls);
   headerAction.setAttribute(
     "aria-label",
     showControls ? "Plugin version" : "Close about page",

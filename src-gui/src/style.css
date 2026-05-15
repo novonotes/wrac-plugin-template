@@ -84,12 +84,23 @@ body {
 }
 
 .header-action {
+  display: grid;
+  min-width: 30px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
   font-size: 11px;
   color: rgba(247, 241, 231, 0.46);
 }
 
 .header-action:not(:disabled) {
+  border: 1px solid rgba(217, 185, 133, 0.44);
   color: #d9b985;
+}
+
+.header-action.is-close {
+  font-size: 19px;
+  line-height: 1;
 }
 
 .header-action:disabled {
