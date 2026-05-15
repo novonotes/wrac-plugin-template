@@ -59,28 +59,41 @@ body {
 }
 
 .plugin-name,
-.version {
+.header-action {
   margin: 0;
 }
 
-.plugin-name {
+.plugin-name,
+.header-action {
   padding: 0;
   border: 0;
   background: transparent;
-  font-size: 11px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
   color: #d9b985;
   cursor: pointer;
 }
 
-.plugin-name:hover {
+.plugin-name {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.plugin-name:hover,
+.header-action:not(:disabled):hover {
   color: #fff6e5;
 }
 
-.version {
+.header-action {
   font-size: 11px;
   color: rgba(247, 241, 231, 0.46);
+}
+
+.header-action:not(:disabled) {
+  color: #d9b985;
+}
+
+.header-action:disabled {
+  cursor: default;
 }
 
 .page {
@@ -200,18 +213,10 @@ body {
 
 .about-title {
   margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
   color: #f7f1e7;
   font-size: 32px;
   line-height: 1;
   font-weight: 600;
-  cursor: pointer;
-}
-
-.about-title:hover {
-  color: #fff6e5;
 }
 
 .about-page dl {

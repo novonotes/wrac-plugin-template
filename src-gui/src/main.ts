@@ -61,9 +61,10 @@ const MAX_ANGLE = 135;
 // --- DOM element references ---
 const dbLabel = document.querySelector<HTMLButtonElement>("#gain-db");
 const gainInput = document.querySelector<HTMLInputElement>("#gain-input");
-const buildInfo = document.querySelector<HTMLParagraphElement>("#build-info");
+const headerAction =
+  document.querySelector<HTMLButtonElement>("#header-action");
 const pluginName = document.querySelector<HTMLButtonElement>("#plugin-name");
-const aboutTitle = document.querySelector<HTMLButtonElement>("#about-title");
+const aboutTitle = document.querySelector<HTMLElement>("#about-title");
 const aboutPluginName =
   document.querySelector<HTMLElement>("#about-plugin-name");
 const aboutVersion = document.querySelector<HTMLElement>("#about-version");
@@ -80,7 +81,7 @@ const pageAbout = document.querySelector<HTMLElement>("#page-about");
 if (
   !dbLabel ||
   !gainInput ||
-  !buildInfo ||
+  !headerAction ||
   !pluginName ||
   !aboutTitle ||
   !aboutPluginName ||
@@ -105,7 +106,6 @@ aboutPluginName.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
 aboutVersion.textContent = __WRAC_PLUGIN_METADATA__.version;
 aboutCompanyName.textContent = __WRAC_PLUGIN_METADATA__.companyName;
 aboutBuild.textContent = `${buildType} build`;
-buildInfo.textContent = `v${__WRAC_PLUGIN_METADATA__.version}`;
 document.title = __WRAC_PLUGIN_METADATA__.pluginName;
 
 // --- State ---
@@ -259,6 +259,14 @@ function renderEditorPage(page: EditorPage): void {
   pluginName.setAttribute(
     "aria-label",
     showControls ? "Show about page" : "Show controls",
+  );
+  headerAction.textContent = showControls
+    ? `v${__WRAC_PLUGIN_METADATA__.version}`
+    : "×";
+  headerAction.disabled = showControls;
+  headerAction.setAttribute(
+    "aria-label",
+    showControls ? "Plugin version" : "Close about page",
   );
 }
 
@@ -441,27 +449,27 @@ gainInput.addEventListener("keydown", (event) => {
 gainInput.addEventListener("pointerdown", (event) => event.stopPropagation());
 
 // About は設定画面ではなく plugin identity の詳細表示なので、常設タブではなく
-// plugin 名そのものを入口にする。メイン操作面の余計な segmented control を避けるため。
+// plugin 名そのものを入口/切り替えにする。メイン操作面の余計な segmented control を避けるため。
 pluginName.addEventListener("click", (event) => {
-  setEditorPage("about");
+  setEditorPage(pageAbout.hidden ? "about" : "controls");
   restoreHostFocusIfNeeded(event.target);
 });
 
-aboutTitle.addEventListener("click", (event) => {
+// About は full-screen modal 相当の一時表示なので、右上の明示的な close affordance で戻す。
+// 中央の plugin 名は情報表示に留め、閉じる操作と混同させない。
+headerAction.addEventListener("click", (event) => {
   setEditorPage("controls");
   restoreHostFocusIfNeeded(event.target);
 });
 
 {
-  let dragStart:
-    | {
-        pointerId: number;
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      }
-    | null = null;
+  let dragStart: {
+    pointerId: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null = null;
   let resizeFrame = 0;
   let inFlight = false;
   let queuedSize: { width: number; height: number } | null = null;
