@@ -32,9 +32,12 @@ use crate::state::{
     EditorPage, ParameterStateSnapshot, ProjectState, ProjectStateStore, SharedState,
 };
 
-// plugin を識別する reverse-DNS 形式の ID。DAW が plugin を一意に判別するために
-// 使うので、自分の plugin を作るときはここを必ず変更する。
-pub(crate) const PLUGIN_ID: &str = "com.your-company.wrac-gain";
+// plugin identity は src-plugin/Cargo.toml の [package.metadata.wrac] から来る。
+// GUI 側も同じ metadata を読むことで、host-facing descriptor と About 表示の
+// 改名漏れを防ぐ。
+pub(crate) const PLUGIN_ID: &str = env!("WRAC_PLUGIN_ID");
+pub(crate) const PLUGIN_NAME: &str = env!("WRAC_PLUGIN_NAME");
+pub(crate) const COMPANY_NAME: &str = env!("WRAC_COMPANY_NAME");
 
 // 各 parameter にも host 内で一意の ID を割り当てる必要がある。
 // 新しい parameter を追加するときは、ここに `PARAM_*_ID` を増やし、下の
@@ -52,8 +55,8 @@ pub(crate) const MAX_GAIN: f32 = 2.0;
 // `wrac_clap_adapter` がこれを CLAP / AUv2 の descriptor 構造体へと変換する。
 pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     id: PLUGIN_ID,
-    name: "WRAC Gain",
-    vendor: "Your Company",
+    name: PLUGIN_NAME,
+    vendor: COMPANY_NAME,
     url: "",
     manual_url: "",
     support_url: "",
@@ -69,7 +72,7 @@ pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
     // 同じ会社内で重複しないように決める必要がある。
     auv2: Some(Auv2Descriptor {
         manufacturer_code: *b"YrCo",
-        manufacturer_name: "Your Company",
+        manufacturer_name: COMPANY_NAME,
         plugin_type: *b"aufx", // "aufx" = audio effect
         plugin_subtype: *b"WtGn",
     }),

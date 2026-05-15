@@ -8,6 +8,13 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 build = "build.rs"
 
+# Plugin identity lives here so the Rust descriptor and GUI About page are
+# generated from the same values when this template is renamed.
+[package.metadata.wrac]
+plugin_id = "com.your-company.wrac-gain"
+plugin_name = "WRAC Gain"
+company_name = "Your Company"
+
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 

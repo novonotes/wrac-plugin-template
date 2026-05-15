@@ -21,12 +21,24 @@ fn main() {
     println!("cargo:rerun-if-changed=../src-gui/vite.config.ts");
     println!("cargo:rerun-if-changed=Cargo.toml");
 
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_path = manifest_dir.join("Cargo.toml");
+    // Cargo.toml の [package.metadata.wrac] を plugin identity の SoT にする。
+    // Rust の descriptor と GUI の About が別々の値を持つと、テンプレートを改名した時に
+    // 片方だけ古い表示になるため、build.rs から compile-time env として Rust へ渡す。
+    let metadata = read_wrac_metadata(&manifest_path).expect("failed to read WRAC metadata");
+    println!("cargo:rustc-env=WRAC_PLUGIN_ID={}", metadata.plugin_id);
+    println!("cargo:rustc-env=WRAC_PLUGIN_NAME={}", metadata.plugin_name);
+    println!(
+        "cargo:rustc-env=WRAC_COMPANY_NAME={}",
+        metadata.company_name
+    );
+
     // debug build 時は zip を作らない (Vite dev server を使うため)。
     if env::var("PROFILE").ok().as_deref() != Some("release") {
         return;
     }
 
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let gui_dist_dir = manifest_dir
         .parent()
         .expect("src-plugin must have a parent directory")
@@ -44,6 +56,62 @@ fn main() {
     }
 
     create_zip(&gui_dist_dir, &out_zip).expect("failed to create frontend zip");
+}
+
+struct WracMetadata {
+    plugin_id: String,
+    plugin_name: String,
+    company_name: String,
+}
+
+fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
+    let manifest = fs::read_to_string(manifest_path)?;
+    let plugin_id = read_toml_string(&manifest, "package.metadata.wrac", "plugin_id")
+        .ok_or_else(|| missing_metadata("plugin_id"))?;
+    let plugin_name = read_toml_string(&manifest, "package.metadata.wrac", "plugin_name")
+        .ok_or_else(|| missing_metadata("plugin_name"))?;
+    let company_name = read_toml_string(&manifest, "package.metadata.wrac", "company_name")
+        .ok_or_else(|| missing_metadata("company_name"))?;
+    Ok(WracMetadata {
+        plugin_id,
+        plugin_name,
+        company_name,
+    })
+}
+
+fn missing_metadata(key: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("missing package.metadata.wrac.{key} in src-plugin/Cargo.toml"),
+    )
+}
+
+fn read_toml_string(manifest: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in manifest.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line == format!("[{section}]");
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((line_key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if line_key.trim() != key {
+            continue;
+        }
+        return parse_toml_basic_string(value.trim());
+    }
+    None
+}
+
+fn parse_toml_basic_string(value: &str) -> Option<String> {
+    let value = value.strip_prefix('"')?;
+    let value = value.strip_suffix('"')?;
+    Some(value.replace("\\\"", "\"").replace("\\\\", "\\"))
 }
 
 /// `src_dir` 以下を丸ごと deflate 圧縮の zip にまとめて `out_zip` に書き出す。

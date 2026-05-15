@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WRAC Gain</title>
+    <title>Plugin</title>
     <!--
       Load the entry point as a Vite module script.
       In debug builds, the Vite dev server serves the .ts file directly.
@@ -15,46 +15,71 @@
     <div id="app">
       <main class="panel">
         <div class="header">
-          <p class="eyebrow">WRAC Gain</p>
-          <p class="version" id="build-info"></p>
+          <button class="plugin-name" id="plugin-name" type="button"></button>
+          <button
+            class="header-action"
+            id="header-action"
+            type="button"
+          ></button>
         </div>
-        <nav class="tabs" aria-label="Editor pages">
-          <button class="tab is-active" id="tab-controls" type="button" data-page="controls">Controls</button>
-          <button class="tab" id="tab-about" type="button" data-page="about">About</button>
-        </nav>
         <section class="page is-active" id="page-controls">
           <div class="meter">
             <button class="value" id="gain-db" type="button">0.0 dB</button>
-            <input class="value value-input" id="gain-input" type="text" hidden />
+            <input
+              class="value value-input"
+              id="gain-input"
+              type="text"
+              hidden
+            />
           </div>
           <section class="knob-zone">
-            <button class="knob" id="gain-knob" type="button" aria-label="Gain knob">
+            <button
+              class="knob"
+              id="gain-knob"
+              type="button"
+              aria-label="Gain knob"
+            >
               <div class="knob-track"></div>
               <div class="knob-indicator" id="knob-indicator"></div>
             </button>
           </section>
         </section>
         <section class="page about-page" id="page-about" hidden>
-          <h1>WRAC Gain</h1>
+          <h1 class="about-title" id="about-title"></h1>
           <dl>
             <div>
-              <dt>Vendor</dt>
-              <dd>Your Company</dd>
+              <dt>Plugin Name</dt>
+              <dd id="about-plugin-name"></dd>
             </div>
             <div>
-              <dt>Format</dt>
-              <dd>CLAP wrapped to AU/VST3</dd>
+              <dt>Version</dt>
+              <dd id="about-version"></dd>
             </div>
             <div>
-              <dt>Processing</dt>
-              <dd>Sample-accurate gain with bypass</dd>
+              <dt>Company Name</dt>
+              <dd id="about-company-name"></dd>
+            </div>
+            <div>
+              <dt>Build</dt>
+              <dd id="about-build"></dd>
             </div>
           </dl>
         </section>
       </main>
-      <button class="resize-grip" id="resize-grip" type="button" aria-label="Resize plugin window">
+      <button
+        class="resize-grip"
+        id="resize-grip"
+        type="button"
+        aria-label="Resize plugin window"
+      >
         <svg width="18" height="18" viewBox="0 0 12 12" aria-hidden="true">
-          <path d="M2 10L10 2M5 10L10 5M8 10L10 8" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" />
+          <path
+            d="M2 10L10 2M5 10L10 5M8 10L10 8"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1"
+            stroke-linecap="round"
+          />
         </svg>
       </button>
     </div>

@@ -35,6 +35,15 @@ pub(crate) fn register_commands(
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     gui_resize_handle: WxpGuiResizeHandle,
 ) {
+    // GUI 初期化のどこまで到達したかを native log から追えるようにする。
+    // WebView console は DAW 環境で見えないことが多いため、frontend 起点の診断ログを
+    // plugin 側 logger に橋渡しする command を用意しておく。
+    command_handler.register_sync("write_to_log", move |ctx| {
+        let message = ctx.arg::<String>("message").map_err(|e| e.to_string())?;
+        log::info!("frontend: {message}");
+        Ok::<_, String>(json!({ "ok": true }))
+    });
+
     // editor page は音に関係しない project state。audio thread が読む SharedState とは
     // 別の store に置き、保存時に parameter snapshot と合成する。
     {

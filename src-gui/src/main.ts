@@ -17,7 +17,12 @@
 import { Channel, invoke } from "@novonotes/webview-bridge";
 import "./style.css";
 
-declare const __WRAC_GAIN_VERSION__: string;
+declare const __WRAC_PLUGIN_METADATA__: {
+  pluginId: string;
+  pluginName: string;
+  companyName: string;
+  version: string;
+};
 
 /** Type definition matching the JSON produced by parameter_payload() on the Rust side */
 type ParameterState = {
@@ -56,31 +61,52 @@ const MAX_ANGLE = 135;
 // --- DOM element references ---
 const dbLabel = document.querySelector<HTMLButtonElement>("#gain-db");
 const gainInput = document.querySelector<HTMLInputElement>("#gain-input");
-const buildInfo = document.querySelector<HTMLParagraphElement>("#build-info");
+const headerAction =
+  document.querySelector<HTMLButtonElement>("#header-action");
+const pluginName = document.querySelector<HTMLButtonElement>("#plugin-name");
+const aboutTitle = document.querySelector<HTMLElement>("#about-title");
+const aboutPluginName =
+  document.querySelector<HTMLElement>("#about-plugin-name");
+const aboutVersion = document.querySelector<HTMLElement>("#about-version");
+const aboutCompanyName = document.querySelector<HTMLElement>(
+  "#about-company-name",
+);
+const aboutBuild = document.querySelector<HTMLElement>("#about-build");
 const knob = document.querySelector<HTMLButtonElement>("#gain-knob");
 const indicator = document.querySelector<HTMLDivElement>("#knob-indicator");
 const resizeGrip = document.querySelector<HTMLButtonElement>("#resize-grip");
-const tabControls = document.querySelector<HTMLButtonElement>("#tab-controls");
-const tabAbout = document.querySelector<HTMLButtonElement>("#tab-about");
 const pageControls = document.querySelector<HTMLElement>("#page-controls");
 const pageAbout = document.querySelector<HTMLElement>("#page-about");
 
 if (
   !dbLabel ||
   !gainInput ||
-  !buildInfo ||
+  !headerAction ||
+  !pluginName ||
+  !aboutTitle ||
+  !aboutPluginName ||
+  !aboutVersion ||
+  !aboutCompanyName ||
+  !aboutBuild ||
   !knob ||
   !indicator ||
   !resizeGrip ||
-  !tabControls ||
-  !tabAbout ||
   !pageControls ||
   !pageAbout
 ) {
   throw new Error("required elements not found");
 }
 
-buildInfo.textContent = `v${__WRAC_GAIN_VERSION__} (${import.meta.env.PROD ? "Release" : "Debug"})`;
+const buildType = import.meta.env.PROD ? "Release" : "Debug";
+// About に出す identity は Vite が src-plugin/Cargo.toml から埋め込んだ値だけを使う。
+// テンプレート利用者が plugin を改名した時に、Rust descriptor と GUI 表示が分岐しないようにする。
+pluginName.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
+aboutTitle.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
+aboutPluginName.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
+aboutVersion.textContent = __WRAC_PLUGIN_METADATA__.version;
+aboutCompanyName.textContent = __WRAC_PLUGIN_METADATA__.companyName;
+aboutBuild.textContent = `${buildType} build`;
+document.title = __WRAC_PLUGIN_METADATA__.pluginName;
 
 // --- State ---
 let gain = 1;
@@ -109,7 +135,10 @@ function isEditableElement(target: EventTarget | null): boolean {
 }
 
 function restoreHostFocusIfNeeded(target?: EventTarget | null): void {
-  if (isEditableElement(target ?? null) || isEditableElement(document.activeElement)) {
+  if (
+    isEditableElement(target ?? null) ||
+    isEditableElement(document.activeElement)
+  ) {
     return;
   }
   window.setTimeout(() => {
@@ -176,9 +205,12 @@ void (async () => {
   // Register the Channel on the Rust side and remember the returned subscriptionId.
   // Passing that id back on unsubscribe guarantees we tear down only our own
   // subscription, even if a remount created another one in the meantime.
-  const subscription = await invoke<SubscribeParametersResponse>("subscribe_parameters", {
-    channel,
-  });
+  const subscription = await invoke<SubscribeParametersResponse>(
+    "subscribe_parameters",
+    {
+      channel,
+    },
+  );
   parameterSubscriptionId = subscription.subscriptionId;
 
   const initialPage = await invoke<EditorPageState>("get_editor_page");
@@ -190,6 +222,11 @@ void (async () => {
     },
   );
   editorPageSubscriptionId = editorPageSubscription.subscriptionId;
+  // WebView console に頼らず、native log だけで frontend 初期化完了を確認できるようにする。
+  // DAW 上の plugin GUI では devtools を開けない環境があるため、この境界ログを残す。
+  await invoke("write_to_log", {
+    message: "GUI initialization completed",
+  });
 })();
 
 function clamp(value: number): number {
@@ -215,14 +252,23 @@ function render(state: ParameterState): void {
 
 function renderEditorPage(page: EditorPage): void {
   const showControls = page === "controls";
-  tabControls.classList.toggle("is-active", showControls);
-  tabAbout.classList.toggle("is-active", !showControls);
-  tabControls.setAttribute("aria-selected", String(showControls));
-  tabAbout.setAttribute("aria-selected", String(!showControls));
   pageControls.hidden = !showControls;
   pageAbout.hidden = showControls;
   pageControls.classList.toggle("is-active", showControls);
   pageAbout.classList.toggle("is-active", !showControls);
+  pluginName.setAttribute(
+    "aria-label",
+    showControls ? "Show about page" : "Show controls",
+  );
+  headerAction.textContent = showControls
+    ? `v${__WRAC_PLUGIN_METADATA__.version}`
+    : "×";
+  headerAction.disabled = showControls;
+  headerAction.classList.toggle("is-close", !showControls);
+  headerAction.setAttribute(
+    "aria-label",
+    showControls ? "Plugin version" : "Close about page",
+  );
 }
 
 function setEditorPage(page: EditorPage): void {
@@ -403,26 +449,28 @@ gainInput.addEventListener("keydown", (event) => {
 });
 gainInput.addEventListener("pointerdown", (event) => event.stopPropagation());
 
-tabControls.addEventListener("click", (event) => {
+// About は設定画面ではなく plugin identity の詳細表示なので、常設タブではなく
+// plugin 名そのものを入口/切り替えにする。メイン操作面の余計な segmented control を避けるため。
+pluginName.addEventListener("click", (event) => {
+  setEditorPage(pageAbout.hidden ? "about" : "controls");
+  restoreHostFocusIfNeeded(event.target);
+});
+
+// About は full-screen modal 相当の一時表示なので、右上の明示的な close affordance で戻す。
+// 中央の plugin 名は情報表示に留め、閉じる操作と混同させない。
+headerAction.addEventListener("click", (event) => {
   setEditorPage("controls");
   restoreHostFocusIfNeeded(event.target);
 });
 
-tabAbout.addEventListener("click", (event) => {
-  setEditorPage("about");
-  restoreHostFocusIfNeeded(event.target);
-});
-
 {
-  let dragStart:
-    | {
-        pointerId: number;
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-      }
-    | null = null;
+  let dragStart: {
+    pointerId: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null = null;
   let resizeFrame = 0;
   let inFlight = false;
   let queuedSize: { width: number; height: number } | null = null;
