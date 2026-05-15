@@ -166,7 +166,7 @@ pub(crate) fn register_commands(
 
     command_handler.register_sync("focus_host_window", move |ctx| {
         ctx.webview()
-            .focus_parent()
+            .post_focus_parent()
             .map_err(|e| format!("focus_parent failed: {e}"))?;
         Ok::<_, String>(json!({ "ok": true }))
     });
@@ -178,7 +178,7 @@ pub(crate) fn register_commands(
         let size = gui_resize_handle
             .request_resize(
                 wxp::dpi::LogicalSize::new(request.width, request.height),
-                &ctx.webview(),
+                ctx.webview(),
                 host_gui_resize_requester.as_ref(),
             )
             .map_err(|e| e.to_string())?;

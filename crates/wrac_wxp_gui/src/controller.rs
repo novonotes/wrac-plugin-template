@@ -8,7 +8,7 @@ use wrac_clap_adapter::{
     ClapWindow, GuiApi, GuiConfiguration, GuiResizeHints, GuiSize, HostGuiResizeRequester,
     PluginError, PluginGui, PluginResult,
 };
-use wxp::{WebViewRef, dpi::LogicalSize};
+use wxp::{WebViewDispatch, dpi::LogicalSize};
 
 use crate::dpi::DpiConverter;
 use crate::runtime::{
@@ -558,7 +558,7 @@ impl WxpGuiResizeHandle {
     pub fn request_resize(
         &self,
         requested: LogicalSize<f64>,
-        web_view: &WebViewRef,
+        web_view: &WebViewDispatch,
         host_gui_resize_requester: &dyn HostGuiResizeRequester,
     ) -> PluginResult<GuiSize> {
         let logical_size = self.layout.clamp_logical_size(requested);
@@ -570,8 +570,10 @@ impl WxpGuiResizeHandle {
 
         self.layout.store_accepted_size(gui_size);
         let scale = *self.scale.lock();
+        // Commands receive `WebViewDispatch`, not the native WebView owner. That keeps resize
+        // requests usable from command handlers without extending a closing editor's lifetime.
         web_view
-            .set_bounds(DpiConverter::new(scale).create_webview_bounds(logical_size))
+            .post_set_bounds(DpiConverter::new(scale).create_webview_bounds(logical_size))
             .map_err(|_| PluginError::Message("failed to resize webview"))?;
         Ok(gui_size)
     }
