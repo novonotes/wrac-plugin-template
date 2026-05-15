@@ -4,6 +4,7 @@
 //! の形を変えるときは `src-gui` 側の `invoke(...)` / subscription と一緒に変更する。
 
 use std::cell::RefCell;
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::Arc;

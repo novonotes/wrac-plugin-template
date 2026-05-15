@@ -425,6 +425,7 @@ tabAbout.addEventListener("click", (event) => {
       }
     | null = null;
   let inFlight = false;
+  let drainResizeQueue: Promise<void> | null = null;
   let resizeDragSeq = 0;
   let queuedSize:
     | {
@@ -436,10 +437,10 @@ tabAbout.addEventListener("click", (event) => {
 
   const flushResize = () => {
     if (inFlight) {
-      return;
+      return drainResizeQueue ?? Promise.resolve();
     }
     inFlight = true;
-    void (async () => {
+    drainResizeQueue = (async () => {
       try {
         while (queuedSize) {
           const size = queuedSize;
@@ -452,9 +453,14 @@ tabAbout.addEventListener("click", (event) => {
         inFlight = false;
       }
       if (queuedSize) {
-        flushResize();
+        await flushResize();
       }
-    })();
+    })().finally(() => {
+      if (!inFlight && !queuedSize) {
+        drainResizeQueue = null;
+      }
+    });
+    return drainResizeQueue;
   };
 
   const requestResize = (width: number, height: number) => {
@@ -463,7 +469,19 @@ tabAbout.addEventListener("click", (event) => {
       height: Math.max(1, Math.round(height)),
       dragId: dragStart?.dragId ?? 0,
     };
-    flushResize();
+    return flushResize();
+  };
+
+  const endResizeDragAfterDrain = (dragId: number) => {
+    void (async () => {
+      // Keep the native drag snapshot alive until the final queued resize request
+      // has returned. Otherwise a slow host can make the last request fall back to
+      // JS coordinates, exactly the coordinate source this path is trying to avoid.
+      await flushResize();
+      await invoke("end_gui_resize_drag", {
+        request: { dragId },
+      }).catch(() => undefined);
+    })();
   };
 
   const applyResizeDelta = (event: PointerEvent) => {
@@ -497,11 +515,7 @@ tabAbout.addEventListener("click", (event) => {
     const dragId = dragStart?.dragId;
     dragStart = null;
     if (dragId !== undefined) {
-      window.setTimeout(() => {
-        void invoke("end_gui_resize_drag", {
-          request: { dragId },
-        }).catch(() => undefined);
-      }, 250);
+      endResizeDragAfterDrain(dragId);
     }
     restoreHostFocusIfNeeded(event.target);
   };
