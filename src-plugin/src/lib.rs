@@ -6,11 +6,11 @@
 //! 基本的にこの crate の各ファイルを書き換えていきます。
 //!
 //! ファイル構成:
-//! - `plugin.rs`   : host から見える plugin の契約。parameter / state / `PluginCore`。
+//! - `plugin.rs`   : host から見える plugin の契約。詳細実装は `plugin/` 配下。
 //! - `state.rs`    : audio / GUI / host で共有する lock-free な state。
 //! - `audio.rs`    : audio thread 上で動く DSP (このサンプルでは gain を掛けるだけ)。
-//! - `gui.rs`      : WebView ベースの GUI runtime。
-//! - `commands.rs` : WebView frontend から呼べる Rust command。
+//! - `gui.rs`      : WebView ベースの GUI integration。runtime / notifier は `gui/` 配下。
+//! - `commands.rs` : WebView frontend から呼べる Rust command。resize 補助は `commands/` 配下。
 //!
 //! ログは `log` facade 経由。`logging.rs` は debug build 用の簡易 logger で、
 //! 製品では独自 logger に差し替える前提です。

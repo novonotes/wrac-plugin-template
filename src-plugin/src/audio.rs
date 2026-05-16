@@ -19,10 +19,10 @@ use crate::state::SharedState;
 ///
 /// field は **audio thread が待たずに読めるもの**だけにする。`shared` は atomic
 /// なので process 中に読める。`audio_channel_count` は activate 時点で
-/// [`AudioLayoutStore`](crate::plugin) から copy した snapshot。adapter が active
-/// 中の layout 変更を拒否するので、走行中の Processor の契約は途中で変わらない。
-/// 製品で layout に応じ DSP を変える場合も、`Arc<RwLock<Layout>>` を持たせず
-/// activate 時に必要な設定へ変換して渡すのが安全。
+/// plugin の audio layout store から copy した snapshot。adapter が active 中の
+/// layout 変更を拒否するので、走行中の Processor の契約は途中で変わらない。製品で
+/// layout に応じ DSP を変える場合も、`Arc<RwLock<Layout>>` を持たせず activate
+/// 時に必要な設定へ変換して渡すのが安全。
 pub(crate) struct WracGainAudioProcessor {
     shared: Arc<SharedState>,
     // gain 自体は channel count を使わないが、「layout は activate で snapshot して
