@@ -25,6 +25,34 @@ It is also structured so it can be used as a template.
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
 - VST3 / AU / Standalone builds via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
 
+## Quick Start
+
+Want to try the bundled WRAC Gain plugin before building your own? Follow the minimal steps below.
+With just Rust and Node.js you should be able to build CLAP.
+For the prerequisites to build VST3 / AU / Standalone, see the [Setup doc](docs/setup.md#prerequisites).
+
+```sh
+# Clone with submodules (submodules are only needed for VST3 / AU / Standalone)
+git clone --recursive https://github.com/novonotes/wrac-plugin-template.git
+cd wrac-plugin-template
+
+# Build and install the plugin
+# Change the --target argument if you need AU or VST3
+cargo xtask build --target=clap
+cargo xtask install --target=clap
+
+# Debug builds load the GUI from the Vite dev server, so start it before launching your DAW
+cd src-gui
+npm install
+npm run dev
+```
+
+Then launch your DAW and insert **WRAC Gain** (a plugin rescan may be required).
+
+If it works, a quick note at [DAW Compatibility Reports](https://github.com/novonotes/wrac-plugin-template/discussions/6) is a big help for the community!
+
+To build your own plugin based on this template, see [Setup](docs/setup.md).
+
 ## Build
 
 Common commands:
@@ -46,11 +74,11 @@ cargo xtask install
 
 Supported formats:
 
-| OS | `cargo xtask build` targets | `cargo xtask validate` targets |
-|----|-----------------------------|-------------------------------|
-| macOS | CLAP / VST3 / AU / Standalone | CLAP / VST3 / AU |
-| Windows | CLAP / VST3 / Standalone | CLAP / VST3 |
-| Linux | CLAP / VST3 / Standalone | CLAP / VST3 |
+| OS | Supported formats |
+|----|---------------------------|
+| macOS | CLAP / VST3 / AU / Standalone |
+| Windows | CLAP / VST3 / Standalone |
+| Linux | CLAP / VST3 / Standalone |
 
 The `--target` option accepts `clap`, `vst3`, `au`, and `standalone` as comma-separated values.
 
@@ -62,19 +90,6 @@ cargo xtask --help
 # Subcommand help
 cargo xtask build --help
 ```
-
-## Setting Up a New Project
-
-To create a new wxp plugin based on this repository, see [Setup](docs/setup.md).
-
-
-## Give it a spin?
-
-This template comes with a simple Gain plugin pre-implemented. Try loading it up and let us know how it works in your DAW!
-Even a quick comment like **"Works on Logic Pro 10.7"** is incredibly helpful for the community.
-
-Feel free to drop a quick note here:
-👉 [DAW Compatibility Reports](https://github.com/novonotes/wrac-plugin-template/discussions/6)
 
 ## Notes
 
