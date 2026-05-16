@@ -39,22 +39,21 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
 
     build_gui(ctx)?;
 
+    let mut default_rust_plugin_built = false;
     if targets.contains(&Target::Clap) {
         build_rust_plugin(ctx, profile, RustPluginBuild::Default)?;
+        default_rust_plugin_built = true;
         package_clap(ctx, profile)?;
     }
 
-    if ctx.platform == Platform::Macos {
-        if targets.contains(&Target::Vst3) {
-            build_rust_plugin(ctx, profile, RustPluginBuild::Vst3)?;
-            build_wrapper_set(ctx, profile, WrapperBuild::Vst3)?;
+    if targets.iter().any(|target| target.is_wrapper()) {
+        // 旧 WRY_OBJC_SUFFIX 時代は macOS の ObjC class 名を format ごとに変えるため、
+        // VST3/AU で別々の Rust staticlib を作っていた。現在の wxp/wry は wry source id を
+        // objc2 の自動 class 名へ含めるため、同じ製品 build の VST3/AU は同じ staticlib を
+        // 共有できる。format ごとの compile-time 入力を再導入しない限り、ここで分けない。
+        if !default_rust_plugin_built {
+            build_rust_plugin(ctx, profile, RustPluginBuild::Default)?;
         }
-        if targets.contains(&Target::Au) {
-            build_rust_plugin(ctx, profile, RustPluginBuild::Au)?;
-            build_wrapper_set(ctx, profile, WrapperBuild::Au)?;
-        }
-    } else if targets.iter().any(|target| target.is_wrapper()) {
-        build_rust_plugin(ctx, profile, RustPluginBuild::Default)?;
         build_wrapper_set(
             ctx,
             profile,
@@ -98,8 +97,6 @@ fn npm_command(platform: Platform) -> &'static str {
 #[derive(Debug, Clone, Copy)]
 enum RustPluginBuild {
     Default,
-    Vst3,
-    Au,
     Standalone,
 }
 
@@ -107,8 +104,6 @@ impl RustPluginBuild {
     fn label(self) -> &'static str {
         match self {
             Self::Default => "default",
-            Self::Vst3 => "vst3",
-            Self::Au => "au",
             Self::Standalone => "standalone",
         }
     }
@@ -116,9 +111,7 @@ impl RustPluginBuild {
     fn cargo_target_dir(self, ctx: &Context) -> PathBuf {
         match self {
             Self::Default => ctx.target_dir.clone(),
-            Self::Vst3 | Self::Au | Self::Standalone => {
-                ctx.wrac_dir().join("cargo").join(self.label())
-            }
+            Self::Standalone => ctx.wrac_dir().join("cargo").join(self.label()),
         }
     }
 
@@ -213,8 +206,6 @@ fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 enum WrapperBuild {
     Plugin { vst3: bool, au: bool },
-    Vst3,
-    Au,
     Standalone,
 }
 
@@ -222,8 +213,6 @@ impl WrapperBuild {
     fn purpose(self) -> &'static str {
         match self {
             Self::Plugin { .. } => "wrap",
-            Self::Vst3 => "wrap-vst3",
-            Self::Au => "wrap-au",
             Self::Standalone => "standalone",
         }
     }
@@ -231,8 +220,6 @@ impl WrapperBuild {
     fn rust_build(self) -> RustPluginBuild {
         match self {
             Self::Plugin { .. } => RustPluginBuild::Default,
-            Self::Vst3 => RustPluginBuild::Vst3,
-            Self::Au => RustPluginBuild::Au,
             Self::Standalone => RustPluginBuild::Standalone,
         }
     }
@@ -246,9 +233,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
 
     let build_dir = ctx.cmake_dir(build.purpose(), profile);
     let stage_dir = match build {
-        WrapperBuild::Plugin { .. } | WrapperBuild::Vst3 | WrapperBuild::Au => {
-            ctx.plugins_dir(profile)
-        }
+        WrapperBuild::Plugin { .. } => ctx.plugins_dir(profile),
         WrapperBuild::Standalone => ctx.standalone_dir(profile),
     };
     fs::create_dir_all(&stage_dir)?;
@@ -292,18 +277,6 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                     on_off(vst3)
                 ))
                 .arg(format!("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2={}", on_off(au)))
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
-        }
-        WrapperBuild::Vst3 => {
-            configure
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=ON")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
-        }
-        WrapperBuild::Au => {
-            configure
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
         }
         WrapperBuild::Standalone => {
@@ -389,14 +362,6 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                 // AU は AudioComponentRegistrar 経由で読むため、local build でも署名済みにしておく。
                 codesign_nested_macos_bundle(ctx, &ctx.au_bundle(profile))?;
             }
-        }
-        WrapperBuild::Vst3 => {
-            ensure_exists(&ctx.vst3_bundle(profile), "VST3 artifact")?;
-            codesign_nested_macos_bundle(ctx, &ctx.vst3_bundle(profile))?;
-        }
-        WrapperBuild::Au => {
-            ensure_exists(&ctx.au_bundle(profile), "AU artifact")?;
-            codesign_nested_macos_bundle(ctx, &ctx.au_bundle(profile))?;
         }
         WrapperBuild::Standalone => {
             ensure_exists(&ctx.standalone_artifact(profile), "standalone artifact")?;
