@@ -15,7 +15,7 @@ The CLAP headers annotate the allowed thread for each function using comments su
 
 `clack` is designed assuming the host calls functions according to these annotations, and works straightforwardly with native CLAP hosts.
 
-This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`. When routing through those hosts, annotated `[main-thread]` queries may be called from a different thread, among other deviations from the spec. This crate handles such cases through locks and panic catching on the adapter side, so that product code never exposes `unsafe` and still operates correctly.
+This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`. When routing through those hosts, annotated `[main-thread]` queries may be called from a different thread, among other deviations from the spec. This crate handles such cases through locks and panic catching on the adapter side, without exposing `unsafe` to product code, while still operating correctly.
 
 ## Acknowledgements
 
