@@ -2,10 +2,60 @@ cmake_minimum_required(VERSION 3.21)
 project(clap_wrapper_builder)
 # enable_language(OBJCXX)
 
+# ---------------------------------------------------------------------------
+# clap_wrapper_builder
+#
+# Wraps a prebuilt CLAP plugin static library into VST3 / AUv2 / AAX /
+# Standalone bundles. The caller supplies a static library plus a few cache
+# variables; this file owns everything from there (entry-point shim, per-OS
+# system-library linkage, bundle identifiers, artifact staging).
+#
+# Input contract (pass with -D on the cmake command line):
+#
+#   Required
+#     CLAP_WRAPPER_BUILDER_TARGET_LIB   Path to the static library to wrap.
+#                                       Plugin name is derived from its file
+#                                       name (leading "lib" stripped) unless
+#                                       overridden below.
+#
+#   Naming / metadata (optional)
+#     CLAP_WRAPPER_BUILDER_TARGET_NAME      Internal CMake target name. Defaults
+#                                           to the derived plugin name.
+#     CLAP_WRAPPER_BUILDER_OUTPUT_NAME      Display/bundle name. Overrides the
+#                                           name derived from TARGET_LIB.
+#     CLAP_WRAPPER_BUILDER_BUNDLE_VERSION   Version written into bundles.
+#                                           Default "1.0.0".
+#     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
+#                                           copied here under fixed names
+#                                           (<name>.vst3/.component/.app/.exe).
+#                                           Leave empty to skip staging.
+#
+#   Format toggles
+#     CLAP_WRAPPER_BUILDER_BUILD_VST3        Default ON.
+#     CLAP_WRAPPER_BUILDER_BUILD_AUV2        Default ON on macOS, OFF elsewhere.
+#     CLAP_WRAPPER_BUILDER_BUILD_AAX         Default OFF. Requires the Avid AAX
+#                                            SDK; only meaningful on macOS/Win.
+#     CLAP_WRAPPER_BUILDER_BUILD_STANDALONE  Default OFF. When ON,
+#                                            STANDALONE_PLUGIN_ID is required.
+#
+#   Standalone (only when BUILD_STANDALONE=ON)
+#     CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID    Required. Plugin ID the
+#                                                  standalone host loads.
+#     CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME  Optional. Defaults to
+#                                                  "<name> Standalone".
+#
+# Dependency SDKs (clap, clap-wrapper, vst3sdk, AudioUnitSDK) live alongside
+# this file as git submodules.
+# ---------------------------------------------------------------------------
+
 # Require C++23 or later (required by clap-wrapper and AudioUnitSDK)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# The wrapped library ends up inside shared plugin bundles (.vst3/.so/.dylib),
+# so every object on the link line must be position-independent.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+# 10.15 is the floor the Rust plugin staticlib is built against; keep the C++
+# side from targeting a newer minimum and producing a mismatched bundle.
 if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
     if(DEFINED ENV{MACOSX_DEPLOYMENT_TARGET} AND NOT "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
         set(CMAKE_OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET}")
@@ -16,6 +66,8 @@ endif()
 
 set(CLAP_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/clap")
 
+# Rust staticlibs link the static MSVC CRT; the C++ side must match it or the
+# final wrapper hits duplicate/conflicting CRT symbols at link time.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Receive the static library path as a cache variable
@@ -70,6 +122,8 @@ message(STATUS "  Build AAX: ${CLAP_WRAPPER_BUILDER_BUILD_AAX}")
 # Add the clap-wrapper subproject
 add_subdirectory(clap-wrapper)
 
+# clap-wrapper builds with -Werror on Apple; its own AUv2 code trips
+# -Wshorten-64-to-32, so relax just that warning to keep the build green.
 if(APPLE AND TARGET clap-wrapper-compile-options)
   target_compile_options(clap-wrapper-compile-options INTERFACE -Wno-shorten-64-to-32)
 endif()
@@ -89,6 +143,9 @@ if(MSVC)
   )
 endif()
 
+# The Rust plugin renders its UI through a system webview. Rust staticlibs do
+# not carry these native system deps into the wrapper link (same reason as the
+# MSVC block above), so declare the webview/UI frameworks per platform here.
 if(APPLE)
   set_target_properties(${PLUGIN_NAME_SAFE}_impl PROPERTIES
       INTERFACE_LINK_LIBRARIES "-framework AppKit;-framework Foundation;-framework WebKit"
@@ -146,6 +203,8 @@ set(CLAPFIRST_COMMON_ARGS
     PLUGIN_FORMATS ${PLUGIN_FORMATS}
     BUNDLE_IDENTIFIER "${BUNDLE_ID}"
     BUNDLE_VERSION "${BUNDLE_VERSION}"
+    # We stage artifacts ourselves into STAGE_DIR below, so suppress
+    # clap-wrapper's own install-to-system-folders step.
     COPY_AFTER_BUILD FALSE
     WINDOWS_FOLDER_VST3 TRUE
 )
@@ -208,10 +267,14 @@ if(APPLE)
     endif()
 endif()
 
+# The standalone exe links the impl lib directly rather than through the
+# wrapper, so it needs runtimeobject.lib stated again on its own link line.
 if(MSVC AND TARGET ${PLUGIN_NAME_SAFE}_standalone)
     target_link_libraries(${PLUGIN_NAME_SAFE}_standalone PRIVATE runtimeobject.lib)
 endif()
 
+# Only the CLAP target compiles the generated entry shim, which includes
+# <clap/clap.h>; the other formats get the header transitively.
 target_include_directories(${PLUGIN_NAME_SAFE}_clap
   PRIVATE
   ${CLAP_SDK_ROOT}/include
