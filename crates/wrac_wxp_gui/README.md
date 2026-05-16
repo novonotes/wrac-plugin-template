@@ -10,14 +10,7 @@
 - 1 process 内の host UI thread は単一とみなす
 - 複数 UI thread を使う host は unsupported として失敗させる
 - floating window はこの helper では扱わない
-- 汎用的なフレームワークではなく実装例を兼ねた出発点を意図しています。今後の変更に伴う、API の後方互換性やマイグレーションサポートは提供しません。
-
-## wxp runtime の扱い
-
-`WxpWebView` は native WebView の寿命を所有する token なので、GUI runtime の中だけで保持します。
-command handler など editor の寿命を延ばしたくない経路では、wxp の `WebViewDispatch` を使って
-WebView 操作を post します。これにより、host が editor を閉じた後に遅れて届いた command や resize
-request が native WebView を直接触らず、閉じた WebView には `WebViewClosed` として失敗できます。
+- 汎用的なフレームワークではなく実装例の一部です。今後の変更に伴う、API の後方互換性やマイグレーションサポートは提供しません。
 
 ## 参考
 wxp クレートの使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
