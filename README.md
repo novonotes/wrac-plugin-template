@@ -44,8 +44,8 @@ cargo xtask install
 ```
 
 `cargo xtask build` builds every target supported by the current OS:
-CLAP/VST3/AU/standalone on macOS, CLAP/VST3/standalone on Windows, and CLAP/VST3
-on Linux. Use `build --target` with a comma-separated list of `clap`, `vst3`,
+CLAP/VST3/AU/standalone on macOS and CLAP/VST3/standalone on Windows and Linux.
+Use `build --target` with a comma-separated list of `clap`, `vst3`,
 `au`, and `standalone` to build a smaller set. `install` and `uninstall` accept
 plugin formats only: `clap`, `vst3`, and `au`. `install --scope` accepts `user`
 or `system`; `uninstall --scope` accepts `user`, `system`, or `all`.

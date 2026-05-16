@@ -268,6 +268,11 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${PLUGIN_NAME_SAFE}_standalone>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}.exe"
                 VERBATIM
             )
+        else()
+            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_standalone POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${PLUGIN_NAME_SAFE}_standalone>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}"
+                VERBATIM
+            )
         endif()
     endif()
 endif()

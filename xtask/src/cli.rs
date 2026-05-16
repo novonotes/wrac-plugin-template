@@ -12,7 +12,7 @@ Targets:
 Default targets by platform:
   macOS:   clap, vst3, au, standalone
   Windows: clap, vst3, standalone
-  Linux:   clap, vst3
+  Linux:   clap, vst3, standalone
 
 Examples:
   cargo xtask build
@@ -23,7 +23,7 @@ Examples:
 Notes:
   Run `cargo xtask install` after building to install plugin artifacts.
   Run `cargo xtask validate` after building to validate CLAP/VST3/AU artifacts.
-  VST3/AU wrapper targets require clap-wrapper dependencies.";
+  VST3/AU/standalone targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
 Targets:

@@ -24,7 +24,9 @@ To generate VST3 / AU / Standalone using clap-wrapper, the following are additio
 - CMake (3.15 or later recommended)
 
 **Linux:**
-- CLAP only is supported at this time.
+- C++ compiler and build tools
+- CMake (3.15 or later recommended)
+- Development packages for WebKitGTK, GTK 3, GDK X11, and X11
 
 ### Debugging
 

@@ -26,7 +26,11 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     // wrapper 系の不足は npm/cargo のビルド後に CMake エラーとして出ると原因が追いにくい。
     // 対象が wrapper を必要とする時だけ、先にサブモジュールの実体まで確認する。
     if targets.iter().any(|target| target.is_wrapper()) || targets.contains(&Target::Standalone) {
-        ensure_wrapper_inputs(ctx)?;
+        ensure_wrapper_inputs(
+            ctx,
+            targets.contains(&Target::Vst3),
+            targets.contains(&Target::Au),
+        )?;
     }
 
     if args.clean {
@@ -795,7 +799,7 @@ pub(crate) fn clean(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-fn ensure_wrapper_inputs(ctx: &Context) -> Result<()> {
+fn ensure_wrapper_inputs(ctx: &Context, needs_vst3: bool, needs_au: bool) -> Result<()> {
     // git submodule が未 init の場合、directory だけ存在して中身が空のことがある。
     // CMake の抽象的な失敗に進ませず、wrapper が実際に読む sentinel file を見る。
     ensure_exists(&ctx.wrapper_dir, "clap_wrapper_builder directory")?;
@@ -811,8 +815,10 @@ fn ensure_wrapper_inputs(ctx: &Context) -> Result<()> {
             .join("clap.h"),
         "CLAP SDK submodule",
     )?;
-    ensure_vst3_sdk_input(ctx)?;
-    if ctx.platform == Platform::Macos {
+    if needs_vst3 {
+        ensure_vst3_sdk_input(ctx)?;
+    }
+    if needs_au {
         ensure_exists(
             &ctx.wrapper_dir
                 .join("AudioUnitSDK")

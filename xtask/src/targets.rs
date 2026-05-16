@@ -112,7 +112,7 @@ impl Platform {
             Target::Clap => true,
             Target::Vst3 => self.supports_vst3(),
             Target::Au => self.supports_au(),
-            Target::Standalone => matches!(self, Self::Macos | Self::Windows),
+            Target::Standalone => matches!(self, Self::Macos | Self::Windows | Self::Linux),
         }
     }
 
@@ -121,7 +121,7 @@ impl Platform {
         match self {
             Self::Macos => vec![Target::Clap, Target::Vst3, Target::Au, Target::Standalone],
             Self::Windows => vec![Target::Clap, Target::Vst3, Target::Standalone],
-            Self::Linux => vec![Target::Clap, Target::Vst3],
+            Self::Linux => vec![Target::Clap, Target::Vst3, Target::Standalone],
         }
     }
 

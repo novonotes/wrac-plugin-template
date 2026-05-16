@@ -96,10 +96,10 @@ impl Context {
     }
 
     pub(crate) fn standalone_artifact(&self, profile: BuildProfile) -> PathBuf {
-        let filename = if self.platform == Platform::Macos {
-            format!("{}.app", self.metadata.standalone_name)
-        } else {
-            format!("{}.exe", self.metadata.standalone_name)
+        let filename = match self.platform {
+            Platform::Macos => format!("{}.app", self.metadata.standalone_name),
+            Platform::Windows => format!("{}.exe", self.metadata.standalone_name),
+            Platform::Linux => self.metadata.standalone_name.clone(),
         };
         self.standalone_dir(profile).join(filename)
     }

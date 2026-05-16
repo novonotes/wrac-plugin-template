@@ -50,7 +50,7 @@ cargo xtask install
 |----|---------------------------|-------------------------------|
 | macOS | CLAP / VST3 / AU / Standalone | CLAP / VST3 / AU |
 | Windows | CLAP / VST3 / Standalone | CLAP / VST3 |
-| Linux | CLAP / VST3 | CLAP / VST3 |
+| Linux | CLAP / VST3 / Standalone | CLAP / VST3 |
 
 `build --target` には `clap`、`vst3`、`au`、`standalone` をカンマ区切りで指定できます。
 ただし、OS が対応していないフォーマットを指定した場合はエラーになります。
