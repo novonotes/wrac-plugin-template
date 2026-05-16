@@ -8,16 +8,22 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 build = "build.rs"
 
-# Plugin identity lives here so descriptors, GUI metadata, bundle names,
-# wrapper arguments, AUv2 codes, WebView data dirs, and log names all move
-# together when this template is renamed.
+# WRAC metadata is the single source of truth for descriptors, GUI metadata,
+# bundle names, wrapper arguments, AUv2 registration, WebView data dirs, and logs.
 [package.metadata.wrac]
+# Reverse-DNS identifier. Use your own domain or another namespace you control.
 plugin_id = "com.your-company.wrac-gain"
+# User-visible plugin name shown by hosts and the template GUI.
 plugin_name = "WRAC Gain"
+# User-visible vendor name shown by hosts and the template GUI.
 company_name = "Your Company"
+# AUv2 component type. Audio effects usually use "aufx"; instruments usually use "aumu".
 auv2_type = "aufx"
+# AUv2 subtype. Pick a unique 4-byte ASCII code for each plugin from the same vendor.
 auv2_subtype = "WtGn"
+# AUv2 manufacturer code. Use the same 4-byte ASCII code across your plugin catalog.
 auv2_manufacturer_code = "YrCo"
+# User-visible standalone app name.
 standalone_name = "WRAC Gain Standalone"
 
 [lib]
