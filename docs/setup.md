@@ -143,9 +143,3 @@ In VS Code, select the "Debug gain plugin standalone" configuration and run it.
 
 Debug build logs are written to `.log/<plugin_name> Latest.log`.
 To follow the log, use `tail -f ".log/<plugin_name> Latest.log"` on macOS/Linux, or `Get-Content ".log\<plugin_name> Latest.log" -Wait` in Windows PowerShell.
-
-## Next Steps
-
-Read [architecture.md](architecture.md) to learn about the thread model, communication flow, and parameter change flow.
-
-For wxp usage, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).
