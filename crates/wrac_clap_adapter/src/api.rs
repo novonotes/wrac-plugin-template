@@ -255,6 +255,10 @@ impl ClapWindow {
 /// it impossible to answer one while the other is running. Split each capability into
 /// its own thread-safe store and return it as `Arc<dyn …>` from this trait (see
 /// `src-plugin` for examples).
+///
+/// Returning each capability as a separate `Arc` also keeps safe implementations from
+/// exposing ordinary `PluginCore` fields directly to concurrent host callbacks: any
+/// shared mutable state must cross an explicit thread-safe boundary.
 pub trait PluginCore: Send + Sync + 'static {
     fn activate(&mut self, context: ActivateContext) -> PluginResult<Box<dyn Processor>>;
     fn deactivate(&mut self, processor: Box<dyn Processor>) -> PluginResult<()>;
