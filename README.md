@@ -102,8 +102,15 @@ cargo xtask build --help
 
 This repository is intended as an implementation example and starting point, not a general-purpose framework. Future changes will not provide API backwards compatibility or migration support.
 
+## Built with WRAC
+
+Built a plugin with this template? Share it in the [Showcase Discussion](https://github.com/novonotes/wrac-plugin-template/discussions/43).
+Open-source, freeware, and commercial releases are all welcome.
+
 ## Reference
 
 For known DAW compatibility status, see the [DAW Compatibility Matrix](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix).
 
 For usage of the wxp crate, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).
+
+For additional plugin examples built from this template, see [wrac-examples](https://github.com/novonotes/wrac-examples).
