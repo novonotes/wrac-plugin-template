@@ -14,9 +14,12 @@ use clap_sys::ext::configurable_audio_ports::{
     CLAP_EXT_CONFIGURABLE_AUDIO_PORTS, CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT,
 };
 use clap_sys::ext::gui::CLAP_EXT_GUI;
+use clap_sys::ext::latency::CLAP_EXT_LATENCY;
 use clap_sys::ext::note_ports::CLAP_EXT_NOTE_PORTS;
 use clap_sys::ext::params::CLAP_EXT_PARAMS;
+use clap_sys::ext::render::CLAP_EXT_RENDER;
 use clap_sys::ext::state::CLAP_EXT_STATE;
+use clap_sys::ext::tail::CLAP_EXT_TAIL;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::host::clap_host;
 use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
@@ -32,9 +35,12 @@ mod audio_ports;
 mod configurable_audio_ports;
 mod ffi;
 mod gui_extension;
+mod latency_extension;
 mod note_ports;
 mod params_extension;
+mod render_extension;
 mod state_extension;
+mod tail_extension;
 
 use self::audio_buffers::audio_buffers;
 use self::ffi::{ffi_bool, ffi_ptr, ffi_status, ffi_unit, four_char_code};
@@ -46,8 +52,8 @@ use crate::host_gui::HostGuiResizeRequest;
 use crate::params::ParameterEditQueue;
 use crate::{
     ActivateContext, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore, PluginCoreContext,
-    PluginGui, PluginNotePorts, PluginParameters, PluginStateSupport, ProcessContext,
-    ProcessStatus, Processor, TransportEvent,
+    PluginGui, PluginLatency, PluginNotePorts, PluginParameters, PluginRender, PluginStateSupport,
+    PluginTail, ProcessContext, ProcessStatus, Processor, TransportEvent,
 };
 
 // clap-wrapper reads this draft factory when generating AUv2 metadata. Without a
@@ -76,6 +82,9 @@ pub(crate) struct PluginInstance {
     parameters: Option<Arc<dyn PluginParameters>>,
     state: Option<Arc<dyn PluginStateSupport>>,
     gui: Option<Arc<dyn PluginGui>>,
+    render: Option<Arc<dyn PluginRender>>,
+    tail: Option<Arc<dyn PluginTail>>,
+    latency: Option<Arc<dyn PluginLatency>>,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
     gui_callback_busy: Mutex<()>,
@@ -96,6 +105,9 @@ pub(crate) struct PluginCapabilities {
     parameters: bool,
     state: bool,
     gui: bool,
+    render: bool,
+    tail: bool,
+    latency: bool,
 }
 
 // Safety: CLAP shares the same opaque plugin pointer across callbacks. Adapter state is
@@ -123,6 +135,9 @@ impl PluginInstance {
         let parameters = core.parameters();
         let state = core.state();
         let gui = core.gui();
+        let render = core.render();
+        let tail = core.tail();
+        let latency = core.latency();
         let capabilities = PluginCapabilities {
             audio_ports: audio_ports.is_some(),
             configurable_audio_ports: configurable_audio_ports.is_some(),
@@ -130,6 +145,9 @@ impl PluginInstance {
             parameters: parameters.is_some(),
             state: state.is_some(),
             gui: gui.is_some(),
+            render: render.is_some(),
+            tail: tail.is_some(),
+            latency: latency.is_some(),
         };
         let storage = registration.storage();
 
@@ -156,6 +174,9 @@ impl PluginInstance {
             parameters,
             state,
             gui,
+            render,
+            tail,
+            latency,
             gui_callback_busy: Mutex::new(()),
             parameter_edits,
             processor: UnsafeCell::new(None),
@@ -636,10 +657,20 @@ unsafe extern "C" fn plugin_get_extension(
             &state_extension::STATE as *const _ as *const c_void
         } else if id == CLAP_EXT_GUI && instance.capabilities.gui {
             &gui_extension::GUI as *const _ as *const c_void
+        } else if id == CLAP_EXT_RENDER && instance.capabilities.render {
+            &render_extension::RENDER as *const _ as *const c_void
+        } else if id == CLAP_EXT_TAIL && instance.capabilities.tail {
+            &tail_extension::TAIL as *const _ as *const c_void
+        } else if id == CLAP_EXT_LATENCY && instance.capabilities.latency {
+            &latency_extension::LATENCY as *const _ as *const c_void
         } else {
             ptr::null()
         }
     })
 }
 
-unsafe extern "C" fn plugin_on_main_thread(_plugin: *const clap_plugin) {}
+unsafe extern "C" fn plugin_on_main_thread(_plugin: *const clap_plugin) {
+    // WRAC intentionally does not route product work through CLAP's main-thread callback.
+    // GUI and main-thread tasks should use novonotes_run_loop/wxp instead, which keeps
+    // behavior consistent across native CLAP and wrapper-backed VST3/AU hosts.
+}

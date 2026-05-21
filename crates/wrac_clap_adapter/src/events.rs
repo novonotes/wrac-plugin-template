@@ -3,11 +3,12 @@ use std::mem::size_of;
 use std::ptr;
 
 use clap_sys::events::{
-    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END,
-    CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF, CLAP_EVENT_NOTE_ON,
-    CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END, CLAP_EVENT_PARAM_MOD,
-    CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT, clap_event_header, clap_event_midi,
-    clap_event_note, clap_event_note_expression, clap_event_param_gesture, clap_event_param_mod,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_MIDI_SYSEX, CLAP_EVENT_MIDI2,
+    CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_NOTE_END, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF,
+    CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_GESTURE_BEGIN, CLAP_EVENT_PARAM_GESTURE_END,
+    CLAP_EVENT_PARAM_MOD, CLAP_EVENT_PARAM_VALUE, CLAP_EVENT_TRANSPORT, clap_event_header,
+    clap_event_midi, clap_event_midi_sysex, clap_event_midi2, clap_event_note,
+    clap_event_note_expression, clap_event_param_gesture, clap_event_param_mod,
     clap_event_param_value, clap_event_transport, clap_input_events, clap_note_expression,
     clap_output_events, clap_transport_flags,
 };
@@ -165,6 +166,18 @@ impl<'a> OutputEvents<'a> {
                 let raw = event.to_raw();
                 unsafe { try_push(self.raw, &raw.header) }
             }
+            OutputEvent::Midi(event) => {
+                let raw = event.to_raw();
+                unsafe { try_push(self.raw, &raw.header) }
+            }
+            OutputEvent::MidiSysex(event) => {
+                let raw = event.to_raw();
+                unsafe { try_push(self.raw, &raw.header) }
+            }
+            OutputEvent::Midi2(event) => {
+                let raw = event.to_raw();
+                unsafe { try_push(self.raw, &raw.header) }
+            }
             OutputEvent::ParamValue(event) => {
                 let raw = param_value_to_raw(event);
                 unsafe { try_push(self.raw, &raw.header) }
@@ -204,13 +217,16 @@ impl<'a> OutputEvents<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum InputEvent {
     NoteOn(NoteEvent),
     NoteOff(NoteEvent),
     NoteChoke(NoteEvent),
     NoteEnd(NoteEvent),
     NoteExpression(NoteExpressionEvent),
+    Midi(MidiEvent),
+    MidiSysex(MidiSysexEvent),
+    Midi2(Midi2Event),
     ParamValue(ParameterValueEvent),
     ParamMod(ParameterModEvent),
     ParamGestureBegin(ParameterGestureEvent),
@@ -250,10 +266,17 @@ impl InputEvent {
                 Self::NoteExpression(NoteExpressionEvent::from_raw(unsafe { cast_event(header) })),
             ),
             CLAP_EVENT_MIDI if has_size::<clap_event_midi>(header) => {
-                // Some wrappers and hosts deliver MIDI dialect input as raw MIDI events even when
-                // the plugin's audio code only cares about note semantics. Convert the channel note
-                // messages here so processors can handle CLAP notes and MIDI notes uniformly.
-                midi_note_event_from_raw(unsafe { cast_event(header) })
+                Some(midi_event_from_raw(unsafe { cast_event(header) }))
+            }
+            CLAP_EVENT_MIDI_SYSEX if has_size::<clap_event_midi_sysex>(header) => {
+                Some(Self::MidiSysex(MidiSysexEvent::from_raw(unsafe {
+                    cast_event(header)
+                })))
+            }
+            CLAP_EVENT_MIDI2 if has_size::<clap_event_midi2>(header) => {
+                Some(Self::Midi2(Midi2Event::from_raw(unsafe {
+                    cast_event(header)
+                })))
             }
             CLAP_EVENT_PARAM_VALUE if has_size::<clap_event_param_value>(header) => {
                 Some(Self::ParamValue(parameter_value_from_raw(unsafe {
@@ -291,6 +314,9 @@ impl InputEvent {
             | Self::NoteChoke(event)
             | Self::NoteEnd(event) => event.time,
             Self::NoteExpression(event) => event.time,
+            Self::Midi(event) => event.time,
+            Self::MidiSysex(event) => event.time,
+            Self::Midi2(event) => event.time,
             Self::ParamValue(event) => event.time,
             Self::ParamMod(event) => event.time,
             Self::ParamGestureBegin(event) | Self::ParamGestureEnd(event) => event.time,
@@ -300,7 +326,10 @@ impl InputEvent {
     }
 }
 
-fn midi_note_event_from_raw(raw: &clap_event_midi) -> Option<InputEvent> {
+fn midi_event_from_raw(raw: &clap_event_midi) -> InputEvent {
+    // CLAP hosts must not send the same MIDI note twice as both raw MIDI and CLAP note
+    // events. Normalize channel note messages at the adapter boundary so processors do
+    // not need their own duplicate-note suppression policy.
     let status = raw.data[0] & 0xF0;
     let channel = raw.data[0] & 0x0F;
     let key = raw.data[1];
@@ -315,20 +344,23 @@ fn midi_note_event_from_raw(raw: &clap_event_midi) -> Option<InputEvent> {
     };
 
     match status {
-        0x80 => Some(InputEvent::NoteOff(note)),
-        0x90 if velocity == 0 => Some(InputEvent::NoteOff(note)),
-        0x90 => Some(InputEvent::NoteOn(note)),
-        _ => Some(InputEvent::Unknown(UnknownEvent::from_header(&raw.header))),
+        0x80 => InputEvent::NoteOff(note),
+        0x90 if velocity == 0 => InputEvent::NoteOff(note),
+        0x90 => InputEvent::NoteOn(note),
+        _ => InputEvent::Midi(MidiEvent::from_raw(raw)),
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum OutputEvent {
     NoteOn(NoteEvent),
     NoteOff(NoteEvent),
     NoteChoke(NoteEvent),
     NoteEnd(NoteEvent),
     NoteExpression(NoteExpressionEvent),
+    Midi(MidiEvent),
+    MidiSysex(MidiSysexEvent),
+    Midi2(Midi2Event),
     ParamValue(ParameterValueEvent),
     ParamMod(ParameterModEvent),
     ParamGestureBegin(ParameterGestureEvent),
@@ -365,6 +397,87 @@ impl NoteEvent {
             channel: self.channel,
             key: self.key,
             velocity: self.velocity,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MidiEvent {
+    pub time: u32,
+    pub port_index: u16,
+    pub data: [u8; 3],
+}
+
+impl MidiEvent {
+    fn from_raw(raw: &clap_event_midi) -> Self {
+        Self {
+            time: raw.header.time,
+            port_index: raw.port_index,
+            data: raw.data,
+        }
+    }
+
+    fn to_raw(self) -> clap_event_midi {
+        clap_event_midi {
+            header: event_header::<clap_event_midi>(self.time, CLAP_EVENT_MIDI),
+            port_index: self.port_index,
+            data: self.data,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiSysexEvent {
+    pub time: u32,
+    pub port_index: u16,
+    pub data: Vec<u8>,
+}
+
+impl MidiSysexEvent {
+    fn from_raw(raw: &clap_event_midi_sysex) -> Self {
+        let data = if raw.buffer.is_null() || raw.size == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(raw.buffer, raw.size as usize).to_vec() }
+        };
+        Self {
+            time: raw.header.time,
+            port_index: raw.port_index,
+            data,
+        }
+    }
+
+    fn to_raw(&self) -> clap_event_midi_sysex {
+        clap_event_midi_sysex {
+            header: event_header::<clap_event_midi_sysex>(self.time, CLAP_EVENT_MIDI_SYSEX),
+            port_index: self.port_index,
+            buffer: self.data.as_ptr(),
+            size: self.data.len() as u32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Midi2Event {
+    pub time: u32,
+    pub port_index: u16,
+    pub data: [u32; 4],
+}
+
+impl Midi2Event {
+    fn from_raw(raw: &clap_event_midi2) -> Self {
+        Self {
+            time: raw.header.time,
+            port_index: raw.port_index,
+            data: raw.data,
+        }
+    }
+
+    fn to_raw(self) -> clap_event_midi2 {
+        clap_event_midi2 {
+            header: event_header::<clap_event_midi2>(self.time, CLAP_EVENT_MIDI2),
+            port_index: self.port_index,
+            data: self.data,
         }
     }
 }
@@ -573,8 +686,9 @@ mod tests {
     use std::ffi::c_void;
 
     use clap_sys::events::{
-        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE,
-        clap_event_header, clap_event_midi, clap_event_note, clap_event_param_value,
+        CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_MIDI_SYSEX, CLAP_EVENT_MIDI2,
+        CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, clap_event_header, clap_event_midi,
+        clap_event_midi_sysex, clap_event_midi2, clap_event_note, clap_event_param_value,
         clap_input_events,
     };
 
@@ -734,6 +848,93 @@ mod tests {
     }
 
     #[test]
+    fn input_events_keep_non_note_midi_messages_raw() {
+        let cc = clap_event_midi {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_midi>() as u32,
+                time: 40,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_MIDI,
+                flags: 0,
+            },
+            port_index: 2,
+            data: [0xB1, 74, 100],
+        };
+        let mut list_data = EventList {
+            events: vec![&cc.header],
+        };
+        let raw = clap_input_events {
+            ctx: (&mut list_data as *mut EventList).cast::<c_void>(),
+            size: Some(event_count),
+            get: Some(event_get),
+        };
+        let events = unsafe { InputEvents::from_raw(&raw) };
+
+        match events.get(0).unwrap() {
+            InputEvent::Midi(event) => {
+                assert_eq!(event.time, 40);
+                assert_eq!(event.port_index, 2);
+                assert_eq!(event.data, [0xB1, 74, 100]);
+            }
+            _ => panic!("expected raw MIDI CC"),
+        }
+    }
+
+    #[test]
+    fn input_events_copy_sysex_and_midi2_messages() {
+        let sysex_data = [0xF0, 0x7D, 0x01, 0xF7];
+        let sysex = clap_event_midi_sysex {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_midi_sysex>() as u32,
+                time: 50,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_MIDI_SYSEX,
+                flags: 0,
+            },
+            port_index: 1,
+            buffer: sysex_data.as_ptr(),
+            size: sysex_data.len() as u32,
+        };
+        let midi2 = clap_event_midi2 {
+            header: clap_event_header {
+                size: std::mem::size_of::<clap_event_midi2>() as u32,
+                time: 60,
+                space_id: CLAP_CORE_EVENT_SPACE_ID,
+                type_: CLAP_EVENT_MIDI2,
+                flags: 0,
+            },
+            port_index: 3,
+            data: [1, 2, 3, 4],
+        };
+        let mut list_data = EventList {
+            events: vec![&sysex.header, &midi2.header],
+        };
+        let raw = clap_input_events {
+            ctx: (&mut list_data as *mut EventList).cast::<c_void>(),
+            size: Some(event_count),
+            get: Some(event_get),
+        };
+        let events = unsafe { InputEvents::from_raw(&raw) };
+
+        match events.get(0).unwrap() {
+            InputEvent::MidiSysex(event) => {
+                assert_eq!(event.time, 50);
+                assert_eq!(event.port_index, 1);
+                assert_eq!(event.data, sysex_data);
+            }
+            _ => panic!("expected MIDI sysex"),
+        }
+        match events.get(1).unwrap() {
+            InputEvent::Midi2(event) => {
+                assert_eq!(event.time, 60);
+                assert_eq!(event.port_index, 3);
+                assert_eq!(event.data, [1, 2, 3, 4]);
+            }
+            _ => panic!("expected MIDI2"),
+        }
+    }
+
+    #[test]
     fn input_events_iter_skips_null_slots() {
         let param = clap_event_param_value {
             header: clap_event_header {
@@ -763,7 +964,7 @@ mod tests {
         let parsed: Vec<_> = events.iter().collect();
 
         assert_eq!(parsed.len(), 1);
-        match parsed[0] {
+        match &parsed[0] {
             InputEvent::ParamValue(event) => assert_eq!(event.parameter_id, 9),
             _ => panic!("expected param value"),
         }

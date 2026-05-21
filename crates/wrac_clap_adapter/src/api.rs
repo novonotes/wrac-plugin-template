@@ -307,6 +307,24 @@ pub trait PluginCore: Send + Sync + 'static {
     fn gui(&self) -> Option<Arc<dyn PluginGui>> {
         None
     }
+
+    /// Capability for CLAP render mode changes.
+    ///
+    /// This mirrors the CLAP render extension: the adapter forwards host mode changes,
+    /// and the product decides whether to store that mode for the audio processor.
+    fn render(&self) -> Option<Arc<dyn PluginRender>> {
+        None
+    }
+
+    /// Capability for reporting tail length in frames.
+    fn tail(&self) -> Option<Arc<dyn PluginTail>> {
+        None
+    }
+
+    /// Capability for reporting processing latency in frames.
+    fn latency(&self) -> Option<Arc<dyn PluginLatency>> {
+        None
+    }
 }
 
 /// CLAP audio-ports extension. Returns metadata the host uses to determine routing and
@@ -406,6 +424,32 @@ pub trait PluginGui: Send + Sync + 'static {
     fn suggest_title(&self, title: &str);
     fn show(&self) -> PluginResult<()>;
     fn hide(&self) -> PluginResult<()>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderMode {
+    Realtime,
+    Offline,
+}
+
+/// CLAP render extension. The host calls this outside `process()` to announce whether
+/// upcoming processing is realtime or offline.
+pub trait PluginRender: Send + Sync + 'static {
+    fn has_hard_realtime_requirement(&self) -> bool {
+        false
+    }
+
+    fn set_render_mode(&self, mode: RenderMode) -> PluginResult<()>;
+}
+
+/// CLAP tail extension. The returned value is a frame count, matching CLAP directly.
+pub trait PluginTail: Send + Sync + 'static {
+    fn tail_frames(&self) -> u32;
+}
+
+/// CLAP latency extension. The returned value is a frame count, matching CLAP directly.
+pub trait PluginLatency: Send + Sync + 'static {
+    fn latency_frames(&self) -> u32;
 }
 
 /// Processing object that runs on the audio thread.
