@@ -30,6 +30,9 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 - `PluginParameters`: CLAP `params`
 - `PluginStateSupport`: CLAP `state`
 - `PluginGui`: CLAP `gui`
+- `PluginRender`: CLAP `render`
+- `PluginTail`: CLAP `tail`
+- `PluginLatency`: CLAP `latency`
 - `export_clap_plugin!`: exports the CLAP entry point
 
 Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.
@@ -43,7 +46,6 @@ Additionally, full CLAP ABI coverage is not yet complete. Known limitations:
 - `audio-ports`: exposes current port metadata only; dynamic port rescan notifications are not supported
 - `configurable-audio-ports`: only layout negotiation while inactive is supported
 - `params`: value rescan after state restore is supported, but a dynamic rescan API for the parameter schema itself is not provided
-- No helper for raw MIDI bytes (only note events via note-ports are supported)
 - Output event batching helpers are minimal (sample-accurate event ordering is the product's responsibility)
 - The `audio-ports-activation` extension is not implemented
 - Exporting multiple plugins from a single binary is not supported
