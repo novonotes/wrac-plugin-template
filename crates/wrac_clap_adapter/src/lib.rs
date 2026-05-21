@@ -18,13 +18,15 @@ pub use api::{
     ClapWindow, GuiApi, GuiConfiguration, GuiResizeHints, GuiSize, HostGuiResizeRequester,
     HostParameterEditNotifier, NoteDialects, NotePortInfo, ParameterFlags, ParameterInfo,
     ParameterValueEvent, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore,
-    PluginCoreContext, PluginError, PluginGui, PluginNotePorts, PluginParameters, PluginResult,
-    PluginState, PluginStateSupport, ProcessContext, ProcessStatus, Processor,
+    PluginCoreContext, PluginError, PluginGui, PluginLatency, PluginNotePorts, PluginParameters,
+    PluginRender, PluginResult, PluginState, PluginStateSupport, PluginTail, ProcessContext,
+    ProcessStatus, Processor, RenderMode,
 };
 pub use descriptor::{Auv2Descriptor, PluginDescriptor, PluginFeature};
 pub use events::{
-    InputEvent, InputEvents, NoteEvent, NoteExpressionEvent, OutputEvent, OutputEvents,
-    ParameterGestureEvent, ParameterModEvent, ProcessEvents, TransportEvent, UnknownEvent,
+    InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent, NoteExpressionEvent,
+    OutputEvent, OutputEvents, ParameterGestureEvent, ParameterModEvent, ProcessEvents,
+    TransportEvent, UnknownEvent,
 };
 pub use process_buffer::{
     AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,
