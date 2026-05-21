@@ -18,7 +18,7 @@ use clap_sys::ext::note_ports::{
     CLAP_NOTE_DIALECT_MIDI2,
 };
 
-use crate::events::ProcessEvents;
+use crate::events::{ProcessEvents, TransportEvent};
 use crate::process_buffer::{AudioBufferError, AudioProcessBuffer};
 
 #[derive(Debug)]
@@ -423,6 +423,7 @@ pub struct ProcessContext<'a> {
     pub frames_count: u32,
     pub audio: AudioProcessBuffer<'a>,
     pub events: ProcessEvents<'a>,
+    pub transport: Option<TransportEvent>,
 }
 
 #[derive(Debug, Clone, Copy)]

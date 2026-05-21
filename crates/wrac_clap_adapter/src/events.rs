@@ -488,7 +488,7 @@ pub struct TransportEvent {
 }
 
 impl TransportEvent {
-    fn from_raw(raw: &clap_event_transport) -> Self {
+    pub(crate) fn from_raw(raw: &clap_event_transport) -> Self {
         Self {
             time: raw.header.time,
             flags: raw.flags,

@@ -47,7 +47,7 @@ use crate::params::ParameterEditQueue;
 use crate::{
     ActivateContext, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore, PluginCoreContext,
     PluginGui, PluginNotePorts, PluginParameters, PluginStateSupport, ProcessContext,
-    ProcessStatus, Processor,
+    ProcessStatus, Processor, TransportEvent,
 };
 
 // clap-wrapper reads this draft factory when generating AUv2 metadata. Without a
@@ -588,6 +588,7 @@ unsafe extern "C" fn plugin_process(
                 frames_count: process.frames_count,
                 audio,
                 events,
+                transport: unsafe { process.transport.as_ref() }.map(TransportEvent::from_raw),
             }) {
                 Ok(ProcessStatus::Continue) => CLAP_PROCESS_CONTINUE,
                 Ok(ProcessStatus::ContinueIfNotQuiet) => CLAP_PROCESS_CONTINUE_IF_NOT_QUIET,
