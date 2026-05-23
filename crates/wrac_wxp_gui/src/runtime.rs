@@ -40,17 +40,25 @@ struct GuiRuntimeEntry {
 
 /// RAII token representing a reference to the GUI thread's run loop.
 ///
+/// The token is `Send + Sync` because `WxpGuiController` is shared with host callbacks,
+/// but the run-loop reference itself is released on the GUI thread captured at acquisition.
+/// Dropping this token from another host thread blocks until `RunLoop::deinit()` has run
+/// on the owning GUI thread.
+///
 /// TODO: once `novonotes_run_loop` gains a transactional guard API, this type should
 /// become a thin wrapper around it. The current `RunLoop::init()` does not guarantee
 /// full rollback on failure, so the local state is not advanced beyond what can be
 /// safely undone.
-pub(crate) struct GuiThreadLease;
+pub(crate) struct GuiThreadLease {
+    owner: ThreadId,
+    sender: RunLoopSender,
+}
 
 /// The actual WebView runtime owned by the UI thread.
 ///
-/// Not requiring `Send` / `Sync` is intentional: native GUI objects are bound to the
-/// thread that created them, so operations are dispatched back through the run loop via
-/// `GuiRuntimeHandle`.
+/// `Send` / `Sync` are intentionally not required: implementations may hold
+/// GUI-thread-owned toolkit state such as native WebViews, `Rc`, or `RefCell`.
+/// Host-facing thread defense belongs in [`WxpGuiController`](crate::WxpGuiController).
 pub trait WxpGuiRuntime: 'static {
     fn set_scale(&mut self, scale: f64) -> PluginResult<()>;
     fn set_size(&mut self, size: GuiSize) -> PluginResult<()>;
@@ -66,6 +74,7 @@ pub trait WxpGuiRuntime: 'static {
 ///
 /// The factory itself is `Send + Sync` because it is held inside `PluginCore`, but the
 /// runtime it returns does not need to be `Send` — it lives in the UI thread's TLS.
+/// Runtime creation may allocate and touch native GUI APIs; it is not realtime-safe.
 pub trait WxpGuiFactory: Send + Sync + 'static {
     fn create_gui_runtime(
         &self,
@@ -234,13 +243,21 @@ impl GuiThreadLease {
         // Advance the owner only after `RunLoop::init()` succeeds. The dependency's init
         // does not guarantee full rollback on failure, so at least keep our own source of
         // truth clean.
+        let sender = RunLoop::sender();
         gui_thread.owner = Some(current_thread);
         gui_thread.ref_count += 1;
         log::debug!(
             "wxp GUI thread lease: acquired on thread {current_thread:?}; ref_count={}",
             gui_thread.ref_count
         );
-        Ok(Self)
+        Ok(Self {
+            owner: current_thread,
+            sender,
+        })
+    }
+
+    pub(crate) fn sender(&self) -> RunLoopSender {
+        self.sender.clone()
     }
 }
 
@@ -248,7 +265,15 @@ impl Drop for GuiThreadLease {
     fn drop(&mut self) {
         let current_thread = std::thread::current().id();
         log::debug!("wxp GUI thread lease: dropping on thread {current_thread:?}");
-        RunLoop::deinit();
+        if current_thread == self.owner {
+            RunLoop::deinit();
+        } else {
+            log::debug!(
+                "wxp GUI thread lease: dispatching deinit from thread {current_thread:?} to owner {:?}",
+                self.owner
+            );
+            self.sender.send_and_wait(RunLoop::deinit);
+        }
         let mut gui_thread = GUI_THREAD_STATE.lock();
         debug_assert!(gui_thread.ref_count > 0);
         gui_thread.ref_count = gui_thread.ref_count.saturating_sub(1);

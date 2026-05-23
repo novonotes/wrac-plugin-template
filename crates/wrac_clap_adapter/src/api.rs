@@ -69,6 +69,9 @@ pub struct PluginCoreContext {
 /// This is not an API to update the source of truth. The product updates its own store
 /// first, then calls this to report the edit back to the host
 /// (begin → update → end forms one undo unit).
+///
+/// `Send + Sync` allows GUI or control callbacks to share the notifier. It is not
+/// realtime-safe; do not call it from `Processor::process()`.
 pub trait HostParameterEditNotifier: Send + Sync {
     fn begin_edit(&self, parameter_id: u32);
     fn update_edit(&self, parameter_id: u32, value: f64);
@@ -76,6 +79,11 @@ pub trait HostParameterEditNotifier: Send + Sync {
 }
 
 /// Requests the host to resize the GUI client area on behalf of the product (e.g., from the GUI).
+///
+/// This trait is `Send + Sync` because it is stored inside the shared plugin context, not because
+/// every method is meaningful from every thread. Call `request_resize` only from the product's GUI
+/// event path. Do not call it from the audio thread, and do not assume arbitrary background threads
+/// may enter the host's GUI extension safely.
 pub trait HostGuiResizeRequester: Send + Sync {
     fn request_resize(&self, size: GuiSize) -> PluginResult<()>;
 }
@@ -365,7 +373,8 @@ pub trait PluginNotePorts: Send + Sync + 'static {
 /// CLAP params extension. Design assuming the host reads schema and current values from
 /// any thread. In particular, `parameter_value` / `apply_parameter_value` sit close to
 /// the automation/flush and audio processing boundary, so keep them in a store that does
-/// not share locks the audio thread waits on.
+/// not share locks the audio thread waits on. Do not do GUI dispatch, file IO, or host
+/// callbacks from these methods.
 pub trait PluginParameters: Send + Sync + 'static {
     fn parameter_count(&self) -> u32;
     fn parameter_info(&self, index: u32) -> Option<ParameterInfo>;
@@ -402,6 +411,7 @@ pub trait PluginStateSupport: Send + Sync + 'static {
 
 /// CLAP gui extension. GUI backend thread affinity must be enforced within this trait
 /// (the adapter does not marshal callbacks to the UI thread).
+/// This is not a realtime-safe API and must never be called from `Processor::process()`.
 ///
 /// `get_size`/`can_resize`/`resize_hints` may be re-entered during host layout
 /// computation. Answer from cached size or static hints without entering heavy mutations.
@@ -458,6 +468,9 @@ pub trait PluginLatency: Send + Sync + 'static {
 /// lock and from GUI/project state. State passed in must be either an immutable snapshot
 /// copied at activate time, or atomic/lock-free shared state the audio thread never
 /// waits on (even when passing `Arc<Mutex<_>>`, design it so process() never locks).
+///
+/// `Send` lets the adapter move the processor to the audio owner. `Sync` is intentionally
+/// not required because the adapter calls it through exclusive `&mut self` access.
 pub trait Processor: Send {
     fn reset(&mut self) {}
     fn process(&mut self, context: ProcessContext<'_>) -> PluginResult<ProcessStatus>;

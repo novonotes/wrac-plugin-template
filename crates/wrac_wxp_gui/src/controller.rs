@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use novonotes_run_loop::RunLoop;
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
     ClapWindow, GuiApi, GuiConfiguration, GuiResizeHints, GuiSize, HostGuiResizeRequester,
@@ -27,6 +26,9 @@ pub struct GuiSizeLimits {
 /// The actual runtime lives in TLS on the UI thread; this type receives GUI lifecycle
 /// callbacks as the [`PluginGui`] handle shared across CLAP instances. Only embedded GUI
 /// (attached as a child view to the host parent) is supported; floating windows are rejected.
+/// Methods may be entered from host callback threads; GUI runtime work is serialized through the
+/// GUI run loop once a parent has established the owning GUI thread.
+/// This controller is not realtime-safe; do not call it from the audio callback.
 pub struct WxpGuiController {
     factory: Arc<dyn WxpGuiFactory>,
     layout: Arc<HostGuiLayout>,
@@ -87,6 +89,15 @@ pub struct WxpGuiResizeHandle {
     layout: Arc<HostGuiLayout>,
     scale: Arc<Mutex<f64>>,
 }
+
+const _: () = {
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    // These handles are intentionally shared with host callbacks and product command handlers.
+    // Thread-affine native GUI objects remain behind run-loop dispatch/TLS.
+    let _ = assert_send_sync::<WxpGuiController>;
+    let _ = assert_send_sync::<WxpGuiResizeHandle>;
+};
 
 impl WxpGuiController {
     pub fn new_with_resize_handle(
@@ -156,7 +167,7 @@ fn schedule_runtime_creation(
     // makes host lifecycle re-entry more likely. Posting to the run loop centralizes
     // creation serialization, pending visibility/size application, and stale-generation
     // teardown in one place.
-    let (configuration, parent) = {
+    let (configuration, parent, sender) = {
         let mut state = runtime.lock();
         if state.is_creating_runtime {
             log::debug!(
@@ -176,19 +187,24 @@ fn schedule_runtime_creation(
             return Ok(());
         }
         let parent = session.parent.ok_or(PluginError::InvalidState)?;
+        let sender = session
+            .parent_lease
+            .as_ref()
+            .ok_or(PluginError::InvalidState)?
+            .sender();
         let configuration = session.configuration;
         state.is_creating_runtime = true;
         state.creating_generation = Some(generation);
         state.pending_creation_generation = None;
         state.destroy_requested_while_creating = false;
-        (configuration, parent)
+        (configuration, parent, sender)
     };
 
     log::debug!("wxp controller: posting runtime creation: generation={generation}");
     let factory_for_callback = factory.clone();
     let runtime_for_callback = runtime.clone();
     let layout_for_callback = layout.clone();
-    RunLoop::sender().send(move || {
+    sender.send(move || {
             log::debug!("wxp controller: posted runtime creation started: generation={generation}");
             let result = create_runtime_on_gui_thread(
                 factory_for_callback.as_ref(),
@@ -564,12 +580,19 @@ impl WxpGuiResizeHandle {
         }
     }
 
+    /// Requests a host-approved resize from the GUI event path and mirrors accepted bounds to wxp.
+    ///
+    /// `WxpGuiResizeHandle` is `Send + Sync` so command registration can share it, but this method
+    /// should be called by GUI commands/events. It is not suitable for audio-thread or generic
+    /// background-thread use because it enters the host GUI resize extension.
     pub fn request_resize(
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
         host_gui_resize_requester: &dyn HostGuiResizeRequester,
     ) -> PluginResult<GuiSize> {
+        // This method is intended for GUI command handlers. `HostGuiResizeRequester` is stored in
+        // Send/Sync context, but host GUI resize calls are not real-time or arbitrary-thread APIs.
         let logical_size = self.layout.clamp_logical_size(requested);
         let gui_size = GuiSize {
             width: logical_size.width as u32,

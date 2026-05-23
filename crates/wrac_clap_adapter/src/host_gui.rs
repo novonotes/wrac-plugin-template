@@ -39,8 +39,8 @@ struct HostGuiRequestResize {
 }
 
 // The instance lifetime of the host pointer is the minimal unavoidable assumption of the
-// CLAP ABI. Use is limited to request_resize from the GUI thread; the raw pointer is
-// not exposed to product code.
+// CLAP ABI. This handle is Send/Sync only so it can live in shared plugin context; callers
+// must still use request_resize from the GUI event path, not from audio/background work.
 unsafe impl Send for HostGuiRequestResize {}
 unsafe impl Sync for HostGuiRequestResize {}
 
