@@ -18,6 +18,12 @@ The WRAC stack is a technology stack for audio plugin development, built around 
 
 **C** (CLAP): Interface with host applications via the CLever Audio Plug-in standard.
 
+## Why WRAC?
+
+Audio plugins have requirements that ordinary desktop WebView apps do not have: support for many DAWs and plugin formats, cooperative behavior with host applications, and hard real-time requirements on the audio thread.
+
+It took our team a lot of iteration to satisfy those requirements with a WebView + Rust architecture.
+Other developers should not have to repeat the same trial and error. With this template, you can start from working code that NovoNotes uses in production.
 
 ## Contents
 
@@ -55,6 +61,20 @@ Then launch your DAW and insert **WRAC Gain** (a plugin rescan may be required).
 If it works, a quick note at [DAW Compatibility Reports](https://github.com/novonotes/wrac-plugin-template/discussions/6) is a big help for the community!
 
 To build your own plugin based on this template, see [Setup](docs/setup.md).
+
+## FAQ
+
+### Why WebView instead of a GPU-native UI stack?
+
+For production plugins, predictability was the main reason. The web platform is mature, widely understood, and already has a known set of tradeoffs in desktop and plugin UI contexts. GPU-native UI stacks such as wgpu are promising, but there is still less production evidence to rely on inside DAW-hosted plugin environments.
+
+### Is this a framework?
+
+No. This repository is an implementation example and starting point, not a general-purpose framework. As a result, it does not provide a broad high-level API, and the adapter layers are intentionally kept thin. Adapting it to your own project should usually be straightforward. For the same reason, future changes will not provide API backwards compatibility or migration support.
+
+### Can I use this for commercial plugins?
+
+Yes. This repository is licensed under the MIT License, which permits commercial use. Open-source, freeware, and commercial releases built from this template are all welcome.
 
 ## Build
 
@@ -100,10 +120,6 @@ cargo xtask --help
 # Subcommand help
 cargo xtask build --help
 ```
-
-## Notes
-
-This repository is intended as an implementation example and starting point, not a general-purpose framework. Future changes will not provide API backwards compatibility or migration support.
 
 ## Built with WRAC
 
