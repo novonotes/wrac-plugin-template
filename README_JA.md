@@ -73,6 +73,10 @@ npm run dev
 
 はい。このリポジトリは MIT License で公開されており、商用利用が可能です。このテンプレートを元にしたオープンソース、フリーウェア、商用リリースのいずれも歓迎です。
 
+### AAX / AUv3 対応はありますか
+
+AAX / AUv3 対応は進行中です。`clap-wrapper` の `next` ブランチにはすでに AAX 対応が入っており、NovoNotes 社内では macOS AAX ビルドに利用しています。AUv3 対応も `clap-wrapper` に PR はありますが、NovoNotes ではまだ検証していません。このテンプレートの `xtask` target としては、現時点では CLAP / VST3 / AU / Standalone のみを公開しています。
+
 ## ビルド
 
 代表的なコマンド:

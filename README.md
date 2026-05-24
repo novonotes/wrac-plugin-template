@@ -76,6 +76,10 @@ No. This repository is an implementation example and starting point, not a gener
 
 Yes. This repository is licensed under the MIT License, which permits commercial use. Open-source, freeware, and commercial releases built from this template are all welcome.
 
+### What about AAX and AUv3 support?
+
+AAX and AUv3 support are ongoing. `clap-wrapper` already has AAX support on its `next` branch, and NovoNotes is using it for internal macOS AAX builds. AUv3 support also has open `clap-wrapper` pull requests, but NovoNotes has not verified it yet. This template still exposes only CLAP / VST3 / AU / Standalone as supported `xtask` targets.
+
 ## Build
 
 Common commands:
