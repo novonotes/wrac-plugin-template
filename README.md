@@ -5,6 +5,9 @@ You can copy this repository as a starting point for new projects.
 
 > 日本語版: [README_JA.md](README_JA.md)
 
+<img width="500" alt="wrac_gain" src="https://github.com/user-attachments/assets/4797b197-79ce-42d5-ab97-871eb3913db7" />
+
+
 # What is the WRAC Stack?
 
 The WRAC stack is a technology stack for audio plugin development, built around three core components: **Webview, Rust Audio, and CLAP**.
