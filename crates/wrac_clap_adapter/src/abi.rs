@@ -49,6 +49,7 @@ use crate::descriptor::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr,
 };
 use crate::host_gui::HostGuiResizeRequest;
+use crate::host_state::HostStateDirtyNotification;
 use crate::params::ParameterEditQueue;
 use crate::{
     ActivateContext, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore, PluginCoreContext,
@@ -123,6 +124,7 @@ impl PluginInstance {
         // host pointers or CLAP event lifetimes.
         let context = PluginCoreContext {
             host_parameter_edit_notifier: parameter_edits.clone(),
+            host_state_dirty_notifier: Arc::new(HostStateDirtyNotification::new(host)),
             host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
         };
         let core = (registration.create)(context);

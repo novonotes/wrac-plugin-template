@@ -60,6 +60,7 @@ impl From<AudioBufferError> for PluginError {
 #[derive(Clone)]
 pub struct PluginCoreContext {
     pub host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
+    pub host_state_dirty_notifier: Arc<dyn HostStateDirtyNotifier>,
     pub host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
 }
 
@@ -73,6 +74,14 @@ pub trait HostParameterEditNotifier: Send + Sync {
     fn begin_edit(&self, parameter_id: u32);
     fn update_edit(&self, parameter_id: u32, value: f64);
     fn end_edit(&self, parameter_id: u32);
+}
+
+/// Notifies the host that non-parameter project state changed and should be saved.
+///
+/// This maps to CLAP `clap_host_state.mark_dirty()`. Use it for plugin-owned document
+/// state, not for parameter automation gestures.
+pub trait HostStateDirtyNotifier: Send + Sync {
+    fn mark_dirty(&self);
 }
 
 /// Requests the host to resize the GUI client area on behalf of the product (e.g., from the GUI).

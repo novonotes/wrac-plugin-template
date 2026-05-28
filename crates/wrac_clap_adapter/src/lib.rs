@@ -10,14 +10,15 @@ mod api;
 mod descriptor;
 mod events;
 mod host_gui;
+mod host_state;
 mod params;
 mod process_buffer;
 
 pub use api::{
     ActivateContext, AudioPortConfigurationRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
     ClapWindow, GuiApi, GuiConfiguration, GuiResizeHints, GuiSize, HostGuiResizeRequester,
-    HostParameterEditNotifier, NoteDialects, NotePortInfo, ParameterFlags, ParameterInfo,
-    ParameterValueEvent, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore,
+    HostParameterEditNotifier, HostStateDirtyNotifier, NoteDialects, NotePortInfo, ParameterFlags,
+    ParameterInfo, ParameterValueEvent, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore,
     PluginCoreContext, PluginError, PluginGui, PluginLatency, PluginNotePorts, PluginParameters,
     PluginRender, PluginResult, PluginState, PluginStateSupport, PluginTail, ProcessContext,
     ProcessStatus, Processor, RenderMode,
