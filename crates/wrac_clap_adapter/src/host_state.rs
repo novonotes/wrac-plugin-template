@@ -35,7 +35,8 @@ struct HostStateMarkDirty {
 }
 
 // The instance lifetime of the host pointer is the minimal unavoidable assumption of the
-// CLAP ABI. Products only receive the safe notifier, not the raw pointer.
+// CLAP ABI. The public trait contract, not this proxy, carries the `mark_dirty`
+// main-thread constraint, so products never receive the raw pointer.
 unsafe impl Send for HostStateMarkDirty {}
 unsafe impl Sync for HostStateMarkDirty {}
 

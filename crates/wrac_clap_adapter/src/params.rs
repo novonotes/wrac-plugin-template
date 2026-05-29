@@ -164,8 +164,9 @@ struct HostParams {
 }
 
 // The instance lifetime of the host pointer is the minimal unavoidable assumption of the
-// CLAP ABI. Wrapper-specific thread/order guarantees are not trusted; within the adapter
-// usage is limited to `request_flush()` only.
+// CLAP ABI. Product-facing usage is limited to `request_flush()`; adapter-internal
+// `rescan_values()` is called only after state load, where CLAP gives the callback a
+// main-thread contract.
 unsafe impl Send for HostParams {}
 unsafe impl Sync for HostParams {}
 

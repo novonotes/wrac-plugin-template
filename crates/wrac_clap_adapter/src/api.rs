@@ -81,6 +81,10 @@ pub trait HostParameterEditNotifier: Send + Sync {
 ///
 /// This maps to CLAP `clap_host_state.mark_dirty()`. Use it for plugin-owned document
 /// state, not for parameter automation gestures.
+///
+/// CLAP requires this notification to be sent from the main thread. The adapter
+/// does not marshal calls, so call this from the product's GUI/control path, not
+/// directly from `Processor::process()` or a background worker.
 pub trait HostStateDirtyNotifier: Send + Sync {
     fn mark_dirty(&self);
 }
