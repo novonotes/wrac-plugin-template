@@ -1,13 +1,18 @@
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 
 use directories::ProjectDirs;
+use url::{Host, Url};
 use wrac_clap_adapter::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
 use crate::controller::GuiSizeLimits;
 use crate::dpi::DpiConverter;
 use crate::window::ParentWindowHandle;
+
+const URL_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Frontend source loaded by the WebView.
 ///
@@ -84,12 +89,25 @@ impl WxpWebViewSession {
         let builder = match config.frontend {
             WxpFrontendSource::Url { url } => {
                 log::debug!("configuring wxp WebView session URL frontend: url={url}");
-                WxpWebViewBuilder::new(&mut wxp_context)
+                let builder = WxpWebViewBuilder::new(&mut wxp_context)
                     .with_command_handler(command_handler.clone())
                     .with_devtools(config.devtools)
                     .with_visible(true)
-                    .with_bounds(bounds)
-                    .with_url(url)
+                    .with_bounds(bounds);
+                match probe_frontend_url(url, URL_PROBE_TIMEOUT) {
+                    Ok(ProbeOutcome::Reachable) | Ok(ProbeOutcome::Skipped) => {
+                        builder.with_url(url)
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "wxp WebView URL probe failed: url={}, target={}, error={}",
+                            url,
+                            error.target,
+                            error.error
+                        );
+                        builder.with_html(url_probe_error_html(url, &error, URL_PROBE_TIMEOUT))
+                    }
+                }
             }
             WxpFrontendSource::Zip { scheme, url, bytes } => {
                 log::debug!("configuring wxp WebView session zip frontend: url={url}");
@@ -188,6 +206,255 @@ impl Drop for WxpWebViewSession {
     }
 }
 
+enum ProbeOutcome {
+    Reachable,
+    Skipped,
+}
+
+#[derive(Debug)]
+struct UrlProbeError {
+    target: String,
+    error: String,
+}
+
+#[derive(Debug)]
+struct ProbeTarget {
+    host: String,
+    port: u16,
+    display: String,
+}
+
+fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlProbeError> {
+    let parsed = Url::parse(url).map_err(|error| UrlProbeError {
+        target: url.to_string(),
+        error: format!("URL parse failed: {error}"),
+    })?;
+
+    // Custom schemes are resolved by the WebView/custom-protocol layer, so a TCP probe would
+    // create false failures for release assets served from `with_serve_zip`.
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Ok(ProbeOutcome::Skipped);
+    }
+
+    let target = probe_target(&parsed)?;
+    let mut addresses = (target.host.as_str(), target.port)
+        .to_socket_addrs()
+        .map_err(|error| UrlProbeError {
+            target: target.display.clone(),
+            error: format!("address resolution failed: {error}"),
+        })?
+        .collect::<Vec<_>>();
+    addresses.sort();
+    addresses.dedup();
+
+    if addresses.is_empty() {
+        return Err(UrlProbeError {
+            target: target.display,
+            error: "address resolution returned no socket addresses".to_string(),
+        });
+    }
+
+    // Embedded WebViews do not consistently render their own network error pages in plugin
+    // hosts. Probe first so a refused or unreachable GUI URL becomes visible instead of blank.
+    let mut errors = Vec::new();
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, timeout) {
+            Ok(_) => return Ok(ProbeOutcome::Reachable),
+            Err(error) => errors.push(format!("{address}: {error}")),
+        }
+    }
+
+    Err(UrlProbeError {
+        target: target.display,
+        error: errors.join("; "),
+    })
+}
+
+fn probe_target(url: &Url) -> Result<ProbeTarget, UrlProbeError> {
+    let host = url.host().ok_or_else(|| UrlProbeError {
+        target: url.as_str().to_string(),
+        error: "URL has no host".to_string(),
+    })?;
+    let port = url.port_or_known_default().ok_or_else(|| UrlProbeError {
+        target: url.as_str().to_string(),
+        error: format!("URL scheme has no known default port: {}", url.scheme()),
+    })?;
+
+    let (host, display_host) = match host {
+        Host::Domain(domain) => (domain.to_string(), domain.to_string()),
+        Host::Ipv4(address) => {
+            let address = address.to_string();
+            (address.clone(), address)
+        }
+        Host::Ipv6(address) => {
+            let address = address.to_string();
+            (address.clone(), format!("[{address}]"))
+        }
+    };
+
+    let display = format!("{display_host}:{port}");
+    Ok(ProbeTarget {
+        host,
+        port,
+        display,
+    })
+}
+
+fn url_probe_error_html(url: &str, error: &UrlProbeError, timeout: Duration) -> String {
+    let timeout_ms = timeout.as_millis();
+    let url_html = escape_html(url);
+    let target_html = escape_html(&error.target);
+    let error_html = escape_html(&error.error);
+    let url_js = escape_js_string(url);
+
+    // Keep this page dependency-free because it is the last-resort UI when the real frontend
+    // cannot be fetched. Retry navigates directly so a server started later can load normally.
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Failed to load URL</title>
+    <style>
+      :root {{
+        color-scheme: dark;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #111;
+        color: #eee;
+      }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #111;
+      }}
+      main {{
+        box-sizing: border-box;
+        width: min(680px, 100vw);
+        padding: 24px;
+      }}
+      h1 {{
+        margin: 0 0 18px;
+        font-size: 20px;
+        font-weight: 650;
+      }}
+      dl {{
+        display: grid;
+        gap: 14px;
+        margin: 0;
+      }}
+      dt {{
+        margin-bottom: 5px;
+        color: #aaa;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }}
+      dd {{
+        margin: 0;
+      }}
+      code, pre {{
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }}
+      code {{
+        overflow-wrap: anywhere;
+      }}
+      pre {{
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+        padding: 10px;
+        border: 1px solid #3a3a3a;
+        background: #181818;
+      }}
+      button {{
+        margin-top: 20px;
+        height: 32px;
+        padding: 0 14px;
+        border: 1px solid #666;
+        border-radius: 4px;
+        background: #2b2b2b;
+        color: #fff;
+        font: inherit;
+        cursor: pointer;
+      }}
+      button:hover {{
+        background: #383838;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Failed to load URL</h1>
+      <dl>
+        <div>
+          <dt>URL</dt>
+          <dd><code>{url_html}</code></dd>
+        </div>
+        <div>
+          <dt>Probe target</dt>
+          <dd><code>{target_html}</code></dd>
+        </div>
+        <div>
+          <dt>Timeout</dt>
+          <dd><code>{timeout_ms} ms</code></dd>
+        </div>
+        <div>
+          <dt>Error</dt>
+          <dd><pre>{error_html}</pre></dd>
+        </div>
+      </dl>
+      <button type="button" id="retry">Retry</button>
+    </main>
+    <script>
+      const url = "{url_js}";
+      document.getElementById("retry").addEventListener("click", () => {{
+        window.location.href = url;
+      }});
+    </script>
+  </body>
+</html>"#
+    )
+}
+
+fn escape_html(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn escape_js_string(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '&' => escaped.push_str("\\x26"),
+            '<' => escaped.push_str("\\x3C"),
+            '>' => escaped.push_str("\\x3E"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\u{2028}' => escaped.push_str("\\u2028"),
+            '\u{2029}' => escaped.push_str("\\u2029"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 fn clamp_size(size: GuiSize, limits: GuiSizeLimits) -> GuiSize {
     GuiSize {
         width: size.width.clamp(limits.min.width, limits.max.width),
@@ -257,5 +524,34 @@ mod tests {
 
         assert_eq!(clamped.width, 320);
         assert_eq!(clamped.height, 480);
+    }
+
+    #[test]
+    fn resolves_http_probe_targets() {
+        let url = Url::parse("http://127.0.0.1:5173/").unwrap();
+        assert_eq!(probe_target(&url).unwrap().display, "127.0.0.1:5173");
+
+        let url = Url::parse("https://example.com/path").unwrap();
+        assert_eq!(probe_target(&url).unwrap().display, "example.com:443");
+
+        let url = Url::parse("http://[::1]:5173/").unwrap();
+        assert_eq!(probe_target(&url).unwrap().display, "[::1]:5173");
+    }
+
+    #[test]
+    fn escapes_error_page_values() {
+        let error = UrlProbeError {
+            target: "127.0.0.1:5173".to_string(),
+            error: "failed <because> \"quoted\" & 'single'".to_string(),
+        };
+        let html = url_probe_error_html(
+            "http://127.0.0.1:5173/?x=\"<&",
+            &error,
+            Duration::from_millis(500),
+        );
+
+        assert!(html.contains("http://127.0.0.1:5173/?x=&quot;&lt;&amp;"));
+        assert!(html.contains("failed &lt;because&gt; &quot;quoted&quot; &amp; &#39;single&#39;"));
+        assert!(html.contains("const url = \"http://127.0.0.1:5173/?x=\\\"\\x3C\\x26\";"));
     }
 }

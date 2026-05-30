@@ -122,6 +122,8 @@ The `--target` option accepts `clap`, `vst3`, and `au` as comma-separated values
 
 Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).
 Before launching the plugin in your DAW, start the dev server with the following commands.
+If the WebView cannot connect to the configured URL, the plugin shows a low-level load error
+instead of a blank editor so you can see the failed URL and socket error directly.
 
 ```sh
 cd /path/to/my_plugin/src-gui
