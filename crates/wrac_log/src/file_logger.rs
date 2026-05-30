@@ -322,14 +322,14 @@ fn parse_dotenv_rust_log(content: &str) -> Option<String> {
 
 #[cfg(debug_assertions)]
 fn parse_dotenv_value(value: &str) -> String {
-    if value.starts_with('"') {
-        if let Some(end) = value[1..].find('"') {
-            return value[1..end + 1].to_string();
+    if let Some(stripped) = value.strip_prefix('"') {
+        if let Some(end) = stripped.find('"') {
+            return stripped[..end].to_string();
         }
-    } else if value.starts_with('\'')
-        && let Some(end) = value[1..].find('\'')
+    } else if let Some(stripped) = value.strip_prefix('\'')
+        && let Some(end) = stripped.find('\'')
     {
-        return value[1..end + 1].to_string();
+        return stripped[..end].to_string();
     }
 
     value
@@ -586,7 +586,6 @@ mod tests {
             &RecentLogFilesOptions {
                 max_files: 2,
                 max_total_bytes: 1024,
-                ..RecentLogFilesOptions::default()
             },
         )
         .unwrap();
