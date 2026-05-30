@@ -1,17 +1,19 @@
-//! Helper that exposes the wxp WebView GUI as a `wrac_clap_adapter::PluginGui`.
+//! Shared building blocks for using wxp WebViews in WRAC plugin GUIs.
 //!
-//! Parts that need to know about the CLAP ABI remain in `wrac_clap_adapter`. This crate
-//! is responsible only for toolkit conversion of window handles and the thread affinity
-//! of the GUI runtime.
+//! Code that needs to understand the CLAP ABI stays in `wrac_clap_adapter`. This crate
+//! owns only the toolkit boundary shared by product GUI runtimes: window-handle conversion,
+//! GUI thread affinity, and WebView DPI/bounds management.
 
 mod controller;
 mod dpi;
 mod pointer;
+mod resize_drag;
 mod runtime;
+mod session;
 mod window;
 
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
-pub use dpi::DpiConverter;
-pub use pointer::{GlobalPointerPosition, global_pointer_position};
+pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
+pub use session::{WxpFrontendSource, WxpWebViewConfig, WxpWebViewSession};
 pub use window::ParentWindowHandle;

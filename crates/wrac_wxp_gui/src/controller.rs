@@ -541,6 +541,9 @@ impl HostGuiLayout {
 
     fn clamp_logical_size(&self, size: LogicalSize<f64>, scale: f64) -> LogicalSize<f64> {
         let dpi = DpiConverter::new(scale);
+        // Resize commands receive frontend logical pixels, while the host's min/max
+        // contract is physical pixels. Convert before clamping so limits mean the
+        // same thing at every DPI scale.
         let physical = dpi.logical_size_to_gui(size);
         let clamped = clamp_size_with_limits(physical, self.limits);
         dpi.gui_size_to_logical(clamped)
@@ -579,16 +582,16 @@ impl WxpGuiResizeHandle {
     /// Requests a host-approved resize from the GUI event path and mirrors accepted bounds to wxp.
     ///
     /// `WxpGuiResizeHandle` is `Send + Sync` so command registration can share it, but this method
-    /// should be called by GUI commands/events. It is not suitable for audio-thread or generic
-    /// background-thread use because it enters the host GUI resize extension.
+    /// enters the host GUI resize extension and must only be called from GUI commands/events.
     pub fn request_resize(
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
         host_gui_resize_requester: &dyn HostGuiResizeRequester,
     ) -> PluginResult<LogicalSize<f64>> {
-        // This method is intended for GUI command handlers. `HostGuiResizeRequester` is stored in
-        // Send/Sync context, but host GUI resize calls are not real-time or arbitrary-thread APIs.
+        // `HostGuiResizeRequester` can be shared from Send/Sync product state, but the target
+        // API is a host GUI extension. Keep the "GUI command only" threading contract at the
+        // command registration boundary rather than making this a generic background-thread API.
         let scale = *self.scale.lock();
         let logical_size = self.layout.clamp_logical_size(requested, scale);
         let gui_size = DpiConverter::new(scale).logical_size_to_gui(logical_size);
@@ -990,5 +993,36 @@ fn default_gui_configuration() -> GuiConfiguration {
     GuiConfiguration {
         api: default_gui_api(),
         is_floating: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamps_logical_resize_request_in_physical_pixels() {
+        let layout = HostGuiLayout::new(
+            GuiSize {
+                width: 600,
+                height: 400,
+            },
+            GuiSizeLimits {
+                min: GuiSize {
+                    width: 300,
+                    height: 200,
+                },
+                max: GuiSize {
+                    width: 900,
+                    height: 600,
+                },
+            },
+            GuiResizePolicy::RESIZABLE,
+        );
+
+        let clamped = layout.clamp_logical_size(LogicalSize::new(700.0, 100.0), 1.5);
+
+        assert_eq!(clamped.width, 600.0);
+        assert_eq!(clamped.height, 200.0 / 1.5);
     }
 }

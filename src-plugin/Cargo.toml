@@ -36,7 +36,6 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 [dependencies]
 assert_no_alloc = { git = "https://github.com/Windfisch/rust-assert-no-alloc.git", rev = "d31f2d5f550ce339d1c2f0c1ab7da951224b20df", features = ["backtrace"] }
 atomic_float = "1.1.0"
-directories = "5"
 log = "0.4"
 novonotes_run_loop = { workspace = true }
 parking_lot = "0.12"

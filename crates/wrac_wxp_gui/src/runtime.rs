@@ -45,10 +45,9 @@ struct GuiRuntimeEntry {
 /// Dropping this token from another host thread blocks until `RunLoop::deinit()` has run
 /// on the owning GUI thread.
 ///
-/// TODO: once `novonotes_run_loop` gains a transactional guard API, this type should
-/// become a thin wrapper around it. The current `RunLoop::init()` does not guarantee
-/// full rollback on failure, so the local state is not advanced beyond what can be
-/// safely undone.
+/// `novonotes_run_loop` does not provide a transactional guard API, so failed
+/// `RunLoop::init()` calls cannot be treated as fully rolled back. Local state is
+/// advanced only after the part we can safely undo has succeeded.
 pub(crate) struct GuiThreadLease {
     owner: ThreadId,
     sender: RunLoopSender,
