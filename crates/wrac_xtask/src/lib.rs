@@ -15,6 +15,7 @@ use cli::{Cli, Commands};
 use commands::{build, clean, install, launch, uninstall, validate};
 use context::{Context, available_plugins};
 use profile::BuildProfile;
+use targets::{Target, resolve_plugin_targets, resolve_validate_targets};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -42,6 +43,7 @@ pub fn run(config: XtaskConfig) -> Result<()> {
         Commands::Install(args) => {
             for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
                 let ctx = Context::new(&config, &plugin)?;
+                build(&ctx, args_for_install_build(&ctx, &args)?)?;
                 install(
                     &ctx,
                     BuildProfile::from_release(args.release),
@@ -59,12 +61,14 @@ pub fn run(config: XtaskConfig) -> Result<()> {
         Commands::Validate(args) => {
             for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
                 let ctx = Context::new(&config, &plugin)?;
+                build(&ctx, args_for_validate_build(&ctx, &args)?)?;
                 validate(&ctx, BuildProfile::from_release(args.release), &args.target)?;
             }
         }
         Commands::Launch(args) => {
             let plugin = selected_plugin(&config, args.plugin.as_deref())?;
             let ctx = Context::new(&config, &plugin)?;
+            build(&ctx, args_for_launch_build(&args))?;
             launch(&ctx, BuildProfile::from_release(args.release))?;
         }
         Commands::Clean(args) => {
@@ -121,5 +125,35 @@ fn args_for_build(args: &cli::BuildArgs) -> cli::BuildArgs {
         release: args.release,
         clean: args.clean,
         target: args.target.clone(),
+    }
+}
+
+fn args_for_install_build(ctx: &Context, args: &cli::InstallArgs) -> Result<cli::BuildArgs> {
+    let targets = resolve_plugin_targets(ctx.platform, &args.target)?
+        .into_iter()
+        .map(|target| target.target())
+        .collect();
+    Ok(args_for_implicit_build(args.release, targets))
+}
+
+fn args_for_validate_build(ctx: &Context, args: &cli::ValidateArgs) -> Result<cli::BuildArgs> {
+    let targets = resolve_validate_targets(ctx.platform, &args.target)?
+        .into_iter()
+        .map(|target| target.target())
+        .collect();
+    Ok(args_for_implicit_build(args.release, targets))
+}
+
+fn args_for_launch_build(args: &cli::LaunchArgs) -> cli::BuildArgs {
+    args_for_implicit_build(args.release, vec![Target::Standalone])
+}
+
+fn args_for_implicit_build(release: bool, target: Vec<Target>) -> cli::BuildArgs {
+    cli::BuildArgs {
+        plugin: None,
+        all: false,
+        release,
+        clean: false,
+        target,
     }
 }

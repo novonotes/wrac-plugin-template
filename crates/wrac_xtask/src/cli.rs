@@ -24,8 +24,7 @@ Examples:
 
 Notes:
   --plugin can be omitted when plugins/ contains exactly one plugin package.
-  Run `cargo xtask install` after building to install plugin artifacts.
-  Run `cargo xtask validate` after building to validate CLAP/VST3/AU artifacts.
+  `install`, `validate`, and `launch` build their required artifacts before use.
   VST3/AU/standalone targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
@@ -46,7 +45,7 @@ Examples:
 
 Notes:
   --plugin can be omitted when plugins/ contains exactly one plugin package.
-  install copies previously built plugin artifacts.
+  install builds the selected plugin formats before copying artifacts.
   --scope defaults to user. Use --scope=system for hosts that only scan system-wide plugin folders.
   standalone is not a plugin format and cannot be installed with this command.";
 
@@ -89,6 +88,7 @@ Examples:
 
 Notes:
   --plugin can be omitted when plugins/ contains exactly one plugin package.
+  validate builds the selected plugin formats before running validators.
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
@@ -102,8 +102,7 @@ Examples:
   cargo xtask launch --plugin=gain-basic --release
 
 Notes:
-  launch starts a previously built standalone artifact.
-  Run `cargo xtask build --target=standalone` first.";
+  launch builds the standalone artifact before starting it.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -124,7 +123,7 @@ pub(crate) enum Commands {
     )]
     Build(BuildArgs),
     #[command(
-        about = "Install previously built plugin artifacts.",
+        about = "Build and install plugin artifacts.",
         after_help = INSTALL_AFTER_HELP
     )]
     Install(InstallArgs),
@@ -134,12 +133,12 @@ pub(crate) enum Commands {
     )]
     Uninstall(UninstallArgs),
     #[command(
-        about = "Validate previously built CLAP/VST3/AU artifacts.",
+        about = "Build and validate CLAP/VST3/AU artifacts.",
         after_help = VALIDATE_AFTER_HELP
     )]
     Validate(ValidateArgs),
     #[command(
-        about = "Launch a previously built standalone artifact.",
+        about = "Build and launch the standalone artifact.",
         after_help = LAUNCH_AFTER_HELP
     )]
     Launch(LaunchArgs),
