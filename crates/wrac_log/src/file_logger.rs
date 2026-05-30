@@ -15,15 +15,21 @@ static INIT: Once = Once::new();
 static CURRENT_LOG_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static CURRENT_LOG_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 
+/// Implementation for [`crate::init!`].
+///
+/// Prefer calling the macro so `manifest_dir` is captured from the plugin crate,
+/// not from `wrac_log`.
 pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
     INIT.call_once(|| {
         let dotenv_rust_log = rust_log_from_debug_dotenv(manifest_dir);
 
+        // Explicit environment configuration is useful for host-driven debugging and CI.
         if let Ok(log_dir) = std::env::var("WRAC_LOG_DIR") {
             init_with_dir(&log_dir, app_name, dotenv_rust_log.as_deref());
             return;
         }
 
+        // Debug builds should make local development logs easy to find in the repository.
         #[cfg(debug_assertions)]
         if let Some(manifest_dir) = manifest_dir {
             let log_dir = Path::new(manifest_dir).join("../.log");
@@ -33,6 +39,8 @@ pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
             }
         }
 
+        // Release builds use a user log directory so installed plugins can keep logs
+        // without depending on the build tree.
         #[cfg(not(debug_assertions))]
         {
             let _ = manifest_dir;
@@ -48,17 +56,27 @@ pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
     });
 }
 
+/// Returns the directory currently used for file logging.
+///
+/// Returns `None` before initialization or when logging fell back to `stderr`.
+/// Use [`current_log_file`] when the caller needs the exact current session log.
 pub fn current_log_dir() -> Option<PathBuf> {
     CURRENT_LOG_DIR.get().cloned().flatten()
 }
 
+/// Returns the current session log file.
+///
+/// Returns `None` before initialization or when logging fell back to `stderr`.
 pub fn current_log_file() -> Option<PathBuf> {
     CURRENT_LOG_FILE.get().cloned().flatten()
 }
 
+/// Limits used when collecting recent log files for diagnostics.
 #[derive(Clone, Debug)]
 pub struct RecentLogFilesOptions {
+    /// Maximum number of files to include, including the current log.
     pub max_files: usize,
+    /// Maximum total byte size to include. The current log is always included.
     pub max_total_bytes: u64,
 }
 
@@ -71,6 +89,10 @@ impl Default for RecentLogFilesOptions {
     }
 }
 
+/// Returns the current log and recent archived logs, newest first.
+///
+/// The current log is always included even if it exceeds `max_total_bytes`.
+/// Archived logs are then added newest first until the file or byte limit is reached.
 pub fn collect_recent_log_files(options: RecentLogFilesOptions) -> std::io::Result<Vec<PathBuf>> {
     let current_log_file = current_log_file()
         .ok_or_else(|| std::io::Error::other("wrac_log is not writing to a log file"))?;
@@ -110,10 +132,15 @@ fn collect_recent_log_files_from_current(
     }
     archived_logs.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
 
+    // After a host crash, the crashed session's previous Latest log becomes an archived
+    // log on the next launch. Include recent archives so diagnostic bundles can still
+    // capture the failure that happened before the current session.
     let mut selected = vec![current_log_file.to_path_buf()];
     selected.extend(archived_logs.into_iter().map(|(_, path)| path));
     selected.truncate(options.max_files.max(1));
 
+    // The current session describes the user's current state and is always included.
+    // Older sessions are included newest first while respecting the total size limit.
     let mut total_bytes = 0_u64;
     let mut limited = Vec::new();
     for path in selected {
@@ -126,6 +153,10 @@ fn collect_recent_log_files_from_current(
     Ok(limited)
 }
 
+/// Initializes logging for tests.
+///
+/// In debug builds, `WRAC_LOG_DIR` creates a per-test timestamped log file. Without
+/// that environment variable, logs go to `stderr`. Initialization is idempotent.
 pub fn init_test() {
     #[cfg(debug_assertions)]
     INIT.call_once(|| {
@@ -152,6 +183,8 @@ fn init_with_dir(log_dir: &str, app_name: &str, dotenv_rust_log: Option<&str>) {
 
     let file_stem = log_file_stem(app_name);
     let latest_log_file = latest_log_file_path(log_dir_path, &file_stem);
+    // Keep a stable Latest filename for users while preserving the previous session
+    // before the new logger appends current-session output.
     if let Err(error) = archive_existing_latest_log(&latest_log_file, &file_stem) {
         eprintln!(
             "Failed to archive latest log file '{}': {error}",
@@ -175,6 +208,8 @@ fn rotate_logs(log_dir: &Path, file_stem: &str) {
         return;
     }
 
+    // Rotate by modification time so the newest archived logs survive even if a
+    // timestamped filename was created by a system clock with low precision.
     log_files.sort_by_key(|entry| {
         entry
             .metadata()
@@ -212,6 +247,9 @@ fn unique_archived_log_file_path(log_dir: &Path, file_stem: &str) -> std::io::Re
         return Ok(first);
     }
 
+    // Fast restarts or coarse system clocks can collide on the same timestamp. Bound
+    // the suffix search so an abnormal directory state cannot turn archive creation
+    // into an infinite loop.
     for index in 1..MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS {
         let candidate = log_dir.join(format!("{file_stem} {timestamp}-{index}.log"));
         if !candidate.exists() {
@@ -234,6 +272,8 @@ fn is_archived_log_file_name(file_name: &str, file_stem: &str) -> bool {
 }
 
 fn log_file_stem(app_name: &str) -> String {
+    // The app name is also user-visible in the log filename. Replace only characters
+    // that are unsafe or awkward across the major target filesystems.
     let sanitized = app_name
         .chars()
         .map(|ch| {
@@ -340,6 +380,10 @@ fn parse_dotenv_value(value: &str) -> String {
 }
 
 #[cfg(not(debug_assertions))]
+/// Resolves the release-build default log directory for the current platform.
+///
+/// Each platform stores logs under a `NovoNotes/{app_name}` directory so installed
+/// plugins keep separate user-facing logs.
 fn resolve_release_log_dir(app_name: &str) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {

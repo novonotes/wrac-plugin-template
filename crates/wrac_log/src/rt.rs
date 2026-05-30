@@ -13,6 +13,7 @@ const RT_TARGET_CAPACITY: usize = 96;
 static RT_REGISTRY: OnceLock<RtRegistry> = OnceLock::new();
 static RT_DRAIN_WORKER: OnceLock<()> = OnceLock::new();
 
+/// Configuration for the background realtime log drain worker.
 pub struct RtDrainConfig {
     interval: Duration,
 }
@@ -26,12 +27,18 @@ impl Default for RtDrainConfig {
 }
 
 impl RtDrainConfig {
+    /// Sets how often the background worker drains registered realtime logs.
     pub fn with_interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
     }
 }
 
+/// Starts the realtime log drain worker once for the current process.
+///
+/// This is called automatically by [`crate::init!`] in debug builds and when
+/// `WRAC_RT_LOG` is set. Calling it directly is useful for tests or custom host
+/// integration.
 pub fn init_rt_log_drain_once(config: RtDrainConfig) {
     RT_DRAIN_WORKER.get_or_init(|| {
         let interval = config.interval;
@@ -46,6 +53,7 @@ pub fn init_rt_log_drain_once(config: RtDrainConfig) {
     });
 }
 
+/// Drains all currently registered realtime logs once on the current thread.
 pub fn drain_rt_logs_once() {
     rt_registry().drain_all();
 }
@@ -56,17 +64,24 @@ pub(crate) fn start_drain_if_enabled() {
     }
 }
 
+/// A fixed-size realtime-safe log buffer.
+///
+/// Create one per realtime component and move cloned [`RtLogWriter`] values into the
+/// realtime path. Dropping `RtLog` unregisters it from the global drain registry after
+/// one final drain.
 pub struct RtLog {
     inner: Arc<RtLogInner>,
 }
 
 impl RtLog {
+    /// Creates and registers a realtime log with the global drain registry.
     pub fn new_registered(name: &'static str) -> Self {
         let inner = Arc::new(RtLogInner::new(name));
         rt_registry().register(&inner);
         Self { inner }
     }
 
+    /// Returns a cheap cloneable writer for use from realtime code.
     pub fn writer(&self) -> RtLogWriter {
         RtLogWriter {
             inner: self.inner.clone(),
@@ -82,6 +97,7 @@ impl Drop for RtLog {
 }
 
 #[derive(Clone)]
+/// Cloneable handle used by the `rt*` macros to write realtime log records.
 pub struct RtLogWriter {
     inner: Arc<RtLogInner>,
 }

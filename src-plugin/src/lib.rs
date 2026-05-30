@@ -12,8 +12,8 @@
 //! - `gui.rs`      : WebView-based GUI integration; runtime/notifier live under `gui/`.
 //! - `commands.rs` : Rust commands callable from the WebView frontend; resize helpers under `commands/`.
 //!
-//! Logging goes through the `log` facade. `logging.rs` provides a simple logger for debug
-//! builds; production plugins are expected to replace it with a custom logger.
+//! Logging goes through the `log` facade and is initialized through the shared `wrac_log`
+//! crate.
 
 // In debug builds, swap in a custom allocator to detect allocations on the audio
 // thread immediately (see process() in audio.rs for usage).

@@ -13,6 +13,24 @@ pub use file_logger::{
 };
 pub use rt::{RtDrainConfig, RtLog, RtLogWriter, drain_rt_logs_once, init_rt_log_drain_once};
 
+/// Initializes logging for a WRAC plugin.
+///
+/// This macro must be called from the plugin crate so `CARGO_MANIFEST_DIR` points at
+/// the caller. In debug builds, the default log directory is resolved as
+/// `{plugin_crate}/../.log`; calling the implementation function directly from this
+/// crate would resolve that path relative to `wrac_log` instead.
+///
+/// Initialization is process-wide and idempotent. The first call wins.
+///
+/// Output destination priority:
+/// 1. `WRAC_LOG_DIR`
+/// 2. Debug builds: `{plugin_crate}/../.log`
+/// 3. Release builds: the platform user log directory under `NovoNotes/{app_name}`
+/// 4. `stderr` when no file destination can be resolved
+///
+/// When writing to a file, the current session is written to
+/// `{app_name} Latest.log`; any previous latest log is archived with a timestamp and
+/// old archives are rotated.
 #[macro_export]
 macro_rules! init {
     ($app_name:expr) => {
