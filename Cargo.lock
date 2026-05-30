@@ -2923,7 +2923,6 @@ version = "0.1.0"
 dependencies = [
  "assert_no_alloc",
  "atomic_float",
- "directories",
  "log",
  "novonotes_run_loop",
  "parking_lot",
@@ -2951,6 +2950,7 @@ dependencies = [
 name = "wrac_wxp_gui"
 version = "0.1.0"
 dependencies = [
+ "directories",
  "log",
  "novonotes_run_loop",
  "parking_lot",

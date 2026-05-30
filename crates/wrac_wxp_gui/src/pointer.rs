@@ -2,9 +2,9 @@
 use std::ffi::c_void;
 
 #[derive(Debug, Clone, Copy)]
-pub struct GlobalPointerPosition {
-    pub x: f64,
-    pub y: f64,
+pub(crate) struct GlobalPointerPosition {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
 }
 
 #[cfg(target_os = "macos")]
@@ -28,11 +28,11 @@ unsafe extern "C" {
     fn CFRelease(cf: *const c_void);
 }
 
-pub fn global_pointer_position() -> Option<GlobalPointerPosition> {
+pub(crate) fn global_pointer_position() -> Option<GlobalPointerPosition> {
     #[cfg(target_os = "macos")]
     {
-        // WebView coordinates can shift during a host-owned editor resize. Reading the
-        // desktop cursor keeps resize gestures independent of child-view relayout.
+        // WebView coordinates can move during a host-owned editor resize, so read the
+        // desktop cursor to keep drag math independent of child-view relayout.
         let event = unsafe { CGEventCreate(std::ptr::null()) };
         if event.is_null() {
             return None;

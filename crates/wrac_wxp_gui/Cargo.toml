@@ -9,6 +9,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
+directories = "5"
 log = "0.4"
 novonotes_run_loop = { workspace = true }
 parking_lot = "0.12"
