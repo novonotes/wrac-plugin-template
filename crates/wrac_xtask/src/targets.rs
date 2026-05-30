@@ -154,18 +154,18 @@ impl Platform {
         }
     }
 
-    pub(crate) fn dynamic_library_name(self) -> &'static str {
+    pub(crate) fn dynamic_library_name(self, crate_name: &str) -> String {
         match self {
-            Self::Macos => concat!("lib", "wrac_gain_plugin", ".dylib"),
-            Self::Windows => concat!("wrac_gain_plugin", ".dll"),
-            Self::Linux => concat!("lib", "wrac_gain_plugin", ".so"),
+            Self::Macos => format!("lib{crate_name}.dylib"),
+            Self::Windows => format!("{crate_name}.dll"),
+            Self::Linux => format!("lib{crate_name}.so"),
         }
     }
 
-    pub(crate) fn static_library_name(self) -> &'static str {
+    pub(crate) fn static_library_name(self, crate_name: &str) -> String {
         match self {
-            Self::Windows => concat!("wrac_gain_plugin", ".lib"),
-            Self::Macos | Self::Linux => concat!("lib", "wrac_gain_plugin", ".a"),
+            Self::Windows => format!("{crate_name}.lib"),
+            Self::Macos | Self::Linux => format!("lib{crate_name}.a"),
         }
     }
 }

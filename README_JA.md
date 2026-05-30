@@ -48,7 +48,7 @@ cargo xtask build --target=clap
 cargo xtask install --target=clap
 
 # デバッグビルドは Vite dev server から GUI を読み込むため、DAW を起動する前に立ち上げてください
-cd src-gui
+cd plugins/wrac-gain/src-gui
 npm install
 npm run dev
 ```

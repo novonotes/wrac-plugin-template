@@ -1,9 +1,10 @@
 [workspace]
 members = [
-    "src-plugin",
+    "plugins/wrac-gain/src-plugin",
     "xtask",
     "crates/wrac_clap_adapter",
     "crates/wrac_log",
+    "crates/wrac_xtask",
     "crates/wrac_wxp_gui",
 ]
 resolver = "2"

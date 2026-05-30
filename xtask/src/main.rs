@@ -1,42 +1,16 @@
-use std::error::Error;
+use std::path::Path;
 
-use clap::Parser;
+use wrac_xtask::{XtaskConfig, run};
 
-mod cli;
-mod commands;
-mod constants;
-mod context;
-mod metadata;
-mod profile;
-mod targets;
-mod util;
-
-use cli::{Cli, Commands};
-use commands::{build, clean, install, launch, uninstall, validate};
-use context::Context;
-use profile::BuildProfile;
-
-pub(crate) type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let ctx = Context::new()?;
-
-    match cli.command {
-        Commands::Build(args) => build(&ctx, args)?,
-        Commands::Install(args) => install(
-            &ctx,
-            BuildProfile::from_release(args.release),
-            args.scope,
-            &args.target,
-        )?,
-        Commands::Uninstall(args) => uninstall(&ctx, args.scope, &args.target, args.dry_run)?,
-        Commands::Validate(args) => {
-            validate(&ctx, BuildProfile::from_release(args.release), &args.target)?
-        }
-        Commands::Launch(args) => launch(&ctx, BuildProfile::from_release(args.release))?,
-        Commands::Clean => clean(&ctx)?,
-    }
-
-    Ok(())
+fn main() -> wrac_xtask::Result<()> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask must be a direct child of the repository root")
+        .to_path_buf();
+    run(XtaskConfig {
+        plugins_dir: root.join("plugins"),
+        wrapper_dir: root.join("clap_wrapper_builder"),
+        target_namespace: "wrac-plugins".to_string(),
+        root,
+    })
 }

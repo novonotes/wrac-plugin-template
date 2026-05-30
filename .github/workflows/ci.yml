@@ -89,22 +89,22 @@ jobs:
           - os: ubuntu-latest
             validate-targets: clap,vst3
             verify: |
-              test -f "target/wrac/plugins/release/WRAC Gain.clap"
-              test -d "target/wrac/plugins/release/WRAC Gain.vst3"
-              test -x "target/wrac/standalone/release/WRAC Gain Standalone"
+              test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
+              test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
+              test -x "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone"
           - os: windows-latest
             validate-targets: clap,vst3
             verify: |
-              test -f "target/wrac/plugins/release/WRAC Gain.clap"
-              test -d "target/wrac/plugins/release/WRAC Gain.vst3"
-              test -f "target/wrac/standalone/release/WRAC Gain Standalone.exe"
+              test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
+              test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
+              test -f "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone.exe"
           - os: macos-latest
             validate-targets: clap,vst3,au
             verify: |
-              test -d "target/wrac/plugins/release/WRAC Gain.clap"
-              test -d "target/wrac/plugins/release/WRAC Gain.vst3"
-              test -d "target/wrac/plugins/release/WRAC Gain.component"
-              test -d "target/wrac/standalone/release/WRAC Gain Standalone.app"
+              test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
+              test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
+              test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.component"
+              test -d "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone.app"
 
     steps:
       - name: Checkout repository
@@ -127,7 +127,7 @@ jobs:
         with:
           node-version: "22.12.0"
           cache: npm
-          cache-dependency-path: src-gui/package-lock.json
+          cache-dependency-path: plugins/wrac-gain/src-gui/package-lock.json
 
       - name: Show tool versions
         run: |

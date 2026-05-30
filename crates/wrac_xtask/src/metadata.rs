@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -5,6 +6,7 @@ use crate::Result;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PluginMetadata {
+    pub(crate) package_name: String,
     pub(crate) company_name: String,
     pub(crate) auv2_manufacturer_code: String,
     pub(crate) bundle_name: String,
@@ -24,6 +26,8 @@ impl PluginMetadata {
     pub(crate) fn read(manifest_path: &Path) -> Result<Self> {
         let manifest = fs::read_to_string(manifest_path)?;
         let metadata = Self {
+            package_name: read_toml_string(&manifest, "package", "name")
+                .ok_or("missing package.name in plugin Cargo.toml")?,
             company_name: required_toml_string(&manifest, "company_name")?,
             auv2_manufacturer_code: required_toml_string(&manifest, "auv2_manufacturer_code")?,
             bundle_name: required_toml_string(&manifest, "bundle_name")?,
@@ -47,6 +51,10 @@ impl PluginMetadata {
     }
 
     pub(crate) fn primary_plugin(&self) -> &PluginProductMetadata {
+        // WRAC bundles may expose multiple plugin products from one binary, but wrapper
+        // fallbacks and standalone launch still need one stable identity. The first
+        // metadata entry is that primary product; validation and generated Rust metadata
+        // still cover every entry in `plugins`.
         self.plugins
             .first()
             .expect("validated metadata must contain at least one plugin")
@@ -57,9 +65,25 @@ impl PluginMetadata {
             return Err("package.metadata.wrac.plugins must contain at least one plugin".into());
         }
         validate_four_ascii("auv2_manufacturer_code", &self.auv2_manufacturer_code)?;
+        let mut plugin_ids = HashSet::new();
+        let mut auv2_ids = HashSet::new();
         for plugin in &self.plugins {
             validate_four_ascii("auv2_type", &plugin.auv2_type)?;
             validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
+            if !plugin_ids.insert(plugin.plugin_id.as_str()) {
+                return Err(format!(
+                    "duplicate package.metadata.wrac.plugins plugin_id: {}",
+                    plugin.plugin_id
+                )
+                .into());
+            }
+            if !auv2_ids.insert((plugin.auv2_type.as_str(), plugin.auv2_subtype.as_str())) {
+                return Err(format!(
+                    "duplicate package.metadata.wrac.plugins AUv2 type/subtype: {}/{}",
+                    plugin.auv2_type, plugin.auv2_subtype
+                )
+                .into());
+            }
         }
         Ok(())
     }

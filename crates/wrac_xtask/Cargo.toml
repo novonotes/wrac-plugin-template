@@ -1,11 +1,11 @@
 [package]
-name = "xtask"
+name = "wrac_xtask"
 version = "0.1.0"
 edition = "2024"
-description = "Repository-local build tasks for the WRAC plugin template"
+description = "Shared build tasks for WRAC plugin repositories"
 license = "MIT"
 repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
-wrac_xtask = { path = "../crates/wrac_xtask" }
+clap = { version = "4.5.38", features = ["derive"] }

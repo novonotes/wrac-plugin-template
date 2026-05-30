@@ -4,7 +4,6 @@ use std::process::Command;
 
 use crate::Result;
 use crate::cli::{BuildArgs, InstallScope, UninstallScope};
-use crate::constants::CRATE_NAME;
 use crate::context::Context;
 use crate::metadata::PluginMetadata;
 use crate::profile::BuildProfile;
@@ -118,15 +117,16 @@ impl RustPluginBuild {
     }
 
     fn dynamic_library(self, ctx: &Context, profile: BuildProfile) -> PathBuf {
-        self.cargo_target_dir(ctx)
-            .join(profile.cargo_dir())
-            .join(ctx.platform.dynamic_library_name())
+        self.cargo_target_dir(ctx).join(profile.cargo_dir()).join(
+            ctx.platform
+                .dynamic_library_name(&ctx.metadata.package_name),
+        )
     }
 
     fn static_library(self, ctx: &Context, profile: BuildProfile) -> PathBuf {
         self.cargo_target_dir(ctx)
             .join(profile.cargo_dir())
-            .join(ctx.platform.static_library_name())
+            .join(ctx.platform.static_library_name(&ctx.metadata.package_name))
     }
 }
 
@@ -258,7 +258,8 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
             ctx.metadata.bundle_name
         ))
         .arg(format!(
-            "-DCLAP_WRAPPER_BUILDER_TARGET_NAME={CRATE_NAME}_{}",
+            "-DCLAP_WRAPPER_BUILDER_TARGET_NAME={}_{}",
+            ctx.metadata.package_name,
             build.purpose()
         ))
         .arg(format!(
@@ -397,8 +398,9 @@ pub(crate) fn launch(ctx: &Context, profile: BuildProfile) -> Result<()> {
             ""
         };
         return Err(format!(
-            "standalone artifact not found: {}\nRun `cargo xtask build --target=standalone{release}` first.",
-            artifact.display()
+            "standalone artifact not found: {}\nRun `cargo xtask build --plugin={} --target=standalone{release}` first.",
+            artifact.display(),
+            ctx.plugin_slug
         )
         .into());
     }
@@ -637,14 +639,16 @@ fn validate_targets(
             .args(["-9", "AudioComponentRegistrar"])
             .status();
 
-        run(Command::new("/usr/bin/auval")
-            .args([
-                "-v",
-                &ctx.metadata.primary_plugin().auv2_type,
-                &ctx.metadata.primary_plugin().auv2_subtype,
-                &ctx.metadata.auv2_manufacturer_code,
-            ])
-            .current_dir(&ctx.root))?;
+        for plugin in &ctx.metadata.plugins {
+            run(Command::new("/usr/bin/auval")
+                .args([
+                    "-v",
+                    &plugin.auv2_type,
+                    &plugin.auv2_subtype,
+                    &ctx.metadata.auv2_manufacturer_code,
+                ])
+                .current_dir(&ctx.root))?;
+        }
     }
 
     Ok(())

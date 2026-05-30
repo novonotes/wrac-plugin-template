@@ -51,7 +51,7 @@ cargo xtask build --target=clap
 cargo xtask install --target=clap
 
 # Debug builds load the GUI from the Vite dev server, so start it before launching your DAW
-cd src-gui
+cd plugins/wrac-gain/src-gui
 npm install
 npm run dev
 ```
