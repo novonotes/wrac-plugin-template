@@ -94,6 +94,9 @@ impl WxpWebViewSession {
                     .with_devtools(config.devtools)
                     .with_visible(true)
                     .with_bounds(bounds);
+                // `Url` is commonly used for development servers. Probe before navigation so
+                // connection-level failures become deterministic plugin UI instead of depending
+                // on host/WebView-specific blank-page behavior.
                 match probe_frontend_url(url, URL_PROBE_TIMEOUT) {
                     Ok(ProbeOutcome::Reachable) | Ok(ProbeOutcome::Skipped) => {
                         builder.with_url(url)
@@ -213,17 +216,26 @@ enum ProbeOutcome {
 
 #[derive(Debug)]
 struct UrlProbeError {
+    /// The endpoint users should inspect first when the fallback page appears.
     target: String,
+    /// Preserves the low-level failure text because this path is primarily a developer diagnostic.
     error: String,
 }
 
 #[derive(Debug)]
 struct ProbeTarget {
+    /// Host value passed to DNS/TCP APIs. IPv6 must not include display brackets here.
     host: String,
     port: u16,
+    /// Human-readable endpoint shown in logs and fallback HTML.
     display: String,
 }
 
+/// Performs a narrow transport probe for WebView URL frontends.
+///
+/// This intentionally checks only that a TCP connection can be established. It does not issue
+/// an HTTP request, validate TLS, or interpret status codes because the goal is to catch the
+/// blank-screen class of failures where no server is listening or the host cannot be reached.
 fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlProbeError> {
     let parsed = Url::parse(url).map_err(|error| UrlProbeError {
         target: url.to_string(),
@@ -244,6 +256,8 @@ fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlP
             error: format!("address resolution failed: {error}"),
         })?
         .collect::<Vec<_>>();
+    // DNS can return duplicate addresses on some platforms. Deduping keeps the fallback error
+    // concise while still reporting every distinct connection attempt.
     addresses.sort();
     addresses.dedup();
 
@@ -270,6 +284,10 @@ fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlP
     })
 }
 
+/// Converts a URL into the exact TCP endpoint used by the probe and a display-safe equivalent.
+///
+/// Keeping these forms separate prevents a common IPv6 regression: bracketed IPv6 is correct
+/// for humans and URLs, but `ToSocketAddrs` expects the raw address string.
 fn probe_target(url: &Url) -> Result<ProbeTarget, UrlProbeError> {
     let host = url.host().ok_or_else(|| UrlProbeError {
         target: url.as_str().to_string(),
@@ -300,6 +318,11 @@ fn probe_target(url: &Url) -> Result<ProbeTarget, UrlProbeError> {
     })
 }
 
+/// Builds the developer-facing fallback page shown when a URL frontend cannot be reached.
+///
+/// The page includes the raw connection error instead of a friendlier summary because the user
+/// usually needs the OS/socket message to distinguish "server not running", DNS, firewall, and
+/// wrong-port failures.
 fn url_probe_error_html(url: &str, error: &UrlProbeError, timeout: Duration) -> String {
     let timeout_ms = timeout.as_millis();
     let url_html = escape_html(url);
