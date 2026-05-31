@@ -1,7 +1,7 @@
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
 use url::{Host, Url};
@@ -224,9 +224,8 @@ struct UrlProbeError {
 
 #[derive(Debug)]
 struct ProbeTarget {
-    /// Host value passed to DNS/TCP APIs. IPv6 must not include display brackets here.
-    host: String,
-    port: u16,
+    /// Pre-resolved addresses keep GUI creation from blocking on DNS without a global timeout.
+    addresses: Vec<SocketAddr>,
     /// Human-readable endpoint shown in logs and fallback HTML.
     display: String,
 }
@@ -248,31 +247,30 @@ fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlP
         return Ok(ProbeOutcome::Skipped);
     }
 
-    let target = probe_target(&parsed)?;
-    let mut addresses = (target.host.as_str(), target.port)
-        .to_socket_addrs()
-        .map_err(|error| UrlProbeError {
-            target: target.display.clone(),
-            error: format!("address resolution failed: {error}"),
-        })?
-        .collect::<Vec<_>>();
-    // DNS can return duplicate addresses on some platforms. Deduping keeps the fallback error
-    // concise while still reporting every distinct connection attempt.
-    addresses.sort();
-    addresses.dedup();
+    let Some(target) = probe_target(&parsed)? else {
+        return Ok(ProbeOutcome::Skipped);
+    };
 
-    if addresses.is_empty() {
+    if target.addresses.is_empty() {
         return Err(UrlProbeError {
             target: target.display,
-            error: "address resolution returned no socket addresses".to_string(),
+            error: "probe target produced no socket addresses".to_string(),
         });
     }
 
     // Embedded WebViews do not consistently render their own network error pages in plugin
     // hosts. Probe first so a refused or unreachable GUI URL becomes visible instead of blank.
     let mut errors = Vec::new();
-    for address in addresses {
-        match TcpStream::connect_timeout(&address, timeout) {
+    let started_at = Instant::now();
+    for address in target.addresses {
+        let elapsed = started_at.elapsed();
+        if elapsed >= timeout {
+            errors.push(format!("{address}: probe timeout elapsed"));
+            break;
+        }
+
+        let remaining = timeout.saturating_sub(elapsed);
+        match TcpStream::connect_timeout(&address, remaining) {
             Ok(_) => return Ok(ProbeOutcome::Reachable),
             Err(error) => errors.push(format!("{address}: {error}")),
         }
@@ -284,11 +282,12 @@ fn probe_frontend_url(url: &str, timeout: Duration) -> Result<ProbeOutcome, UrlP
     })
 }
 
-/// Converts a URL into the exact TCP endpoint used by the probe and a display-safe equivalent.
+/// Converts a URL into TCP endpoints that are safe to probe synchronously.
 ///
-/// Keeping these forms separate prevents a common IPv6 regression: bracketed IPv6 is correct
-/// for humans and URLs, but `ToSocketAddrs` expects the raw address string.
-fn probe_target(url: &Url) -> Result<ProbeTarget, UrlProbeError> {
+/// Arbitrary domain names are skipped because std DNS resolution has no timeout control and this
+/// code runs while the plugin host is creating the GUI. `localhost` is mapped manually so common
+/// dev-server URLs still get the deterministic fallback page without touching DNS.
+fn probe_target(url: &Url) -> Result<Option<ProbeTarget>, UrlProbeError> {
     let host = url.host().ok_or_else(|| UrlProbeError {
         target: url.as_str().to_string(),
         error: "URL has no host".to_string(),
@@ -298,24 +297,27 @@ fn probe_target(url: &Url) -> Result<ProbeTarget, UrlProbeError> {
         error: format!("URL scheme has no known default port: {}", url.scheme()),
     })?;
 
-    let (host, display_host) = match host {
-        Host::Domain(domain) => (domain.to_string(), domain.to_string()),
-        Host::Ipv4(address) => {
-            let address = address.to_string();
-            (address.clone(), address)
-        }
+    let (addresses, display_host) = match host {
+        Host::Domain(domain) if domain.eq_ignore_ascii_case("localhost") => (
+            vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port),
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port),
+            ],
+            domain.to_string(),
+        ),
+        Host::Domain(_) => return Ok(None),
+        Host::Ipv4(address) => (
+            vec![SocketAddr::new(IpAddr::V4(address), port)],
+            address.to_string(),
+        ),
         Host::Ipv6(address) => {
-            let address = address.to_string();
-            (address.clone(), format!("[{address}]"))
+            let display = format!("[{address}]");
+            (vec![SocketAddr::new(IpAddr::V6(address), port)], display)
         }
     };
 
     let display = format!("{display_host}:{port}");
-    Ok(ProbeTarget {
-        host,
-        port,
-        display,
-    })
+    Ok(Some(ProbeTarget { addresses, display }))
 }
 
 /// Builds the developer-facing fallback page shown when a URL frontend cannot be reached.
@@ -331,7 +333,8 @@ fn url_probe_error_html(url: &str, error: &UrlProbeError, timeout: Duration) -> 
     let url_js = escape_js_string(url);
 
     // Keep this page dependency-free because it is the last-resort UI when the real frontend
-    // cannot be fetched. Retry navigates directly so a server started later can load normally.
+    // cannot be fetched. Retry probes in-page before navigating so a failed retry keeps the
+    // diagnostic visible instead of returning to host/WebView-specific blank-page behavior.
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -407,6 +410,10 @@ fn url_probe_error_html(url: &str, error: &UrlProbeError, timeout: Duration) -> 
       button:hover {{
         background: #383838;
       }}
+      button:disabled {{
+        cursor: default;
+        opacity: 0.65;
+      }}
     </style>
   </head>
   <body>
@@ -427,15 +434,39 @@ fn url_probe_error_html(url: &str, error: &UrlProbeError, timeout: Duration) -> 
         </div>
         <div>
           <dt>Error</dt>
-          <dd><pre>{error_html}</pre></dd>
+          <dd><pre id="error">{error_html}</pre></dd>
         </div>
       </dl>
       <button type="button" id="retry">Retry</button>
     </main>
     <script>
       const url = "{url_js}";
-      document.getElementById("retry").addEventListener("click", () => {{
-        window.location.href = url;
+      const timeoutMs = {timeout_ms};
+      const retry = document.getElementById("retry");
+      const error = document.getElementById("error");
+
+      retry.addEventListener("click", async () => {{
+        retry.disabled = true;
+        retry.textContent = "Retrying...";
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {{
+          await fetch(url, {{
+            method: "GET",
+            mode: "no-cors",
+            cache: "no-store",
+            signal: controller.signal,
+          }});
+          window.location.replace(url);
+        }} catch (err) {{
+          const message = err && err.message ? err.message : String(err);
+          error.textContent = `Retry failed: ${{message}}`;
+          retry.disabled = false;
+          retry.textContent = "Retry";
+        }} finally {{
+          clearTimeout(timer);
+        }}
       }});
     </script>
   </body>
@@ -552,13 +583,40 @@ mod tests {
     #[test]
     fn resolves_http_probe_targets() {
         let url = Url::parse("http://127.0.0.1:5173/").unwrap();
-        assert_eq!(probe_target(&url).unwrap().display, "127.0.0.1:5173");
+        let target = probe_target(&url).unwrap().unwrap();
+        assert_eq!(target.display, "127.0.0.1:5173");
+        assert_eq!(
+            target.addresses,
+            vec![SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                5173
+            )]
+        );
 
-        let url = Url::parse("https://example.com/path").unwrap();
-        assert_eq!(probe_target(&url).unwrap().display, "example.com:443");
+        let url = Url::parse("http://localhost:5173/").unwrap();
+        let target = probe_target(&url).unwrap().unwrap();
+        assert_eq!(target.display, "localhost:5173");
+        assert_eq!(
+            target.addresses,
+            vec![
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5173),
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5173),
+            ]
+        );
 
         let url = Url::parse("http://[::1]:5173/").unwrap();
-        assert_eq!(probe_target(&url).unwrap().display, "[::1]:5173");
+        let target = probe_target(&url).unwrap().unwrap();
+        assert_eq!(target.display, "[::1]:5173");
+        assert_eq!(
+            target.addresses,
+            vec![SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5173)]
+        );
+    }
+
+    #[test]
+    fn skips_domain_probe_targets() {
+        let url = Url::parse("https://example.com/path").unwrap();
+        assert!(probe_target(&url).unwrap().is_none());
     }
 
     #[test]
@@ -576,5 +634,7 @@ mod tests {
         assert!(html.contains("http://127.0.0.1:5173/?x=&quot;&lt;&amp;"));
         assert!(html.contains("failed &lt;because&gt; &quot;quoted&quot; &amp; &#39;single&#39;"));
         assert!(html.contains("const url = \"http://127.0.0.1:5173/?x=\\\"\\x3C\\x26\";"));
+        assert!(html.contains("await fetch(url, {"));
+        assert!(html.contains("window.location.replace(url);"));
     }
 }
