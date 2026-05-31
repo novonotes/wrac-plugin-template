@@ -110,10 +110,10 @@ rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' -
 
 ```sh
 cd /path/to/my_plugin
-cargo xtask build
 cargo xtask install
 ```
 
+`cargo xtask install` は選択したプラグインフォーマットをビルドしてからインストールします。
 `cargo xtask install` は既定で user-local のパスにインストールします。
 system-wide のみをスキャンするホスト向けには `cargo xtask install --scope=system` を使います。
 `--target` オプションで `clap`、`vst3`、`au` をカンマ区切りで指定できます。

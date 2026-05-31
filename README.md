@@ -47,7 +47,6 @@ cd wrac-plugin-template
 
 # Build and install the plugin
 # Change the --target argument if you need AU or VST3
-cargo xtask build --target=clap
 cargo xtask install --target=clap
 
 # Debug builds load the GUI from the Vite dev server, so start it before launching your DAW
@@ -93,16 +92,15 @@ cargo xtask build --release
 cargo xtask build --target=vst3
 # Release build for AU and Standalone
 cargo xtask build --target=au,standalone --release
-# Validate built plugins
+# Build and validate plugins
 cargo xtask validate
-# Install built plugins
+# Build and install plugins
 cargo xtask install
 ```
 
-Launch the standalone app after building it:
+Build and launch the standalone app:
 
 ```bash
-cargo xtask build --target=standalone
 cargo xtask launch
 ```
 

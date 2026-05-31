@@ -110,10 +110,10 @@ Run the following from the repository root.
 
 ```sh
 cd /path/to/my_plugin
-cargo xtask build
 cargo xtask install
 ```
 
+`cargo xtask install` builds the selected plugin formats before installing them.
 `cargo xtask install` installs to user-local paths by default.
 Use `cargo xtask install --scope=system` for hosts that only scan system-wide plugin folders.
 The `--target` option accepts `clap`, `vst3`, and `au` as comma-separated values.

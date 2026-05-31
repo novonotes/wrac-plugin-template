@@ -44,7 +44,6 @@ cd wrac-plugin-template
 
 # プラグインをビルドしてインストール
 # AU や VST3 が必要な場合は、target 引数を変更してください。
-cargo xtask build --target=clap
 cargo xtask install --target=clap
 
 # デバッグビルドは Vite dev server から GUI を読み込むため、DAW を起動する前に立ち上げてください
@@ -90,16 +89,15 @@ cargo xtask build --release
 cargo xtask build --target=vst3
 # AU と スタンドアローンをリリースビルド
 cargo xtask build --target=au,standalone --release
-# ビルド済みプラグインを検証
+# プラグインをビルドして検証
 cargo xtask validate
-# ビルド済みプラグインをインストール
+# プラグインをビルドしてインストール
 cargo xtask install
 ```
 
-Standalone app はビルド後に起動できます:
+Standalone app をビルドして起動できます:
 
 ```bash
-cargo xtask build --target=standalone
 cargo xtask launch
 ```
 
