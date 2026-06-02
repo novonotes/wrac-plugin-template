@@ -1386,7 +1386,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=a7494eb35d661df355217be5ed75ab832cfbcd44#a7494eb35d661df355217be5ed75ab832cfbcd44"
+source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
 dependencies = [
  "core-foundation",
  "futures",
@@ -1937,7 +1937,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 [[package]]
 name = "run_loop_timer"
 version = "0.1.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=a7494eb35d661df355217be5ed75ab832cfbcd44#a7494eb35d661df355217be5ed75ab832cfbcd44"
+source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
 dependencies = [
  "novonotes_run_loop",
 ]
@@ -2332,15 +2332,6 @@ checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
  "zerovec",
-]
-
-[[package]]
-name = "tokio"
-version = "1.52.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
-dependencies = [
- "pin-project-lite",
 ]
 
 [[package]]
@@ -2976,7 +2967,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.55.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=a7494eb35d661df355217be5ed75ab832cfbcd44#a7494eb35d661df355217be5ed75ab832cfbcd44"
+source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3019,7 +3010,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=a7494eb35d661df355217be5ed75ab832cfbcd44#a7494eb35d661df355217be5ed75ab832cfbcd44"
+source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
 dependencies = [
  "async-trait",
  "directories",
@@ -3032,7 +3023,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
  "wry",
  "zip 7.2.0",
 ]
