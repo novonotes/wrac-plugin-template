@@ -127,6 +127,11 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         return Err(missing_metadata("plugins"));
     }
     for plugin in &metadata.plugins {
+        validate_required("package.metadata.wrac.plugins.plugin_id", &plugin.plugin_id)?;
+        validate_required(
+            "package.metadata.wrac.plugins.plugin_name",
+            &plugin.plugin_name,
+        )?;
         validate_four_ascii("auv2_type", &plugin.auv2_type)?;
         validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
     }
@@ -145,6 +150,17 @@ fn missing_wrac_metadata() -> io::Error {
         io::ErrorKind::InvalidData,
         "missing package.metadata.wrac in src-plugin/Cargo.toml",
     )
+}
+
+fn validate_required(key: &str, value: &str) -> io::Result<()> {
+    if value.is_empty() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{key} must not be empty"),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
