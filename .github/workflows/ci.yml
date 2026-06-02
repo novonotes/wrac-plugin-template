@@ -41,6 +41,8 @@ jobs:
   rust-test:
     name: Rust lint and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
 
     # Keep clippy and tests in one per-OS job so both checks share the same
     # checkout and compiled dependency graph. Splitting them would make the CI
@@ -69,6 +71,9 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Cargo fetch
+        run: bash .github/scripts/retry.sh cargo fetch --locked
+
       - name: Run Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
@@ -78,6 +83,8 @@ jobs:
   plugin-build:
     name: Plugin artifact validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
     needs:
       - rust-format
       - rust-test
@@ -139,6 +146,9 @@ jobs:
             xcodebuild -version
             /usr/bin/auval -h || true
           fi
+
+      - name: Cargo fetch
+        run: bash .github/scripts/retry.sh cargo fetch --locked
 
       - name: Build all supported artifacts
         run: cargo xtask build --release
