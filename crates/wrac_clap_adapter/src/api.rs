@@ -490,8 +490,6 @@ pub struct ProcessContext<'a> {
     pub audio: AudioProcessBuffer<'a>,
     pub events: ProcessEvents<'a>,
     pub transport: Option<TransportEvent>,
-    /// Realtime-safe logger for diagnostics emitted from `process()`.
-    pub rt_log: wrac_log::RtLogWriter,
 }
 
 #[derive(Debug, Clone, Copy)]

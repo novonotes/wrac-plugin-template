@@ -1,8 +1,8 @@
 //! Logging utilities for WRAC plugins.
 //!
 //! Regular logs are written through the `log` facade. Realtime audio threads must use
-//! the `rt*` macros with an [`RtLogWriter`], which writes into a fixed-size buffer
-//! drained later from a non-realtime worker.
+//! the `rt*` macros, which write into a fixed-size global buffer drained later from a
+//! non-realtime worker.
 
 mod file_logger;
 mod rt;
@@ -11,7 +11,9 @@ pub use file_logger::{
     RecentLogFilesOptions, collect_recent_log_files, current_log_dir, current_log_file, init_impl,
     init_test,
 };
-pub use rt::{RtDrainConfig, RtLog, RtLogWriter, drain_rt_logs_once, init_rt_log_drain_once};
+#[doc(hidden)]
+pub use rt::write_rt_log as __write_rt_log;
+pub use rt::{RtDrainConfig, drain_rt_logs_once, init_rt_log_drain_once};
 
 /// Initializes logging for a WRAC plugin.
 ///
@@ -40,65 +42,50 @@ macro_rules! init {
 
 #[macro_export]
 macro_rules! rttrace {
-    ($writer:expr, $block_seq:expr, $sample_time:expr, $($arg:tt)+) => {{
-        (&$writer).write_fmt(
-            log::Level::Trace,
-            module_path!(),
-            $block_seq,
-            $sample_time,
-            format_args!($($arg)+),
-        );
+    (target: $target:expr, $($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Trace, $target, format_args!($($arg)+));
+    }};
+    ($($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Trace, module_path!(), format_args!($($arg)+));
     }};
 }
 
 #[macro_export]
 macro_rules! rtdebug {
-    ($writer:expr, $block_seq:expr, $sample_time:expr, $($arg:tt)+) => {{
-        (&$writer).write_fmt(
-            log::Level::Debug,
-            module_path!(),
-            $block_seq,
-            $sample_time,
-            format_args!($($arg)+),
-        );
+    (target: $target:expr, $($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Debug, $target, format_args!($($arg)+));
+    }};
+    ($($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Debug, module_path!(), format_args!($($arg)+));
     }};
 }
 
 #[macro_export]
 macro_rules! rtinfo {
-    ($writer:expr, $block_seq:expr, $sample_time:expr, $($arg:tt)+) => {{
-        (&$writer).write_fmt(
-            log::Level::Info,
-            module_path!(),
-            $block_seq,
-            $sample_time,
-            format_args!($($arg)+),
-        );
+    (target: $target:expr, $($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Info, $target, format_args!($($arg)+));
+    }};
+    ($($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Info, module_path!(), format_args!($($arg)+));
     }};
 }
 
 #[macro_export]
 macro_rules! rtwarn {
-    ($writer:expr, $block_seq:expr, $sample_time:expr, $($arg:tt)+) => {{
-        (&$writer).write_fmt(
-            log::Level::Warn,
-            module_path!(),
-            $block_seq,
-            $sample_time,
-            format_args!($($arg)+),
-        );
+    (target: $target:expr, $($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Warn, $target, format_args!($($arg)+));
+    }};
+    ($($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Warn, module_path!(), format_args!($($arg)+));
     }};
 }
 
 #[macro_export]
 macro_rules! rterror {
-    ($writer:expr, $block_seq:expr, $sample_time:expr, $($arg:tt)+) => {{
-        (&$writer).write_fmt(
-            log::Level::Error,
-            module_path!(),
-            $block_seq,
-            $sample_time,
-            format_args!($($arg)+),
-        );
+    (target: $target:expr, $($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Error, $target, format_args!($($arg)+));
+    }};
+    ($($arg:tt)+) => {{
+        $crate::__write_rt_log(log::Level::Error, module_path!(), format_args!($($arg)+));
     }};
 }

@@ -49,8 +49,9 @@ impl ParameterEditQueue {
         // momentarily busy, defer to the next flush/process. request_flush to the host
         // was already issued when the edit was enqueued.
         let Some(mut pending) = self.pending.try_lock() else {
-            events
-                .log_debug("parameter_edits.drain: pending queue try_lock failed; retrying later");
+            wrac_log::rtdebug!(
+                "parameter_edits.drain: pending queue try_lock failed; retrying later"
+            );
             return;
         };
 

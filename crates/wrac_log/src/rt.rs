@@ -1,8 +1,8 @@
 use log::Level;
 use std::array;
 use std::fmt::{self, Write as _};
-use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -10,7 +10,7 @@ const RT_LOG_CAPACITY: usize = 4096;
 const RT_MESSAGE_CAPACITY: usize = 256;
 const RT_TARGET_CAPACITY: usize = 96;
 
-static RT_REGISTRY: OnceLock<RtRegistry> = OnceLock::new();
+static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
 static RT_DRAIN_WORKER: OnceLock<()> = OnceLock::new();
 
 /// Configuration for the background realtime log drain worker.
@@ -27,7 +27,7 @@ impl Default for RtDrainConfig {
 }
 
 impl RtDrainConfig {
-    /// Sets how often the background worker drains registered realtime logs.
+    /// Sets how often the background worker drains realtime logs.
     pub fn with_interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
@@ -53,112 +53,31 @@ pub fn init_rt_log_drain_once(config: RtDrainConfig) {
     });
 }
 
-/// Drains all currently registered realtime logs once on the current thread.
+/// Drains the global realtime log once on the current thread.
 pub fn drain_rt_logs_once() {
-    rt_registry().drain_all();
+    rt_log().drain_to_log();
 }
 
 pub(crate) fn start_drain_if_enabled() {
+    // Initialize from the non-realtime setup path so the first RT log write only
+    // touches atomics and the fixed buffer.
+    let _ = rt_log();
+
     if cfg!(debug_assertions) || std::env::var_os("WRAC_RT_LOG").is_some() {
         init_rt_log_drain_once(RtDrainConfig::default());
     }
 }
 
-/// A fixed-size realtime-safe log buffer.
-///
-/// Create one per realtime component and move cloned [`RtLogWriter`] values into the
-/// realtime path. Dropping `RtLog` unregisters it from the global drain registry after
-/// one final drain.
-pub struct RtLog {
-    inner: Arc<RtLogInner>,
+#[doc(hidden)]
+pub fn write_rt_log(level: Level, target: &'static str, args: fmt::Arguments<'_>) {
+    rt_log().write_fmt(level, target, args);
 }
 
-impl RtLog {
-    /// Creates and registers a realtime log with the global drain registry.
-    pub fn new_registered(name: &'static str) -> Self {
-        let inner = Arc::new(RtLogInner::new(name));
-        rt_registry().register(&inner);
-        Self { inner }
-    }
-
-    /// Returns a cheap cloneable writer for use from realtime code.
-    pub fn writer(&self) -> RtLogWriter {
-        RtLogWriter {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl Drop for RtLog {
-    fn drop(&mut self) {
-        self.inner.drain_to_log();
-        rt_registry().unregister(&self.inner);
-    }
-}
-
-#[derive(Clone)]
-/// Cloneable handle used by the `rt*` macros to write realtime log records.
-pub struct RtLogWriter {
-    inner: Arc<RtLogInner>,
-}
-
-impl RtLogWriter {
-    #[doc(hidden)]
-    pub fn write_fmt(
-        &self,
-        level: Level,
-        target: &'static str,
-        block_seq: u64,
-        sample_time: u32,
-        args: fmt::Arguments<'_>,
-    ) {
-        self.inner
-            .write_fmt(level, target, block_seq, sample_time, args);
-    }
-}
-
-struct RtRegistry {
-    logs: Mutex<Vec<Weak<RtLogInner>>>,
-}
-
-impl RtRegistry {
-    fn register(&self, log: &Arc<RtLogInner>) {
-        if let Ok(mut logs) = self.logs.lock() {
-            logs.push(Arc::downgrade(log));
-        }
-    }
-
-    fn unregister(&self, log: &Arc<RtLogInner>) {
-        if let Ok(mut logs) = self.logs.lock() {
-            logs.retain(|registered| {
-                registered
-                    .upgrade()
-                    .is_some_and(|inner| !Arc::ptr_eq(&inner, log))
-            });
-        }
-    }
-
-    fn drain_all(&self) {
-        if let Ok(mut logs) = self.logs.lock() {
-            logs.retain(|registered| {
-                let Some(log) = registered.upgrade() else {
-                    return false;
-                };
-                log.drain_to_log();
-                true
-            });
-        }
-    }
-}
-
-fn rt_registry() -> &'static RtRegistry {
-    RT_REGISTRY.get_or_init(|| RtRegistry {
-        logs: Mutex::new(Vec::new()),
-    })
+fn rt_log() -> &'static RtLogInner {
+    RT_LOG.get_or_init(RtLogInner::new)
 }
 
 struct RtLogInner {
-    name: &'static str,
     next_sequence: AtomicU64,
     drain_sequence: AtomicU64,
     dropped: AtomicU64,
@@ -166,9 +85,8 @@ struct RtLogInner {
 }
 
 impl RtLogInner {
-    fn new(name: &'static str) -> Self {
+    fn new() -> Self {
         Self {
-            name,
             next_sequence: AtomicU64::new(0),
             drain_sequence: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
@@ -177,28 +95,14 @@ impl RtLogInner {
         }
     }
 
-    fn write_fmt(
-        &self,
-        level: Level,
-        target: &'static str,
-        block_seq: u64,
-        sample_time: u32,
-        args: fmt::Arguments<'_>,
-    ) {
+    fn write_fmt(&self, level: Level, target: &'static str, args: fmt::Arguments<'_>) {
         let sequence = self.next_sequence.fetch_add(1, Ordering::Relaxed);
         let drain_sequence = self.drain_sequence.load(Ordering::Acquire);
         if sequence.saturating_sub(drain_sequence) >= RT_LOG_CAPACITY as u64 {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
 
-        self.slots[sequence as usize % RT_LOG_CAPACITY].write(
-            sequence,
-            level,
-            target,
-            block_seq,
-            sample_time,
-            args,
-        );
+        self.slots[sequence as usize % RT_LOG_CAPACITY].write(sequence, level, target, args);
     }
 
     fn drain_to_log(&self) {
@@ -214,8 +118,7 @@ impl RtLogInner {
         if dropped > 0 || start > previous_drain_sequence {
             log::warn!(
                 target: "wrac_log::rt",
-                "[rt] name={} dropped={} skipped={}",
-                self.name,
+                "[rt] dropped={} skipped={}",
                 dropped,
                 start.saturating_sub(previous_drain_sequence),
             );
@@ -227,11 +130,8 @@ impl RtLogInner {
                 log::log!(
                     target: record.target.as_str(),
                     record.level,
-                    "[rt] name={} seq={} block={} sample={} {}",
-                    self.name,
+                    "[rt] seq={} {}",
                     record.sequence,
-                    record.block_seq,
-                    record.sample_time,
                     record.message.as_str(),
                 );
                 drained_until = sequence + 1;
@@ -248,8 +148,6 @@ impl RtLogInner {
 struct RtLogSlot {
     sequence: AtomicU64,
     level: AtomicU8,
-    block_seq: AtomicU64,
-    sample_time: AtomicU32,
     target_len: AtomicUsize,
     target: [AtomicU8; RT_TARGET_CAPACITY],
     message_len: AtomicUsize,
@@ -261,8 +159,6 @@ impl RtLogSlot {
         Self {
             sequence: AtomicU64::new(0),
             level: AtomicU8::new(level_to_u8(Level::Debug)),
-            block_seq: AtomicU64::new(0),
-            sample_time: AtomicU32::new(0),
             target_len: AtomicUsize::new(0),
             target: array::from_fn(|_| AtomicU8::new(0)),
             message_len: AtomicUsize::new(0),
@@ -270,19 +166,9 @@ impl RtLogSlot {
         }
     }
 
-    fn write(
-        &self,
-        sequence: u64,
-        level: Level,
-        target: &str,
-        block_seq: u64,
-        sample_time: u32,
-        args: fmt::Arguments<'_>,
-    ) {
+    fn write(&self, sequence: u64, level: Level, target: &str, args: fmt::Arguments<'_>) {
         self.sequence.store(0, Ordering::Release);
         self.level.store(level_to_u8(level), Ordering::Relaxed);
-        self.block_seq.store(block_seq, Ordering::Relaxed);
-        self.sample_time.store(sample_time, Ordering::Relaxed);
         write_atomic_bytes(&self.target, &self.target_len, target.as_bytes());
 
         let mut message = FixedMessage::new();
@@ -299,8 +185,6 @@ impl RtLogSlot {
         let record = RtLogRecord {
             sequence,
             level: u8_to_level(self.level.load(Ordering::Relaxed)),
-            block_seq: self.block_seq.load(Ordering::Relaxed),
-            sample_time: self.sample_time.load(Ordering::Relaxed),
             target: read_atomic_string::<RT_TARGET_CAPACITY>(&self.target, &self.target_len),
             message: read_atomic_string::<RT_MESSAGE_CAPACITY>(&self.message, &self.message_len),
         };
@@ -316,8 +200,6 @@ impl RtLogSlot {
 struct RtLogRecord {
     sequence: u64,
     level: Level,
-    block_seq: u64,
-    sample_time: u32,
     target: FixedString<RT_TARGET_CAPACITY>,
     message: FixedString<RT_MESSAGE_CAPACITY>,
 }
@@ -415,13 +297,13 @@ mod tests {
 
     #[test]
     fn drain_stops_before_unpublished_slot() {
-        let log = RtLogInner::new("test");
+        let log = RtLogInner::new();
         log.next_sequence.store(1, Ordering::Release);
 
         log.drain_to_log();
         assert_eq!(log.drain_sequence.load(Ordering::Acquire), 0);
 
-        log.slots[0].write(0, Level::Debug, "test", 10, 20, format_args!("published"));
+        log.slots[0].write(0, Level::Debug, "test", format_args!("published"));
         log.drain_to_log();
         assert_eq!(log.drain_sequence.load(Ordering::Acquire), 1);
     }

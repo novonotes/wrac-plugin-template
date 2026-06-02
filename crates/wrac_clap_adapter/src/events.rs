@@ -1,4 +1,3 @@
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ptr;
@@ -43,23 +42,11 @@ impl<'a> ProcessEvents<'a> {
             output: unsafe { OutputEvents::from_raw(output) },
         }
     }
-
-    pub(crate) unsafe fn from_raw_realtime(
-        input: *const clap_input_events,
-        output: *const clap_output_events,
-        rt_log: wrac_log::RtLogWriter,
-    ) -> Self {
-        Self {
-            input: unsafe { InputEvents::from_raw_realtime(input, rt_log.clone()) },
-            output: unsafe { OutputEvents::from_raw_realtime(output, rt_log) },
-        }
-    }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct InputEvents<'a> {
     raw: *const clap_input_events,
-    rt_log: Option<wrac_log::RtLogWriter>,
     _marker: PhantomData<&'a clap_input_events>,
 }
 
@@ -67,29 +54,17 @@ impl<'a> InputEvents<'a> {
     pub(crate) unsafe fn from_raw(raw: *const clap_input_events) -> Self {
         Self {
             raw,
-            rt_log: None,
-            _marker: PhantomData,
-        }
-    }
-
-    pub(crate) unsafe fn from_raw_realtime(
-        raw: *const clap_input_events,
-        rt_log: wrac_log::RtLogWriter,
-    ) -> Self {
-        Self {
-            raw,
-            rt_log: Some(rt_log),
             _marker: PhantomData,
         }
     }
 
     pub fn len(&self) -> u32 {
         if self.raw.is_null() {
-            self.log_debug("input_events.len: null input event list");
+            wrac_log::rtdebug!("input_events.len: null input event list");
             return 0;
         }
         let Some(size) = (unsafe { (*self.raw).size }) else {
-            self.log_warn("input_events.len: event list has no size callback");
+            wrac_log::rtwarn!("input_events.len: event list has no size callback");
             return 0;
         };
         unsafe { size(self.raw) }
@@ -101,20 +76,16 @@ impl<'a> InputEvents<'a> {
 
     pub fn get(&self, index: u32) -> Option<InputEvent> {
         if index >= self.len() || self.raw.is_null() {
-            self.log_warn(format_args!("input_events.get: invalid index={index}"));
+            wrac_log::rtwarn!("input_events.get: invalid index={index}");
             return None;
         }
         let Some(get) = (unsafe { (*self.raw).get }) else {
-            self.log_warn(format_args!(
-                "input_events.get: event list has no get callback index={index}"
-            ));
+            wrac_log::rtwarn!("input_events.get: event list has no get callback index={index}");
             return None;
         };
         let header = unsafe { get(self.raw, index) };
         if header.is_null() {
-            self.log_warn(format_args!(
-                "input_events.get: host returned null event header index={index}"
-            ));
+            wrac_log::rtwarn!("input_events.get: host returned null event header index={index}");
             return None;
         }
         unsafe { InputEvent::from_header(&*header) }
@@ -122,7 +93,7 @@ impl<'a> InputEvents<'a> {
 
     pub fn iter(&self) -> InputEventsIter<'a> {
         InputEventsIter {
-            events: self.clone(),
+            events: *self,
             index: 0,
             len: self.len(),
         }
@@ -133,22 +104,6 @@ impl<'a> InputEvents<'a> {
             InputEvent::ParamValue(event) => Some(event),
             _ => None,
         })
-    }
-
-    fn log_debug(&self, message: impl Display) {
-        if let Some(rt_log) = &self.rt_log {
-            wrac_log::rtdebug!(rt_log, 0, 0, "{message}");
-        } else {
-            log::debug!("{message}");
-        }
-    }
-
-    fn log_warn(&self, message: impl Display) {
-        if let Some(rt_log) = &self.rt_log {
-            wrac_log::rtwarn!(rt_log, 0, 0, "{message}");
-        } else {
-            log::warn!("{message}");
-        }
     }
 }
 
@@ -180,7 +135,6 @@ impl Iterator for InputEventsIter<'_> {
 
 pub struct OutputEvents<'a> {
     raw: *const clap_output_events,
-    rt_log: Option<wrac_log::RtLogWriter>,
     _marker: PhantomData<&'a mut clap_output_events>,
 }
 
@@ -188,25 +142,13 @@ impl<'a> OutputEvents<'a> {
     pub(crate) unsafe fn from_raw(raw: *const clap_output_events) -> Self {
         Self {
             raw,
-            rt_log: None,
-            _marker: PhantomData,
-        }
-    }
-
-    pub(crate) unsafe fn from_raw_realtime(
-        raw: *const clap_output_events,
-        rt_log: wrac_log::RtLogWriter,
-    ) -> Self {
-        Self {
-            raw,
-            rt_log: Some(rt_log),
             _marker: PhantomData,
         }
     }
 
     pub fn try_push(&mut self, event: OutputEvent) -> bool {
         let Some(try_push) = self.try_push_raw() else {
-            self.log_warn("output_events.try_push: output event queue is unavailable");
+            wrac_log::rtwarn!("output_events.try_push: output event queue is unavailable");
             return false;
         };
 
@@ -261,25 +203,9 @@ impl<'a> OutputEvents<'a> {
             }
         };
         if !pushed {
-            self.log_warn("output_events.try_push: host rejected event");
+            wrac_log::rtwarn!("output_events.try_push: host rejected event");
         }
         pushed
-    }
-
-    pub(crate) fn log_debug(&self, message: impl Display) {
-        if let Some(rt_log) = &self.rt_log {
-            wrac_log::rtdebug!(rt_log, 0, 0, "{message}");
-        } else {
-            log::debug!("{message}");
-        }
-    }
-
-    fn log_warn(&self, message: impl Display) {
-        if let Some(rt_log) = &self.rt_log {
-            wrac_log::rtwarn!(rt_log, 0, 0, "{message}");
-        } else {
-            log::warn!("{message}");
-        }
     }
 
     fn try_push_raw(
@@ -287,12 +213,12 @@ impl<'a> OutputEvents<'a> {
     ) -> Option<unsafe extern "C" fn(*const clap_output_events, *const clap_event_header) -> bool>
     {
         if self.raw.is_null() {
-            self.log_debug("output_events.try_push_raw: null output event list");
+            wrac_log::rtdebug!("output_events.try_push_raw: null output event list");
             return None;
         }
         let try_push = unsafe { (*self.raw).try_push };
         if try_push.is_none() {
-            self.log_warn("output_events.try_push_raw: event list has no try_push callback");
+            wrac_log::rtwarn!("output_events.try_push_raw: event list has no try_push callback");
         }
         try_push
     }
