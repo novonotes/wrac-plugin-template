@@ -13,7 +13,7 @@ mod util;
 
 use cli::{Cli, Commands};
 use commands::{build, clean, install, launch, uninstall, validate};
-use context::{Context, available_plugins};
+use context::{Context, available_packages};
 use profile::BuildProfile;
 use targets::{Target, resolve_plugin_targets, resolve_validate_targets};
 
@@ -22,7 +22,6 @@ pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 #[derive(Debug, Clone)]
 pub struct XtaskConfig {
     pub root: PathBuf,
-    pub plugins_dir: PathBuf,
     pub wrapper_dir: PathBuf,
     pub target_namespace: String,
 }
@@ -35,14 +34,14 @@ pub fn run(config: XtaskConfig) -> Result<()> {
             // Keep build/install logic scoped to one plugin package at a time. A package may
             // export multiple plugin products; the shared Context is still the correct unit for
             // metadata, GUI assets, wrapper staging, and install paths.
-            for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &plugin)?;
+            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
+                let ctx = Context::new(&config, &package)?;
                 build(&ctx, args_for_build(&args))?;
             }
         }
         Commands::Install(args) => {
-            for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &plugin)?;
+            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
+                let ctx = Context::new(&config, &package)?;
                 build(&ctx, args_for_install_build(&ctx, &args)?)?;
                 install(
                     &ctx,
@@ -53,27 +52,27 @@ pub fn run(config: XtaskConfig) -> Result<()> {
             }
         }
         Commands::Uninstall(args) => {
-            for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &plugin)?;
+            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
+                let ctx = Context::new(&config, &package)?;
                 uninstall(&ctx, args.scope, &args.target, args.dry_run)?;
             }
         }
         Commands::Validate(args) => {
-            for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &plugin)?;
+            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
+                let ctx = Context::new(&config, &package)?;
                 build(&ctx, args_for_validate_build(&ctx, &args)?)?;
                 validate(&ctx, BuildProfile::from_release(args.release), &args.target)?;
             }
         }
         Commands::Launch(args) => {
-            let plugin = selected_plugin(&config, args.plugin.as_deref())?;
-            let ctx = Context::new(&config, &plugin)?;
+            let package = selected_package(&config, args.package.as_deref())?;
+            let ctx = Context::new(&config, &package)?;
             build(&ctx, args_for_launch_build(&args))?;
             launch(&ctx, BuildProfile::from_release(args.release))?;
         }
         Commands::Clean(args) => {
-            for plugin in selected_plugins(&config, args.plugin.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &plugin)?;
+            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
+                let ctx = Context::new(&config, &package)?;
                 clean(&ctx)?;
             }
         }
@@ -82,35 +81,45 @@ pub fn run(config: XtaskConfig) -> Result<()> {
     Ok(())
 }
 
-fn selected_plugins(config: &XtaskConfig, plugin: Option<&str>, all: bool) -> Result<Vec<String>> {
+fn selected_packages(
+    config: &XtaskConfig,
+    package: Option<&str>,
+    all: bool,
+) -> Result<Vec<String>> {
     if all {
-        if plugin.is_some() {
-            return Err("--plugin and --all cannot be used together".into());
+        if package.is_some() {
+            return Err("--package and --all cannot be used together".into());
         }
-        return available_plugins(config);
+        let packages = available_packages(config)?
+            .into_iter()
+            .map(|package| package.package_name)
+            .collect::<Vec<_>>();
+        if packages.is_empty() {
+            return Err("no WRAC plugin packages found in workspace members".into());
+        }
+        return Ok(packages);
     }
-    if let Some(plugin) = plugin {
-        return Ok(vec![plugin.to_string()]);
+    if let Some(package) = package {
+        return Ok(vec![package.to_string()]);
     }
-    Ok(vec![selected_plugin(config, None)?])
+    Ok(vec![selected_package(config, None)?])
 }
 
-fn selected_plugin(config: &XtaskConfig, plugin: Option<&str>) -> Result<String> {
-    if let Some(plugin) = plugin {
-        return Ok(plugin.to_string());
+fn selected_package(config: &XtaskConfig, package: Option<&str>) -> Result<String> {
+    if let Some(package) = package {
+        return Ok(package.to_string());
     }
-    let plugins = available_plugins(config)?;
-    match plugins.as_slice() {
-        [] => Err(format!(
-            "no plugin packages found under {}",
-            config.plugins_dir.display()
-        )
-        .into()),
-        [plugin] => Ok(plugin.clone()),
+    let packages = available_packages(config)?;
+    match packages.as_slice() {
+        [] => Err("no WRAC plugin packages found in workspace members".into()),
+        [package] => Ok(package.package_name.clone()),
         _ => Err(format!(
-            "multiple plugin packages found under {}: {}. Use --plugin <PLUGIN> or --all.",
-            config.plugins_dir.display(),
-            plugins.join(", ")
+            "multiple WRAC plugin packages found: {}. Use -p <PACKAGE> or --all.",
+            packages
+                .iter()
+                .map(|package| package.package_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )
         .into()),
     }
@@ -120,7 +129,7 @@ fn args_for_build(args: &cli::BuildArgs) -> cli::BuildArgs {
     // Build is the only command where the command object is passed onward. Strip the
     // repository-level selection flags before handing it to template-derived build code.
     cli::BuildArgs {
-        plugin: None,
+        package: None,
         all: false,
         release: args.release,
         clean: args.clean,
@@ -150,7 +159,7 @@ fn args_for_launch_build(args: &cli::LaunchArgs) -> cli::BuildArgs {
 
 fn args_for_implicit_build(release: bool, target: Vec<Target>) -> cli::BuildArgs {
     cli::BuildArgs {
-        plugin: None,
+        package: None,
         all: false,
         release,
         clean: false,

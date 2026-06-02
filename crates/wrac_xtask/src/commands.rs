@@ -166,7 +166,6 @@ fn build_rust_plugin(ctx: &Context, profile: BuildProfile, build: RustPluginBuil
 fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
     println!("Packaging CLAP...");
     let bundle = ctx.clap_bundle(profile);
-    let version = plugin_version(ctx)?;
     remove_if_exists(&bundle)?;
     fs::create_dir_all(ctx.plugins_dir(profile))?;
 
@@ -180,7 +179,7 @@ fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
             fs::create_dir_all(&macos)?;
             fs::write(
                 contents.join("Info.plist"),
-                macos_clap_info_plist(&ctx.metadata, &version),
+                macos_clap_info_plist(&ctx.metadata),
             )?;
             fs::write(contents.join("PkgInfo"), "BNDL????")?;
             fs::copy(
@@ -231,7 +230,6 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
     let rust_build = build.rust_build();
     let static_library = rust_build.static_library(ctx, profile);
     ensure_exists(&static_library, "static plugin library")?;
-    let version = plugin_version(ctx)?;
 
     let build_dir = ctx.cmake_dir(build.purpose(), profile);
     let stage_dir = match build {
@@ -266,7 +264,10 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
             "-DCLAP_WRAPPER_BUILDER_STAGE_DIR={}",
             stage_dir.display()
         ))
-        .arg(format!("-DCLAP_WRAPPER_BUILDER_BUNDLE_VERSION={version}"))
+        .arg(format!(
+            "-DCLAP_WRAPPER_BUILDER_BUNDLE_VERSION={}",
+            ctx.metadata.version
+        ))
         .arg(format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()))
         .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
         .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF")
@@ -398,9 +399,9 @@ pub(crate) fn launch(ctx: &Context, profile: BuildProfile) -> Result<()> {
             ""
         };
         return Err(format!(
-            "standalone artifact not found: {}\nRun `cargo xtask build --plugin={} --target=standalone{release}` first.",
+            "standalone artifact not found: {}\nRun `cargo xtask build -p {} --target=standalone{release}` first.",
             artifact.display(),
-            ctx.plugin_slug
+            ctx.package_name
         )
         .into());
     }
@@ -846,9 +847,10 @@ fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
     }
 }
 
-fn macos_clap_info_plist(metadata: &PluginMetadata, version: &str) -> String {
+fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     let plugin_name = &metadata.bundle_name;
     let plugin_id = &metadata.primary_plugin().plugin_id;
+    let version = &metadata.version;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -880,31 +882,6 @@ fn macos_clap_info_plist(metadata: &PluginMetadata, version: &str) -> String {
 </plist>
 "#
     )
-}
-
-fn plugin_version(ctx: &Context) -> Result<String> {
-    let manifest = fs::read_to_string(ctx.plugin_manifest())?;
-    let mut in_package_section = false;
-    for line in manifest.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            in_package_section = line == "[package]";
-            continue;
-        }
-        if !in_package_section {
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("version") {
-            let Some((_, value)) = value.split_once('=') else {
-                continue;
-            };
-            let version = value.trim().trim_matches('"');
-            if !version.is_empty() {
-                return Ok(version.to_string());
-            }
-        }
-    }
-    Err("failed to read plugin version from src-plugin/Cargo.toml".into())
 }
 
 fn codesign(path: &Path) -> Result<()> {
