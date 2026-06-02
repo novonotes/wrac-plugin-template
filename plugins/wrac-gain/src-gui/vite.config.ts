@@ -1,12 +1,30 @@
 import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { parse } from "smol-toml";
 
 type PluginMetadata = {
   pluginId: string;
   pluginName: string;
   companyName: string;
   version: string;
+};
+
+type CargoManifest = {
+  package?: {
+    version?: unknown;
+    metadata?: {
+      wrac?: {
+        company_name?: unknown;
+        plugins?: unknown;
+      };
+    };
+  };
+};
+
+type WracPluginMetadata = {
+  plugin_id?: unknown;
+  plugin_name?: unknown;
 };
 
 function readCargoMetadata(): PluginMetadata {
@@ -18,60 +36,33 @@ function readCargoMetadata(): PluginMetadata {
     resolve(__dirname, "../src-plugin/Cargo.toml"),
     "utf8",
   );
-  const versionMatch = cargoToml.match(/^\s*version\s*=\s*"([^"]+)"\s*$/m);
-  if (!versionMatch) {
-    throw new Error(
-      "Failed to read version from src-plugin/Cargo.toml",
-    );
-  }
+  const manifest = parse(cargoToml) as unknown as CargoManifest;
+  const wrac = manifest.package?.metadata?.wrac;
+  const firstPlugin = Array.isArray(wrac?.plugins)
+    ? (wrac.plugins[0] as WracPluginMetadata | undefined)
+    : undefined;
   return {
-    pluginId: readFirstPluginMetadataString(cargoToml, "plugin_id"),
-    pluginName: readFirstPluginMetadataString(cargoToml, "plugin_name"),
-    companyName: readWracMetadataString(cargoToml, "company_name"),
-    version: versionMatch[1],
+    pluginId: requiredString(
+      firstPlugin?.plugin_id,
+      "package.metadata.wrac.plugins[0].plugin_id",
+    ),
+    pluginName: requiredString(
+      firstPlugin?.plugin_name,
+      "package.metadata.wrac.plugins[0].plugin_name",
+    ),
+    companyName: requiredString(
+      wrac?.company_name,
+      "package.metadata.wrac.company_name",
+    ),
+    version: requiredString(manifest.package?.version, "package.version"),
   };
 }
 
-function readFirstPluginMetadataString(cargoToml: string, key: string): string {
-  let inSection = false;
-  for (const rawLine of cargoToml.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line.startsWith("[") && line.endsWith("]")) {
-      inSection = line === "[[package.metadata.wrac.plugins]]";
-      continue;
-    }
-    if (!inSection) {
-      continue;
-    }
-    const match = line.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"\\s*$`));
-    if (match) {
-      return match[1];
-    }
+function requiredString(value: unknown, key: string): string {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
   }
-  throw new Error(
-    `Failed to read package.metadata.wrac.plugins.${key} from src-plugin/Cargo.toml`,
-  );
-}
-
-function readWracMetadataString(cargoToml: string, key: string): string {
-  let inSection = false;
-  for (const rawLine of cargoToml.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line.startsWith("[") && line.endsWith("]")) {
-      inSection = line === "[package.metadata.wrac]";
-      continue;
-    }
-    if (!inSection) {
-      continue;
-    }
-    const match = line.match(new RegExp(`^${key}\\s*=\\s*"([^"]+)"\\s*$`));
-    if (match) {
-      return match[1];
-    }
-  }
-  throw new Error(
-    `Failed to read package.metadata.wrac.${key} from src-plugin/Cargo.toml`,
-  );
+  throw new Error(`Failed to read ${key} from src-plugin/Cargo.toml`);
 }
 
 export default defineConfig({

@@ -52,4 +52,6 @@ wxp = { workspace = true }
 unreachable_pub = "deny"
 
 [build-dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

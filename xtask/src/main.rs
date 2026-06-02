@@ -8,7 +8,6 @@ fn main() -> wrac_xtask::Result<()> {
         .expect("xtask must be a direct child of the repository root")
         .to_path_buf();
     run(XtaskConfig {
-        plugins_dir: root.join("plugins"),
         wrapper_dir: root.join("clap_wrapper_builder"),
         target_namespace: "wrac-plugins".to_string(),
         root,

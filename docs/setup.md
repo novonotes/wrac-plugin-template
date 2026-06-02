@@ -51,7 +51,7 @@ The clap-wrapper-related submodules are required when building VST3 / AU / Stand
 
 ### 2. Configure Plugin Identity
 
-Plugin identity is centralized in `src-plugin/Cargo.toml`.
+Plugin identity is centralized in the plugin package manifest, initially `plugins/wrac-gain/src-plugin/Cargo.toml`.
 Edit `[package.metadata.wrac]` first.
 
 ```toml
@@ -80,7 +80,7 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 
 | Kind | Current value | Example replacement |
 |------|--------------|---------------------|
-| Rust crate name | `wrac_gain_plugin` | `my_plugin` |
+| WRAC plugin package name (Cargo package) | `wrac_gain_plugin` | `my_plugin` |
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
@@ -114,6 +114,7 @@ cargo xtask install
 ```
 
 `cargo xtask install` builds the selected plugin formats before installing them.
+Use `-p/--package` with the Cargo package name when the workspace contains multiple WRAC plugin packages.
 `cargo xtask install` installs to user-local paths by default.
 Use `cargo xtask install --scope=system` for hosts that only scan system-wide plugin folders.
 The `--target` option accepts `clap`, `vst3`, and `au` as comma-separated values.
@@ -126,12 +127,12 @@ If the WebView cannot connect to the configured URL, the plugin shows a low-leve
 instead of a blank editor so you can see the failed URL and socket error directly.
 
 ```sh
-cd /path/to/my_plugin/src-gui
+cd /path/to/my_plugin/plugins/wrac-gain/src-gui
 npm install
 npm run dev
 ```
 
-For release builds, `src-plugin/build.rs` zips `src-gui/dist` and embeds it in the plugin binary, so the dev server is not needed.
+For release builds, `src-plugin/build.rs` zips the sibling `src-gui/dist` and embeds it in the plugin binary, so the dev server is not needed.
 
 Launch your DAW and try inserting the plugin.
 Some DAWs may require a plugin rescan.

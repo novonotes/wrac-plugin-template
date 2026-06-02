@@ -10,6 +10,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use zip::CompressionMethod;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
@@ -80,12 +81,31 @@ fn main() {
     create_zip(&gui_dist_dir, &out_zip).expect("failed to create frontend zip");
 }
 
+#[derive(Debug, Deserialize)]
+struct CargoManifest {
+    package: CargoPackage,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoPackage {
+    #[serde(default)]
+    metadata: PackageMetadata,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PackageMetadata {
+    wrac: Option<WracMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
 struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
+    #[serde(default)]
     plugins: Vec<WracPluginMetadata>,
 }
 
+#[derive(Debug, Deserialize)]
 struct WracPluginMetadata {
     plugin_id: String,
     plugin_name: String,
@@ -95,25 +115,22 @@ struct WracPluginMetadata {
 
 fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
     let manifest = fs::read_to_string(manifest_path)?;
-    let company_name = read_toml_string(&manifest, "package.metadata.wrac", "company_name")
-        .ok_or_else(|| missing_metadata("company_name"))?;
-    let auv2_manufacturer_code =
-        read_toml_string(&manifest, "package.metadata.wrac", "auv2_manufacturer_code")
-            .ok_or_else(|| missing_metadata("auv2_manufacturer_code"))?;
-    validate_four_ascii("auv2_manufacturer_code", &auv2_manufacturer_code)?;
-    let plugins = read_plugin_metadata(&manifest)?;
-    if plugins.is_empty() {
+    let cargo_manifest: CargoManifest = toml::from_str(&manifest)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let metadata = cargo_manifest
+        .package
+        .metadata
+        .wrac
+        .ok_or_else(missing_wrac_metadata)?;
+    validate_four_ascii("auv2_manufacturer_code", &metadata.auv2_manufacturer_code)?;
+    if metadata.plugins.is_empty() {
         return Err(missing_metadata("plugins"));
     }
-    for plugin in &plugins {
+    for plugin in &metadata.plugins {
         validate_four_ascii("auv2_type", &plugin.auv2_type)?;
         validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
     }
-    Ok(WracMetadata {
-        company_name,
-        auv2_manufacturer_code,
-        plugins,
-    })
+    Ok(metadata)
 }
 
 fn missing_metadata(key: &str) -> io::Error {
@@ -123,89 +140,11 @@ fn missing_metadata(key: &str) -> io::Error {
     )
 }
 
-fn read_toml_string(manifest: &str, section: &str, key: &str) -> Option<String> {
-    let mut in_section = false;
-    for line in manifest.lines() {
-        let line = line.trim();
-        if line.starts_with('[') && line.ends_with(']') {
-            in_section = line == format!("[{section}]");
-            continue;
-        }
-        if !in_section {
-            continue;
-        }
-        let Some((line_key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if line_key.trim() != key {
-            continue;
-        }
-        return parse_toml_basic_string(value.trim());
-    }
-    None
-}
-
-fn read_plugin_metadata(manifest: &str) -> io::Result<Vec<WracPluginMetadata>> {
-    let mut plugins = Vec::new();
-    let mut current: Option<WracPluginMetadata> = None;
-    let mut in_plugins = false;
-
-    for line in manifest.lines() {
-        let line = line.trim();
-        if line.starts_with('[') && line.ends_with(']') {
-            if let Some(plugin) = current.take() {
-                plugins.push(plugin);
-            }
-            in_plugins = line == "[[package.metadata.wrac.plugins]]";
-            if in_plugins {
-                current = Some(WracPluginMetadata {
-                    plugin_id: String::new(),
-                    plugin_name: String::new(),
-                    auv2_type: String::new(),
-                    auv2_subtype: String::new(),
-                });
-            }
-            continue;
-        }
-        if !in_plugins {
-            continue;
-        }
-        let Some((line_key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let Some(value) = parse_toml_basic_string(value.trim()) else {
-            continue;
-        };
-        let plugin = current
-            .as_mut()
-            .expect("plugin table must create current metadata");
-        match line_key.trim() {
-            "plugin_id" => plugin.plugin_id = value,
-            "plugin_name" => plugin.plugin_name = value,
-            "auv2_type" => plugin.auv2_type = value,
-            "auv2_subtype" => plugin.auv2_subtype = value,
-            _ => {}
-        }
-    }
-    if let Some(plugin) = current {
-        plugins.push(plugin);
-    }
-    for plugin in &plugins {
-        if plugin.plugin_id.is_empty()
-            || plugin.plugin_name.is_empty()
-            || plugin.auv2_type.is_empty()
-            || plugin.auv2_subtype.is_empty()
-        {
-            return Err(missing_metadata("plugins.*"));
-        }
-    }
-    Ok(plugins)
-}
-
-fn parse_toml_basic_string(value: &str) -> Option<String> {
-    let value = value.strip_prefix('"')?;
-    let value = value.strip_suffix('"')?;
-    Some(value.replace("\\\"", "\"").replace("\\\\", "\\"))
+fn missing_wrac_metadata() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "missing package.metadata.wrac in src-plugin/Cargo.toml",
+    )
 }
 
 fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
