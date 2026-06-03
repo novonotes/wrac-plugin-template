@@ -16,9 +16,15 @@ void Parameter::updateInfo(const clap_plugin_t *plugin, const clap_plugin_params
   if (_cfstring)
   {
     CFRelease(_cfstring);
+    _cfstring = nullptr;
   }
   _info = i;
-  _cfstring = CFStringCreateWithCString(NULL, _info.name, kCFStringEncodingUTF8);
+  const char *name = _info.name[0] != '\0' ? _info.name : "Parameter";
+  _cfstring = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
+  if (!_cfstring)
+  {
+    _cfstring = CFStringCreateWithCString(NULL, "Parameter", kCFStringEncodingUTF8);
+  }
 
   const auto &info = _info;
   AudioUnitParameterOptions flags = 0;
@@ -67,7 +73,10 @@ void Parameter::updateInfo(const clap_plugin_t *plugin, const clap_plugin_params
 }
 Parameter::~Parameter()
 {
-  CFRelease(_cfstring);
+  if (_cfstring)
+  {
+    CFRelease(_cfstring);
+  }
 }
 
 }  // namespace Clap::AUv2

@@ -39,6 +39,8 @@ struct SAAX_Wrapper_AlgorithmicContext
       nullptr;  ///< Transport MIDI node.  Used for querying the state of the MIDI transport.
   //  AAX_IMIDINode*              mAdditionalInputMIDINodes[kMaxAdditionalMIDINodes];  ///< List of additional input MIDI nodes, if your plugin needs them.
 
+  int32_t *mBypass = nullptr;  ///< Host master bypass state.
+
   SAAX_Wrapper_PrivateData *mPrivateData = nullptr;
 
   float **mMeters =

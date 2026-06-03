@@ -351,6 +351,8 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
   _clumps.reset();
   _orderedParameterList.clear();
   _paramOrderingProvided = false;
+  _hasBypassParameter = false;
+  _bypassParameterInfo = {};
   auto *p = _plugin->_ext._params;
   if (p)
   {
@@ -427,12 +429,42 @@ void WrapAsAUV2::setupParameters(const clap_plugin_t *plugin, const clap_plugin_
           {
             piter->second->updateInfo(_plugin->_plugin, p, paraminfo);
           }
+          if ((paraminfo.flags & CLAP_PARAM_IS_BYPASS) && !_hasBypassParameter)
+          {
+            // AU hosts can drive kAudioUnitProperty_BypassEffect without touching
+            // the plugin parameter list. Back it with the CLAP bypass parameter
+            // so AU bypass and plugin-format bypass share the same state.
+            _hasBypassParameter = true;
+            _bypassParameterInfo = paraminfo;
+          }
           Globals()->SetParameter(paraminfo.id, result);
           _orderedParameterList.push_back(static_cast<AudioUnitParameterID>(paraminfo.id));
         }
       }
     }
   }
+}
+
+bool WrapAsAUV2::IsBypassEffect()
+{
+  if (!_hasBypassParameter)
+  {
+    return false;
+  }
+  const auto value = Globals()->GetParameter(_bypassParameterInfo.id);
+  const auto midpoint = (_bypassParameterInfo.min_value + _bypassParameterInfo.max_value) * 0.5;
+  return value >= midpoint;
+}
+
+void WrapAsAUV2::SetBypassEffect(bool bypass)
+{
+  if (!_hasBypassParameter)
+  {
+    return;
+  }
+  const auto value = bypass ? _bypassParameterInfo.max_value : _bypassParameterInfo.min_value;
+  SetParameter(static_cast<AudioUnitParameterID>(_bypassParameterInfo.id), kAudioUnitScope_Global,
+               0, static_cast<AudioUnitParameterValue>(value), 0);
 }
 
 OSStatus WrapAsAUV2::GetParameterList(AudioUnitScope inScope, AudioUnitParameterID *outParameterList,
@@ -522,8 +554,22 @@ OSStatus WrapAsAUV2::GetParameterInfo(AudioUnitScope inScope, AudioUnitParameter
       // strcpy(outParameterInfo.name, info.name);
       memset(outParameterInfo.name, 0, sizeof(outParameterInfo.name));
 
-      CFRetain(f->CFString());
-      outParameterInfo.cfNameString = f->CFString();
+      CFStringRef name = f->CFString();
+      if (name)
+      {
+        CFRetain(name);
+      }
+      else
+      {
+        // The parameter advertises a CF name, so provide a stable fallback even
+        // if the plugin supplied a name CoreFoundation could not encode.
+        name = CFStringCreateWithCString(NULL, "Parameter", kCFStringEncodingUTF8);
+        if (!name)
+        {
+          return kAudioUnitErr_InvalidParameter;
+        }
+      }
+      outParameterInfo.cfNameString = name;
       outParameterInfo.minValue = info.min_value;
       outParameterInfo.maxValue = info.max_value;
       outParameterInfo.defaultValue = info.default_value;

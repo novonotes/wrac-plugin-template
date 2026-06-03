@@ -20,8 +20,8 @@ class ClapAsAAX;
 typedef struct AAXWrappedParameterInfo
 {
   AAXWrappedParameterInfo(const clap_plugin_t *plugin, const clap_param_info_t &ci,
-                          const std::string identifier)
-    : _plugin(plugin), _clap_param_info(ci), _aax_identifier(identifier)
+                          const clap_plugin_params_t *ext_params, const std::string identifier)
+    : _plugin(plugin), _ext_params(ext_params), _clap_param_info(ci), _aax_identifier(identifier)
   {
   }
   const clap_plugin_t *_plugin;

@@ -3,6 +3,7 @@
 #include "wrapper.h"
 
 #include "AAX_MIDIUtilities.h"
+#include <cstring>
 
 void AAX_CALLBACK AAXWrapper_AlgorithmProcessProc(
     SAAX_Wrapper_AlgorithmicContext *const inInstancesBegin[], const void *inInstancesEnd)
@@ -60,13 +61,17 @@ void AAXProcessAdapter::setupProcessing(const clap_plugin_t *plugin, double samp
                                         const clap_plugin_audio_ports *ext_audio,
                                         Clap::IAutomation *automation,
                                         std::vector<clap_id> &gesturedparameters,
-                                        ParamChangeQueue &inqueue, uint32_t midiportid, bool preferMIDI)
+                                        ParamChangeQueue &inqueue,
+                                        std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
+                                        uint32_t midiportid, bool preferMIDI)
 {
   _plugin = plugin;
   _ext_param = ext_param;
   _automation = automation;
   _inqueue = &inqueue;
   _gesturedparameters = &gesturedparameters;
+  _bypassParameter = bypassParameter;
+  _lastBypassState = -1;
 
   _midi_first_portid = midiportid;
   _midi_prefer_mididialect = preferMIDI;
@@ -298,6 +303,28 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   }
 
   _proc.frames_count = *(context->mNumSamples);
+  const int bypassState = (context->mBypass && *context->mBypass != 0) ? 1 : 0;
+
+  if (_bypassParameter && bypassState != _lastBypassState)
+  {
+    // AAX owns master bypass as a host data port. Forward state changes as
+    // CLAP parameter events so the plugin's bypass state remains authoritative.
+    clap_multi_event_t n;
+    n.header = {sizeof(clap_event_param_value_t), 0, CLAP_CORE_EVENT_SPACE_ID,
+                CLAP_EVENT_PARAM_VALUE, 0};
+    n.param.param_id = _bypassParameter->_clap_param_info.id;
+    n.param.cookie = _bypassParameter->_clap_param_info.cookie;
+    n.param.note_id = -1;
+    n.param.port_index = -1;
+    n.param.channel = -1;
+    n.param.key = -1;
+    n.param.value = bypassState ? _bypassParameter->_clap_param_info.max_value
+                                : _bypassParameter->_clap_param_info.min_value;
+
+    _eventindices.push_back(_events.size());
+    _events.emplace_back(n);
+  }
+  _lastBypassState = bypassState;
 
   // distribute the pointers to the audio channels pointer arrays to the
   // appropriate audio ports
@@ -312,6 +339,32 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   {
     this->_output_ports[i].data32 = context->mAudioOutputs + offset;
     offset += this->_output_ports[i].channel_count;
+  }
+
+  if (bypassState && !_bypassParameter)
+  {
+    // Without a CLAP bypass parameter there is no plugin state to drive. Match
+    // host bypass semantics by bypassing the processor and passing audio through.
+    for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i)
+    {
+      for (uint32_t c = 0; c < _output_ports[i].channel_count; ++c)
+      {
+        float *output = _output_ports[i].data32[c];
+        if (!output) continue;
+
+        float *input = nullptr;
+        if (i < _proc.audio_inputs_count && c < _input_ports[i].channel_count)
+        {
+          input = _input_ports[i].data32[c];
+        }
+
+        if (input)
+          std::memmove(output, input, sizeof(float) * _proc.frames_count);
+        else
+          std::memset(output, 0, sizeof(float) * _proc.frames_count);
+      }
+    }
+    return;
   }
 
   // sort all indices

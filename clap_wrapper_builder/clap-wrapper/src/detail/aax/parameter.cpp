@@ -15,6 +15,7 @@ AAX_ClapParamDisplayDelegate *AAX_ClapParamDisplayDelegate::Clone() const
 bool AAX_ClapParamDisplayDelegate::ValueToString(double value, AAX_CString *valueString) const
 {
   auto i = _info.get();
+  if (!i || !i->_plugin || !i->_ext_params || !i->_ext_params->value_to_text) return false;
   char buf[101];
   if (i->_ext_params->value_to_text(i->_plugin, i->_clap_param_info.id, i->asClapValue(value), buf, 100))
   {
@@ -28,9 +29,11 @@ bool AAX_ClapParamDisplayDelegate::ValueToString(double value, int32_t maxNumCha
                                                  AAX_CString *valueString) const
 {
   auto i = _info.get();
+  if (!i || !i->_plugin || !i->_ext_params || !i->_ext_params->value_to_text) return false;
   char buf[101];
   int32_t sz = 100;
   if (maxNumChars < 100) sz = maxNumChars;
+  if (sz <= 0) return false;
   if (i->_ext_params->value_to_text(i->_plugin, i->_clap_param_info.id, i->asClapValue(value), buf, sz))
   {
     valueString->Set(buf);
@@ -41,5 +44,17 @@ bool AAX_ClapParamDisplayDelegate::ValueToString(double value, int32_t maxNumCha
 bool AAX_ClapParamDisplayDelegate::StringToValue(const AAX_CString &valueString, double *value) const
 {
   auto i = _info.get();
-  return i->_ext_params->text_to_value(i->_plugin, i->_clap_param_info.id, valueString.Get(), value);
+  if (!i || !i->_plugin || !i->_ext_params || !i->_ext_params->text_to_value || !value) return false;
+
+  double clapValue = 0.0;
+  if (!i->_ext_params->text_to_value(i->_plugin, i->_clap_param_info.id, valueString.Get(),
+                                     &clapValue))
+  {
+    return false;
+  }
+
+  // AAX display delegates exchange normalized values, while CLAP text_to_value
+  // returns the parameter-domain value.
+  *value = i->asAAXValue(clapValue);
+  return true;
 }
