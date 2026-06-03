@@ -16,14 +16,14 @@ Default targets by platform:
 
 Examples:
   cargo xtask build
-  cargo xtask build --plugin=sine-synth
+  cargo xtask build -p wrac_gain_plugin
   cargo xtask build --all --target=clap
-  cargo xtask build --plugin=gain-basic --release
-  cargo xtask build --plugin=gain-basic --target=vst3
-  cargo xtask build --plugin=gain-basic --target=au,standalone --release
+  cargo xtask build --package=wrac_gain_plugin --release
+  cargo xtask build -p wrac_gain_plugin --target=vst3
+  cargo xtask build -p wrac_gain_plugin --target=au,standalone --release
 
 Notes:
-  --plugin can be omitted when plugins/ contains exactly one plugin package.
+  -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   `install`, `validate`, and `launch` build their required artifacts before use.
   VST3/AU/standalone targets require clap-wrapper dependencies.";
 
@@ -38,13 +38,13 @@ Default targets by platform:
 
 Examples:
   cargo xtask install
-  cargo xtask install --plugin=gain-basic
+  cargo xtask install -p wrac_gain_plugin
   cargo xtask install --all --release
-  cargo xtask install --plugin=sine-synth --scope=system
-  cargo xtask install --plugin=gain-basic --target=clap,vst3
+  cargo xtask install -p wrac_gain_plugin --scope=system
+  cargo xtask install -p wrac_gain_plugin --target=clap,vst3
 
 Notes:
-  --plugin can be omitted when plugins/ contains exactly one plugin package.
+  -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   install builds the selected plugin formats before copying artifacts.
   --scope defaults to user. Use --scope=system for hosts that only scan system-wide plugin folders.
   standalone is not a plugin format and cannot be installed with this command.";
@@ -60,14 +60,14 @@ Default targets by platform:
 
 Examples:
   cargo xtask uninstall
-  cargo xtask uninstall --plugin=gain-basic
+  cargo xtask uninstall -p wrac_gain_plugin
   cargo xtask uninstall --all --target=vst3
-  cargo xtask uninstall --plugin=sine-synth --scope=user
-  cargo xtask uninstall --plugin=sine-synth --scope=system
-  cargo xtask uninstall --plugin=gain-basic --dry-run
+  cargo xtask uninstall -p wrac_gain_plugin --scope=user
+  cargo xtask uninstall -p wrac_gain_plugin --scope=system
+  cargo xtask uninstall -p wrac_gain_plugin --dry-run
 
 Notes:
-  --plugin can be omitted when plugins/ contains exactly one plugin package.
+  -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   --scope defaults to all and removes both user-local and system-wide plugin artifacts.";
 
 const VALIDATE_AFTER_HELP: &str = "\
@@ -81,13 +81,13 @@ Default targets by platform:
 
 Examples:
   cargo xtask validate
-  cargo xtask validate --plugin=gain-basic
+  cargo xtask validate -p wrac_gain_plugin
   cargo xtask validate --all --release
   cargo xtask validate --all --target=clap
-  cargo xtask validate --plugin=sine-synth --target=vst3
+  cargo xtask validate -p wrac_gain_plugin --target=vst3
 
 Notes:
-  --plugin can be omitted when plugins/ contains exactly one plugin package.
+  -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   validate builds the selected plugin formats before running validators.
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
@@ -97,9 +97,9 @@ Notes:
 const LAUNCH_AFTER_HELP: &str = "\
 Examples:
   cargo xtask launch
-  cargo xtask launch --plugin=gain-basic
-  cargo xtask launch --plugin=sine-synth
-  cargo xtask launch --plugin=gain-basic --release
+  cargo xtask launch -p wrac_gain_plugin
+  cargo xtask launch --package=wrac_gain_plugin
+  cargo xtask launch -p wrac_gain_plugin --release
 
 Notes:
   launch builds the standalone artifact before starting it.";
@@ -149,13 +149,13 @@ pub(crate) enum Commands {
 #[derive(Debug, Args)]
 pub(crate) struct BuildArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
-    #[arg(short_alias = 'a', long, help = "Build every example plugin.")]
+    #[arg(short = 'a', long, help = "Build every WRAC plugin package.")]
     pub(crate) all: bool,
 
     #[arg(long, help = "Build with the release profile.")]
@@ -179,13 +179,13 @@ pub(crate) struct BuildArgs {
 #[derive(Debug, Args)]
 pub(crate) struct InstallArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
-    #[arg(short_alias = 'a', long, help = "Install every example plugin.")]
+    #[arg(short = 'a', long, help = "Install every WRAC plugin package.")]
     pub(crate) all: bool,
 
     #[arg(long, help = "Install release artifacts.")]
@@ -227,13 +227,13 @@ pub(crate) enum UninstallScope {
 #[derive(Debug, Args)]
 pub(crate) struct UninstallArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
-    #[arg(short_alias = 'a', long, help = "Uninstall every example plugin.")]
+    #[arg(short = 'a', long, help = "Uninstall every WRAC plugin package.")]
     pub(crate) all: bool,
 
     #[arg(
@@ -265,13 +265,13 @@ pub(crate) struct UninstallArgs {
 #[derive(Debug, Args)]
 pub(crate) struct ValidateArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
-    #[arg(short_alias = 'a', long, help = "Validate every example plugin.")]
+    #[arg(short = 'a', long, help = "Validate every WRAC plugin package.")]
     pub(crate) all: bool,
 
     #[arg(long, help = "Validate release artifacts.")]
@@ -292,11 +292,11 @@ pub(crate) struct ValidateArgs {
 #[derive(Debug, Args)]
 pub(crate) struct LaunchArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
     #[arg(long, help = "Launch release artifact.")]
     pub(crate) release: bool,
@@ -305,12 +305,12 @@ pub(crate) struct LaunchArgs {
 #[derive(Debug, Args)]
 pub(crate) struct CleanArgs {
     #[arg(
-        short_alias = 'p',
-        long,
-        help = "Plugin directory name under plugins/, such as sine-synth."
+        short = 'p',
+        long = "package",
+        help = "WRAC plugin package name, such as wrac_gain_plugin."
     )]
-    pub(crate) plugin: Option<String>,
+    pub(crate) package: Option<String>,
 
-    #[arg(short_alias = 'a', long, help = "Clean every example plugin.")]
+    #[arg(short = 'a', long, help = "Clean every WRAC plugin package.")]
     pub(crate) all: bool,
 }

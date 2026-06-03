@@ -12,6 +12,7 @@
     "@novonotes/webview-bridge": "https://files.novonotes.download/libs/novonotes-webview-bridge-0.1.0-alpha.1.tgz"
   },
   "devDependencies": {
+    "smol-toml": "^1.4.2",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
   }

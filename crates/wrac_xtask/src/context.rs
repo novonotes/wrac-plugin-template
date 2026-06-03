@@ -1,15 +1,25 @@
-use std::fs;
 use std::path::PathBuf;
+
+use cargo_metadata::MetadataCommand;
 
 use crate::metadata::PluginMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::{Result, XtaskConfig};
 
+#[derive(Debug, Clone)]
+pub(crate) struct PluginPackage {
+    pub(crate) package_name: String,
+    pub(crate) artifact_namespace: String,
+    pub(crate) manifest_path: PathBuf,
+    pub(crate) plugin_root: PathBuf,
+}
+
 pub(crate) struct Context {
     pub(crate) root: PathBuf,
-    pub(crate) plugin_slug: String,
+    pub(crate) package_name: String,
     pub(crate) plugin_root: PathBuf,
+    pub(crate) manifest_path: PathBuf,
     pub(crate) platform: Platform,
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
@@ -17,11 +27,8 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    pub(crate) fn new(config: &XtaskConfig, plugin_slug: &str) -> Result<Self> {
-        let plugin_root = config.plugins_dir.join(plugin_slug);
-        if !plugin_root.join("src-plugin").join("Cargo.toml").exists() {
-            return Err(format!("unknown plugin package: {plugin_slug}").into());
-        }
+    pub(crate) fn new(config: &XtaskConfig, package_name: &str) -> Result<Self> {
+        let package = find_package(config, package_name)?;
         // CARGO_TARGET_DIR may be redirected to a shared cache in workspaces or CI.
         // Using the same target root as cargo keeps post-build library detection consistent.
         let target_root = std::env::var_os("CARGO_TARGET_DIR")
@@ -30,19 +37,22 @@ impl Context {
         // Each plugin owns its own Cargo and CMake output tree. Wrapper builds create
         // format-specific projects with fixed target names, so sharing one target/wrac
         // directory across plugins would make artifacts overwrite or cross-contaminate.
-        let target_dir = target_root.join(&config.target_namespace).join(plugin_slug);
+        let target_dir = target_root
+            .join(&config.target_namespace)
+            .join(&package.artifact_namespace);
         // CLAP_WRAPPER_DIR remains an escape hatch for testing SDK changes or a temporary external checkout.
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.wrapper_dir.clone());
         // Plugin identity is sourced from [package.metadata.wrac] in src-plugin/Cargo.toml.
         // Maintaining separate bundle names or wrapper arguments in xtask risks stale build artifacts on rename.
-        let metadata = PluginMetadata::read(&plugin_root.join("src-plugin").join("Cargo.toml"))?;
+        let metadata = PluginMetadata::read(&package.manifest_path)?;
 
         Ok(Self {
             root: config.root.clone(),
-            plugin_slug: plugin_slug.to_string(),
-            plugin_root,
+            package_name: package.package_name,
+            plugin_root: package.plugin_root,
+            manifest_path: package.manifest_path,
             platform: Platform::detect()?,
             target_dir,
             wrapper_dir,
@@ -55,7 +65,7 @@ impl Context {
     }
 
     pub(crate) fn plugin_manifest(&self) -> PathBuf {
-        self.plugin_root.join("src-plugin").join("Cargo.toml")
+        self.manifest_path.clone()
     }
 
     pub(crate) fn cargo_profile_dir(&self, profile: BuildProfile) -> PathBuf {
@@ -116,17 +126,63 @@ impl Context {
     }
 }
 
-pub(crate) fn available_plugins(config: &XtaskConfig) -> Result<Vec<String>> {
-    let mut plugins = Vec::new();
-    for entry in fs::read_dir(&config.plugins_dir)? {
-        let entry = entry?;
-        // A directory becomes a plugin package by containing src-plugin/Cargo.toml.
-        // This keeps docs or future helper directories under plugins/ from becoming
-        // implicit build targets.
-        if entry.path().join("src-plugin").join("Cargo.toml").exists() {
-            plugins.push(entry.file_name().to_string_lossy().into_owned());
+pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPackage>> {
+    let metadata = MetadataCommand::new()
+        .manifest_path(config.root.join("Cargo.toml"))
+        .exec()?;
+
+    let mut packages = Vec::new();
+    for package in metadata.workspace_packages() {
+        if package.metadata.get("wrac").is_none() {
+            continue;
+        }
+        let manifest_path = package.manifest_path.clone().into_std_path_buf();
+        let plugin_root = manifest_path
+            .parent()
+            .and_then(|path| path.parent())
+            .ok_or_else(|| {
+                format!(
+                    "failed to derive plugin root from manifest path: {}",
+                    manifest_path.display()
+                )
+            })?
+            .to_path_buf();
+        let artifact_namespace = plugin_root
+            .file_name()
+            .ok_or_else(|| {
+                format!(
+                    "failed to derive artifact namespace from plugin root: {}",
+                    plugin_root.display()
+                )
+            })?
+            .to_string_lossy()
+            .into_owned();
+        packages.push(PluginPackage {
+            package_name: package.name.clone(),
+            artifact_namespace,
+            manifest_path,
+            plugin_root,
+        });
+    }
+    packages.sort_by(|a, b| a.package_name.cmp(&b.package_name));
+    Ok(packages)
+}
+
+fn find_package(config: &XtaskConfig, package_name: &str) -> Result<PluginPackage> {
+    let packages = available_packages(config)?;
+    for package in &packages {
+        if package.package_name == package_name {
+            return Ok(package.clone());
         }
     }
-    plugins.sort();
-    Ok(plugins)
+    let available = packages
+        .iter()
+        .map(|package| package.package_name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if available.is_empty() {
+        Err(format!("unknown WRAC plugin package: {package_name}").into())
+    } else {
+        Err(format!("unknown WRAC plugin package: {package_name}. Available: {available}").into())
+    }
 }

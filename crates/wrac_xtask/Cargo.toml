@@ -8,4 +8,7 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
+cargo_metadata = "0.19"
 clap = { version = "4.5.38", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
