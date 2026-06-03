@@ -2,6 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
     GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginError, PluginResult,
@@ -60,6 +61,7 @@ impl WracGainGuiRuntime {
     /// Factory called from the closure in `plugin.rs` when the host requests the GUI to open.
     /// Creates a WebView attached to the parent window and returns it.
     pub(super) fn create(
+        run_loop: &RunLoopLocal,
         dependencies: GuiRuntimeDependencies,
         configuration: GuiConfig,
         initial_size: GuiSize,
@@ -115,7 +117,7 @@ impl WracGainGuiRuntime {
                 gui_notifier.notify_parameter(PARAM_GAIN_ID, shared.gain());
             }
         });
-        gui_update_timer.start();
+        gui_update_timer.start(run_loop);
 
         log::debug!("creating GUI runtime: completed");
         Ok(Self {
@@ -138,10 +140,10 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         self.webview.set_size(size)
     }
 
-    fn show(&mut self) -> PluginResult<()> {
+    fn show(&mut self, run_loop: &RunLoopLocal) -> PluginResult<()> {
         log::debug!("showing GUI runtime");
         self.webview.show()?;
-        self.gui_update_timer.start();
+        self.gui_update_timer.start(run_loop);
         log::debug!("showing GUI runtime completed");
         Ok(())
     }
