@@ -38,7 +38,7 @@ The [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscod
 ### 1. Repository Setup
 
 Use the `Use this template` button in the upper right of the [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) page on GitHub to create a new repository.
-After creating it, clone the new repository and initialize the submodules.
+After creating it, clone the new repository and initialize the remaining SDK submodules if you need wrapper targets.
 
 ```sh
 git clone https://github.com/your-org/my-plugin.git
@@ -47,7 +47,7 @@ git submodule update --init --recursive
 ```
 
 Submodules are not needed if you are only building CLAP.
-The clap-wrapper-related submodules are required when building VST3 / AU / Standalone, or when validating VST3 / AU.
+The SDK submodules used by clap-wrapper are required when building VST3 / AU / Standalone, or when validating VST3 / AU.
 
 ### 2. Configure Plugin Identity
 

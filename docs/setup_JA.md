@@ -38,7 +38,7 @@ VS Code のデバッグ設定を用意しています。
 ### 1. リポジトリのセットアップ
 
 GitHub の [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) ページ右上の `Use this template` ボタンを使って新しいリポジトリを作成します。
-作成後、新しいリポジトリをクローンしてサブモジュールを初期化してください。
+作成後、新しいリポジトリをクローンし、wrapper target が必要な場合は残りの SDK サブモジュールを初期化してください。
 
 ```sh
 git clone https://github.com/your-org/my-plugin.git
@@ -47,7 +47,7 @@ git submodule update --init --recursive
 ```
 
 CLAP のみをビルドする場合、サブモジュールは不要です。
-VST3 / AU / Standalone、または VST3 / AU の検証を行う場合は clap-wrapper 関連のサブモジュールが必要です。
+VST3 / AU / Standalone、または VST3 / AU の検証を行う場合は clap-wrapper が利用する SDK サブモジュールが必要です。
 
 ### 2. プラグイン identity を設定する
 

@@ -41,8 +41,8 @@ With just Rust and Node.js you should be able to build CLAP.
 For the prerequisites to build VST3 / AU / Standalone, see the [Setup doc](docs/setup.md#prerequisites).
 
 ```sh
-# Clone with submodules (submodules are only needed for VST3 / AU / Standalone)
-git clone --recursive https://github.com/novonotes/wrac-plugin-template.git
+# Clone the template. Add --recursive if you plan to build VST3 / AU / Standalone.
+git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
 # Build and install the plugin
