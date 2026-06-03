@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
     GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
@@ -82,6 +83,14 @@ struct GuiSession {
     parent_lease: Option<GuiThreadLease>,
     handle: Option<GuiRuntimeHandle>,
     visible: bool,
+}
+
+struct RuntimeCreationRequest {
+    configuration: GuiConfig,
+    size: GuiSize,
+    parent: StoredParentWindow,
+    scale: f64,
+    generation: u64,
 }
 
 #[derive(Clone)]
@@ -167,7 +176,7 @@ fn schedule_runtime_creation(
     // makes host lifecycle re-entry more likely. Posting to the run loop centralizes
     // creation serialization, pending visibility/size application, and stale-generation
     // teardown in one place.
-    let (configuration, parent, sender) = {
+    let (configuration, parent) = {
         let mut state = runtime.lock();
         if state.is_creating_runtime {
             log::debug!(
@@ -187,163 +196,179 @@ fn schedule_runtime_creation(
             return Ok(());
         }
         let parent = session.parent.ok_or(PluginError::InvalidState)?;
-        let sender = session
+        session
             .parent_lease
             .as_ref()
-            .ok_or(PluginError::InvalidState)?
-            .sender();
+            .ok_or(PluginError::InvalidState)?;
         let configuration = session.configuration;
         state.is_creating_runtime = true;
         state.creating_generation = Some(generation);
         state.pending_creation_generation = None;
         state.destroy_requested_while_creating = false;
-        (configuration, parent, sender)
+        (configuration, parent)
     };
 
     log::debug!("wxp controller: posting runtime creation: generation={generation}");
     let factory_for_callback = factory.clone();
     let runtime_for_callback = runtime.clone();
     let layout_for_callback = layout.clone();
-    sender.send(move || {
-            log::debug!("wxp controller: posted runtime creation started: generation={generation}");
-            let result = create_runtime_on_gui_thread(
-                factory_for_callback.as_ref(),
-                runtime_for_callback.as_ref(),
-                layout_for_callback.as_ref(),
-                configuration,
-                parent,
-                generation,
+    let post_result = RunLoop::post(move |run_loop| {
+        log::debug!("wxp controller: posted runtime creation started: generation={generation}");
+        let result = create_runtime_on_gui_thread(
+            run_loop,
+            factory_for_callback.as_ref(),
+            runtime_for_callback.as_ref(),
+            layout_for_callback.as_ref(),
+            configuration,
+            parent,
+            generation,
+        );
+
+        let handle = match result {
+            Ok(handle) => handle,
+            Err(error) => {
+                log::warn!(
+                    "wxp controller: posted runtime creation failed: generation={generation}, error={error:?}"
+                );
+                schedule_pending_runtime_creation(
+                    factory_for_callback,
+                    runtime_for_callback,
+                    layout_for_callback,
+                );
+                return;
+            }
+        };
+
+        let Some((visible, size, scale)) = latest_runtime_state(
+            runtime_for_callback.as_ref(),
+            layout_for_callback.as_ref(),
+            generation,
+        ) else {
+            log::debug!(
+                "wxp controller: posted runtime creation produced stale runtime: generation={generation}"
             );
-
-            let handle = match result {
-                Ok(handle) => handle,
-                Err(error) => {
-                    log::warn!(
-                        "wxp controller: posted runtime creation failed: generation={generation}, error={error:?}"
-                    );
-                    schedule_pending_runtime_creation(
-                        factory_for_callback,
-                        runtime_for_callback,
-                        layout_for_callback,
-                    );
-                    return;
-                }
-            };
-
-            let Some((visible, size, scale)) = latest_runtime_state(
-                runtime_for_callback.as_ref(),
-                layout_for_callback.as_ref(),
-                generation,
-            ) else {
-                log::debug!(
-                    "wxp controller: posted runtime creation produced stale runtime: generation={generation}"
-                );
-                handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            };
-
-            if let Err(error) = handle.set_size(size) {
-                log::warn!(
-                    "wxp controller: posted runtime creation latest set_size failed: {error:?}"
-                );
-                handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            }
-            if let Err(error) = handle.set_scale(scale) {
-                log::warn!(
-                    "wxp controller: posted runtime creation latest set_scale failed: {error:?}"
-                );
-                handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            }
-
-            if !visible {
-                log::debug!("wxp controller: posted runtime creation hiding initially hidden runtime");
-                if let Err(error) = handle.hide() {
-                    log::warn!(
-                        "wxp controller: posted runtime creation initial hide failed: {error:?}"
-                    );
-                    handle.destroy();
-                    runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                    schedule_pending_runtime_creation(
-                        factory_for_callback,
-                        runtime_for_callback,
-                        layout_for_callback,
-                    );
-                    return;
-                }
-            }
-
-            let mut state = runtime_for_callback.lock();
-            let Some(session) = state.session.as_mut() else {
-                drop(state);
-                handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            };
-            if session.generation != generation {
-                drop(state);
-                handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            }
-            if let Some(old_handle) = session.handle.replace(handle) {
-                log::debug!(
-                    "wxp controller: destroying previous runtime before replacing handle: generation={generation}"
-                );
-                drop(state);
-                old_handle.destroy();
-                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
-                schedule_pending_runtime_creation(
-                    factory_for_callback,
-                    runtime_for_callback,
-                    layout_for_callback,
-                );
-                return;
-            }
-            if state.pending_creation_generation == Some(generation) {
-                log::debug!(
-                    "wxp controller: dropping redundant pending runtime creation: generation={generation}"
-                );
-                state.pending_creation_generation = None;
-            }
-            log::debug!("wxp controller: posted runtime creation completed: generation={generation}");
-            drop(state);
+            handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
             schedule_pending_runtime_creation(
                 factory_for_callback,
                 runtime_for_callback,
                 layout_for_callback,
             );
-        });
+            return;
+        };
+
+        if let Err(error) = handle.set_size(size) {
+            log::warn!("wxp controller: posted runtime creation latest set_size failed: {error:?}");
+            handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+            schedule_pending_runtime_creation(
+                factory_for_callback,
+                runtime_for_callback,
+                layout_for_callback,
+            );
+            return;
+        }
+        if let Err(error) = handle.set_scale(scale) {
+            log::warn!(
+                "wxp controller: posted runtime creation latest set_scale failed: {error:?}"
+            );
+            handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+            schedule_pending_runtime_creation(
+                factory_for_callback,
+                runtime_for_callback,
+                layout_for_callback,
+            );
+            return;
+        }
+
+        if !visible {
+            log::debug!("wxp controller: posted runtime creation hiding initially hidden runtime");
+            if let Err(error) = handle.hide() {
+                log::warn!(
+                    "wxp controller: posted runtime creation initial hide failed: {error:?}"
+                );
+                handle.destroy();
+                runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+                schedule_pending_runtime_creation(
+                    factory_for_callback,
+                    runtime_for_callback,
+                    layout_for_callback,
+                );
+                return;
+            }
+        }
+
+        let mut state = runtime_for_callback.lock();
+        let Some(session) = state.session.as_mut() else {
+            drop(state);
+            handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+            schedule_pending_runtime_creation(
+                factory_for_callback,
+                runtime_for_callback,
+                layout_for_callback,
+            );
+            return;
+        };
+        if session.generation != generation {
+            drop(state);
+            handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+            schedule_pending_runtime_creation(
+                factory_for_callback,
+                runtime_for_callback,
+                layout_for_callback,
+            );
+            return;
+        }
+        if let Some(old_handle) = session.handle.replace(handle) {
+            log::debug!(
+                "wxp controller: destroying previous runtime before replacing handle: generation={generation}"
+            );
+            drop(state);
+            old_handle.destroy();
+            runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
+            schedule_pending_runtime_creation(
+                factory_for_callback,
+                runtime_for_callback,
+                layout_for_callback,
+            );
+            return;
+        }
+        if state.pending_creation_generation == Some(generation) {
+            log::debug!(
+                "wxp controller: dropping redundant pending runtime creation: generation={generation}"
+            );
+            state.pending_creation_generation = None;
+        }
+        log::debug!("wxp controller: posted runtime creation completed: generation={generation}");
+        drop(state);
+        schedule_pending_runtime_creation(
+            factory_for_callback,
+            runtime_for_callback,
+            layout_for_callback,
+        );
+    });
+    if post_result.is_err() {
+        log::warn!("wxp controller: runtime creation could not be posted: generation={generation}");
+        clear_runtime_creation_after_post_failure(runtime.as_ref(), generation);
+        return Err(PluginError::InvalidState);
+    }
     Ok(())
+}
+
+fn clear_runtime_creation_after_post_failure(runtime: &Mutex<GuiRuntimeState>, generation: u64) {
+    let mut state = runtime.lock();
+    if state.creating_generation != Some(generation) {
+        return;
+    }
+    state.is_creating_runtime = false;
+    state.creating_generation = None;
+    if state.pending_creation_generation == Some(generation) {
+        state.pending_creation_generation = None;
+    }
+    state.destroy_requested_while_creating = false;
 }
 
 fn schedule_pending_runtime_creation(
@@ -378,6 +403,7 @@ fn schedule_pending_runtime_creation(
 }
 
 fn create_runtime_on_gui_thread(
+    run_loop: &RunLoopLocal,
     factory: &dyn WxpGuiFactory,
     runtime: &Mutex<GuiRuntimeState>,
     layout: &HostGuiLayout,
@@ -402,11 +428,14 @@ fn create_runtime_on_gui_thread(
         return create_runtime_after_wait(
             factory,
             runtime,
-            configuration,
-            size,
-            parent,
-            scale,
-            generation,
+            RuntimeCreationRequest {
+                configuration,
+                size,
+                parent,
+                scale,
+                generation,
+            },
+            run_loop,
         );
     };
     log::debug!(
@@ -420,42 +449,45 @@ fn create_runtime_on_gui_thread(
     create_runtime_after_wait(
         factory,
         runtime,
-        configuration,
-        size,
-        parent,
-        scale,
-        generation,
+        RuntimeCreationRequest {
+            configuration,
+            size,
+            parent,
+            scale,
+            generation,
+        },
+        run_loop,
     )
 }
 
 fn create_runtime_after_wait(
     factory: &dyn WxpGuiFactory,
     runtime: &Mutex<GuiRuntimeState>,
-    configuration: GuiConfig,
-    size: GuiSize,
-    parent: StoredParentWindow,
-    scale: f64,
-    generation: u64,
+    request: RuntimeCreationRequest,
+    run_loop: &RunLoopLocal,
 ) -> PluginResult<GuiRuntimeHandle> {
-    let parent = parent.to_parent_window_handle()?;
+    let parent = request.parent.to_parent_window_handle()?;
     log::debug!("wxp controller: parent handle converted");
-    let handle =
-        match create_gui_runtime_handle(|| factory.create_gui_runtime(configuration, size, parent))
-        {
-            Ok(handle) => handle,
-            Err(error) => {
-                let mut state = runtime.lock();
-                if state.creating_generation == Some(generation) {
-                    state.is_creating_runtime = false;
-                    state.creating_generation = None;
-                    state.pending_creation_generation = None;
-                    state.destroy_requested_while_creating = false;
-                }
-                return Err(error);
+    let handle = match create_gui_runtime_handle(
+        |run_loop| {
+            factory.create_gui_runtime(run_loop, request.configuration, request.size, parent)
+        },
+        run_loop,
+    ) {
+        Ok(handle) => handle,
+        Err(error) => {
+            let mut state = runtime.lock();
+            if state.creating_generation == Some(request.generation) {
+                state.is_creating_runtime = false;
+                state.creating_generation = None;
+                state.pending_creation_generation = None;
+                state.destroy_requested_while_creating = false;
             }
-        };
+            return Err(error);
+        }
+    };
     log::debug!("wxp controller: runtime handle created");
-    if finish_runtime_creation_requested_destroy(runtime, generation) {
+    if finish_runtime_creation_requested_destroy(runtime, request.generation) {
         log::debug!(
             "wxp controller: destroying newly created runtime after stale/deferred destroy"
         );
@@ -463,7 +495,7 @@ fn create_runtime_after_wait(
         runtime.lock().last_runtime_destroyed_at = Some(Instant::now());
         return Err(PluginError::InvalidState);
     }
-    if let Err(error) = handle.set_scale(scale) {
+    if let Err(error) = handle.set_scale(request.scale) {
         log::warn!("wxp controller: initial set_scale failed: {error:?}");
         handle.destroy();
         return Err(error);

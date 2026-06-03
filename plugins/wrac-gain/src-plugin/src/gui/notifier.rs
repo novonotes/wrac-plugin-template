@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use novonotes_run_loop::{RunLoop, RunLoopSender};
+use novonotes_run_loop::RunLoop;
 use parking_lot::Mutex;
 use serde_json::json;
 use wxp::Channel;
@@ -23,8 +23,6 @@ pub(crate) struct GuiStateNotifier {
 #[derive(Clone)]
 struct GuiSubscription {
     kind: GuiSubscriptionKind,
-    // Run loop sender for dispatching notifications back to the UI thread.
-    sender: RunLoopSender,
     // Channel for sending values to the JS subscriber in the WebView.
     channel: Channel,
 }
@@ -71,14 +69,9 @@ impl GuiStateNotifier {
         // IDs are assigned independently of wxp's Channel IDs so that transport and
         // subscription lifecycle can be managed separately.
         let id = GuiSubscriptionId(self.next_subscription_id.fetch_add(1, Ordering::Relaxed));
-        self.subscriptions.lock().insert(
-            id,
-            GuiSubscription {
-                kind,
-                sender: RunLoop::sender(),
-                channel,
-            },
-        );
+        self.subscriptions
+            .lock()
+            .insert(id, GuiSubscription { kind, channel });
         id
     }
 
@@ -124,7 +117,7 @@ impl GuiStateNotifier {
             // WebView channels may only be touched on the same UI thread as the GUI
             // runtime. Sending directly from a host or audio thread would violate thread
             // affinity, so always dispatch back through the run loop first.
-            subscription.sender.send(move || {
+            let _ = RunLoop::post(move |_| {
                 let _ = subscription.channel.send(payload);
             });
         }

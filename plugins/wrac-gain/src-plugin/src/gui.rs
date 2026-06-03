@@ -19,17 +19,46 @@ pub(crate) use notifier::{
     GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload,
 };
 
+use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier};
-use wrac_wxp_gui::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle, WxpGuiRuntime};
+use wrac_clap_adapter::{
+    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginResult,
+};
+use wrac_wxp_gui::{
+    GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
+    WxpGuiRuntime,
+};
 
 use crate::state::{ProjectStateStore, SharedState};
 
 pub(crate) struct GuiIntegration {
     pub(crate) controller: Arc<WxpGuiController>,
     pub(crate) notifier: Arc<GuiStateNotifier>,
+}
+
+struct WracGainGuiFactory {
+    dependencies: GuiRuntimeDependencies,
+}
+
+impl WxpGuiFactory for WracGainGuiFactory {
+    fn create_gui_runtime(
+        &self,
+        run_loop: &RunLoopLocal,
+        configuration: GuiConfig,
+        initial_size: GuiSize,
+        parent: ParentWindowHandle,
+    ) -> PluginResult<Box<dyn WxpGuiRuntime>> {
+        WracGainGuiRuntime::create(
+            run_loop,
+            self.dependencies.clone(),
+            configuration,
+            initial_size,
+            parent,
+        )
+        .map(|runtime| Box::new(runtime) as Box<dyn WxpGuiRuntime>)
+    }
 }
 
 /// Assembles the complete GUI extension set used by the plugin core.
@@ -57,14 +86,8 @@ pub(crate) fn create_gui_integration(
         resize_handle: resize_handle.clone(),
     };
     let controller = Arc::new(WxpGuiController::new_with_resize_handle(
-        move |configuration, initial_size, parent| {
-            WracGainGuiRuntime::create(
-                runtime_dependencies.clone(),
-                configuration,
-                initial_size,
-                parent,
-            )
-            .map(|runtime| Box::new(runtime) as Box<dyn WxpGuiRuntime>)
+        WracGainGuiFactory {
+            dependencies: runtime_dependencies,
         },
         resize_handle,
     ));

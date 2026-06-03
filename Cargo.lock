@@ -1418,7 +1418,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
+source = "git+https://github.com/novonotes/wxp.git?rev=0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717#0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717"
 dependencies = [
  "core-foundation",
  "futures",
@@ -1969,7 +1969,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 [[package]]
 name = "run_loop_timer"
 version = "0.1.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
+source = "git+https://github.com/novonotes/wxp.git?rev=0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717#0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717"
 dependencies = [
  "novonotes_run_loop",
 ]
@@ -3008,7 +3008,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.55.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
+source = "git+https://github.com/novonotes/wxp.git?rev=0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717#0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3051,7 +3051,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=e13c91e8effb625489d2487050226b75f1557a33#e13c91e8effb625489d2487050226b75f1557a33"
+source = "git+https://github.com/novonotes/wxp.git?rev=0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717#0feb83811e0b7e65ed3f06a5c5ed8a9a77e9b717"
 dependencies = [
  "async-trait",
  "directories",
