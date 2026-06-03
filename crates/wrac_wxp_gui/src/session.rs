@@ -9,7 +9,7 @@ use wrac_clap_adapter::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
 use crate::controller::GuiSizeLimits;
-use crate::dpi::DpiConverter;
+use crate::dpi::{DpiConverter, HostGuiSizeUnit};
 use crate::window::ParentWindowHandle;
 
 const URL_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -33,12 +33,13 @@ pub enum WxpFrontendSource {
 /// Configuration needed to create a native WebView session.
 ///
 /// `plugin_id` is also used to isolate WebView user-data directories, so pass the same
-/// reverse-DNS ID used by the host descriptor. Size limits are interpreted as physical
-/// pixels because that is the CLAP host boundary.
+/// reverse-DNS ID used by the host descriptor. Size limits use the same unit as the
+/// host GUI size callbacks selected by `host_size_unit`.
 pub struct WxpWebViewConfig {
     pub plugin_id: &'static str,
     pub initial_size: GuiSize,
     pub limits: GuiSizeLimits,
+    pub host_size_unit: HostGuiSizeUnit,
     pub parent: ParentWindowHandle,
     pub frontend: WxpFrontendSource,
     pub devtools: bool,
@@ -79,9 +80,9 @@ impl WxpWebViewSession {
         log::debug!("using GUI data directory: {}", data_dir.display());
 
         let mut wxp_context = WebContext::new(data_dir);
-        let dpi_converter = DpiConverter::new(1.0);
-        // The host contract is physical pixels. Convert initial bounds here so product
-        // runtimes never need platform-specific DPI branches.
+        let dpi_converter = DpiConverter::with_host_size_unit(1.0, config.host_size_unit);
+        // Convert initial bounds here so product runtimes never need host- or
+        // platform-specific DPI branches.
         let host_size = clamp_size(config.initial_size, config.limits);
         let logical_size = dpi_converter.gui_size_to_logical(host_size);
         let bounds = dpi_converter.create_webview_bounds(logical_size);

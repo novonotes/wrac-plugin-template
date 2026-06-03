@@ -13,6 +13,7 @@ mod session;
 mod window;
 
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
+pub use dpi::HostGuiSizeUnit;
 pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
 pub use session::{WxpFrontendSource, WxpWebViewConfig, WxpWebViewSession};
