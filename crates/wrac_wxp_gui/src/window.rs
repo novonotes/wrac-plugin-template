@@ -44,6 +44,16 @@ impl StoredParentWindow {
         }
     }
 
+    #[cfg(windows)]
+    pub(crate) fn win32_hwnd(self) -> Option<*mut c_void> {
+        // Keep platform-specific parent inspection here so GUI policy code does not need
+        // to duplicate raw-window-handle matching or make assumptions about other backends.
+        match self {
+            Self::Win32 { hwnd } => Some(hwnd as *mut c_void),
+            _ => None,
+        }
+    }
+
     pub(crate) fn to_parent_window_handle(self) -> PluginResult<ParentWindowHandle> {
         match self {
             Self::Cocoa { ns_view } => {

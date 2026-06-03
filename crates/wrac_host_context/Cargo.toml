@@ -1,0 +1,13 @@
+[package]
+name = "wrac_host_context"
+version = "0.1.0"
+edition = "2024"
+description = "Host and wrapper-format detection for WRAC plugins"
+license = "MIT"
+repository = "https://github.com/novonotes/wrac-plugin-template"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+unreachable_pub = "deny"

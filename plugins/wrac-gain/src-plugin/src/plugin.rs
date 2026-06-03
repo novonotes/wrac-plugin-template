@@ -150,6 +150,7 @@ impl WracGainPlugin {
             shared.clone(),
             context.host_parameter_edit_notifier,
             context.host_gui_resize_requester,
+            context.host_context,
         );
         let state_extension = Arc::new(WracGainStateExtension::new(
             project_state,

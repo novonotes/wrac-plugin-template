@@ -179,6 +179,30 @@ impl GuiRuntimeHandle {
         .map_err(|_| PluginError::InvalidState)?
     }
 
+    pub(crate) fn post_set_size(&self, size: GuiSize) -> PluginResult<()> {
+        let id = self.id;
+        log::debug!(
+            "wxp runtime {id}: post_set_size requested: width={}, height={}",
+            size.width,
+            size.height
+        );
+        // Used when a host mutates the native parent after the synchronous callback.
+        // Posting keeps the latest bounds tied to the runtime id while allowing stale
+        // editor sessions to disappear without turning a harmless race into an error.
+        RunLoop::post(move |_| {
+            GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let Some(entry) = runtimes.get_mut(&id) else {
+                    log::debug!("wxp runtime {id}: post_set_size skipped missing runtime");
+                    return;
+                };
+                let result = entry.runtime.set_size(size);
+                log::debug!("wxp runtime {id}: post_set_size completed: result={result:?}");
+            });
+        })
+        .map_err(|_| PluginError::InvalidState)
+    }
+
     pub(crate) fn show(&self) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: show requested");

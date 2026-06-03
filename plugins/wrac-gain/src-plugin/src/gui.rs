@@ -24,7 +24,7 @@ use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
 use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginResult,
+    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, HostParamsEditNotifier, PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
@@ -68,6 +68,7 @@ pub(crate) fn create_gui_integration(
     shared: Arc<SharedState>,
     host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    host_context: HostContext,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());
     let resize_handle = WxpGuiResizeHandle::new(
@@ -90,6 +91,7 @@ pub(crate) fn create_gui_integration(
             dependencies: runtime_dependencies,
         },
         resize_handle,
+        host_context,
     ));
 
     GuiIntegration {

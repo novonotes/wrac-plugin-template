@@ -8,6 +8,7 @@ use wrac_clap_adapter::{
     GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
     PluginGuiExtension, PluginResult,
 };
+use wrac_host_context::HostContext;
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
 use crate::dpi::DpiConverter;
@@ -35,6 +36,7 @@ pub struct WxpGuiController {
     layout: Arc<HostGuiLayout>,
     scale: Arc<Mutex<f64>>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
+    host_context: HostContext,
 }
 
 struct HostGuiLayout {
@@ -112,6 +114,7 @@ impl WxpGuiController {
     pub fn new_with_resize_handle(
         factory: impl WxpGuiFactory,
         resize_handle: WxpGuiResizeHandle,
+        host_context: HostContext,
     ) -> Self {
         Self {
             factory: Arc::new(factory),
@@ -126,6 +129,7 @@ impl WxpGuiController {
                 pending_creation_generation: None,
                 destroy_requested_while_creating: false,
             })),
+            host_context,
         }
     }
 
@@ -150,6 +154,26 @@ impl WxpGuiController {
             self.note_runtime_destroyed();
         }
         log::debug!("wxp controller: destroy_gui_session completed");
+    }
+
+    fn should_async_resync_bounds_after_set_size(&self) -> bool {
+        self.host_context.is_cubase_vst3()
+    }
+
+    fn correct_host_scale(&self, scale: f64, parent: Option<StoredParentWindow>) -> f64 {
+        if !self.host_context.is_cubase_vst3() {
+            return scale;
+        }
+        // Cubase 10 on Windows has been observed to report integer VST3 scale factors
+        // even when the editor is hosted on a fractional-DPI monitor. The host parent
+        // HWND is the closest source of truth for the actual size conversion.
+        let corrected = corrected_scale_for_parent(parent).unwrap_or(scale);
+        if (corrected - scale).abs() > f64::EPSILON {
+            log::info!(
+                "wxp controller: corrected Cubase VST3 host scale from {scale} to {corrected}"
+            );
+        }
+        corrected
     }
 
     fn note_runtime_destroyed(&self) {
@@ -713,6 +737,81 @@ fn unpack_size(size: u64) -> GuiSize {
     }
 }
 
+#[cfg(windows)]
+fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> Option<f64> {
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{
+        HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
+    };
+    use windows_sys::Win32::UI::HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE};
+
+    type GetDpiForWindowFn = unsafe extern "system" fn(HWND) -> u32;
+    type GetDpiForMonitorFn =
+        unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut u32, *mut u32) -> i32;
+
+    let hwnd = parent?.win32_hwnd()? as HWND;
+    if hwnd.is_null() {
+        return None;
+    }
+
+    static GET_DPI_FOR_WINDOW: OnceLock<Option<GetDpiForWindowFn>> = OnceLock::new();
+    if let Some(get_dpi_for_window) = *GET_DPI_FOR_WINDOW
+        .get_or_init(|| unsafe { load_windows_proc(b"user32.dll\0", b"GetDpiForWindow\0") })
+    {
+        let window_dpi = unsafe { get_dpi_for_window(hwnd) };
+        if window_dpi > 0 {
+            return Some(window_dpi as f64 / 96.0);
+        }
+    }
+
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return None;
+    }
+
+    static GET_DPI_FOR_MONITOR: OnceLock<Option<GetDpiForMonitorFn>> = OnceLock::new();
+    let get_dpi_for_monitor = (*GET_DPI_FOR_MONITOR
+        .get_or_init(|| unsafe { load_windows_proc(b"shcore.dll\0", b"GetDpiForMonitor\0") }))?;
+
+    let mut dpi_x = 0u32;
+    let mut dpi_y = 0u32;
+    let result = unsafe {
+        get_dpi_for_monitor(
+            monitor,
+            MDT_EFFECTIVE_DPI,
+            &mut dpi_x as *mut u32,
+            &mut dpi_y as *mut u32,
+        )
+    };
+    if result == 0 && dpi_x > 0 {
+        Some(dpi_x as f64 / 96.0)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+unsafe fn load_windows_proc<T>(module_name: &[u8], proc_name: &[u8]) -> Option<T>
+where
+    T: Copy,
+{
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+
+    let module = unsafe { LoadLibraryA(module_name.as_ptr()) };
+    if module.is_null() {
+        return None;
+    }
+    let proc = unsafe { GetProcAddress(module, proc_name.as_ptr()) }?;
+    Some(unsafe { std::mem::transmute_copy(&proc) })
+}
+
+#[cfg(not(windows))]
+fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
+    None
+}
+
 impl PluginGuiExtension for WxpGuiController {
     fn is_api_supported(&self, api: GuiApi, is_floating: bool) -> bool {
         !is_floating && api == default_gui_api()
@@ -760,13 +859,14 @@ impl PluginGuiExtension for WxpGuiController {
 
     fn set_scale(&self, scale: f64) -> PluginResult<()> {
         log::debug!("wxp controller: set_scale called: scale={scale}");
-        let handle = {
+        let (handle, scale) = {
             let mut state = self.runtime.lock();
             if let Some(session) = &mut state.session {
-                session.scale = scale;
-                session.handle.clone()
+                let corrected_scale = self.correct_host_scale(scale, session.parent);
+                session.scale = corrected_scale;
+                (session.handle.clone(), corrected_scale)
             } else {
-                None
+                (None, scale)
             }
         };
         if let Some(handle) = handle {
@@ -819,6 +919,18 @@ impl PluginGuiExtension for WxpGuiController {
         if let Some(handle) = handle {
             if size_changed {
                 handle.set_size(size)?;
+            }
+            if self.should_async_resync_bounds_after_set_size() {
+                // Cubase 10 on macOS can resize the host-owned editor window after
+                // delivering `set_size`, leaving the embedded child view one geometry
+                // step behind. Re-posting the latest accepted size lets the host finish
+                // its adjustment before wxp reapplies child bounds.
+                log::debug!(
+                    "wxp controller: scheduling Cubase VST3 async bounds resync: width={}, height={}",
+                    size.width,
+                    size.height
+                );
+                handle.post_set_size(size)?;
             }
         }
         self.layout.store_accepted_size(size);
@@ -885,6 +997,9 @@ impl PluginGuiExtension for WxpGuiController {
             return Err(PluginError::InvalidState);
         }
         session.parent = Some(parent);
+        // If `set_scale` arrived before `set_parent`, Cubase VST3 scale correction must
+        // wait until the native parent window is known.
+        session.scale = self.correct_host_scale(session.scale, Some(parent));
         if let Some(parent_lease) = parent_lease {
             session.parent_lease = Some(parent_lease);
         }

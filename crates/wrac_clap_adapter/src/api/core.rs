@@ -6,6 +6,7 @@ use crate::{
     PluginLatencyExtension, PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension,
     PluginResult, PluginStateExtension, PluginTailExtension, Processor,
 };
+use wrac_host_context::HostContext;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ActivateContext {
@@ -22,6 +23,7 @@ pub struct PluginCoreContext {
     pub host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     pub host_state_dirty_notifier: Arc<dyn HostStateDirtyNotifier>,
     pub host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    pub host_context: HostContext,
 }
 
 /// Entry point for a single plugin instance's lifecycle and capabilities.

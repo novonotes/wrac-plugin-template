@@ -16,6 +16,10 @@ use clap_sys::plugin::clap_plugin;
 use super::PluginInstance;
 use super::ffi::{ffi_bool, ffi_u32, ffi_unit, fill_c_char_array, write_c_str_buffer};
 use crate::ParamFlags;
+use wrac_host_context::PluginFormat;
+
+const CLAP_INVALID_PARAM_ID: u32 = u32::MAX;
+const VST3_MAX_PUBLIC_PARAM_ID: u32 = 0x7fff_ffff;
 
 pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
     count: Some(params_count),
@@ -70,6 +74,18 @@ unsafe extern "C" fn params_get_info(
             log::warn!("params.get_info: invalid index={param_index}");
             return false;
         };
+        // `UINT32_MAX` is invalid in CLAP. Through VST3, the high-bit range is also
+        // reserved and clap-wrapper masks it when translating IDs, which can collide
+        // otherwise distinct parameters. Rejecting at discovery keeps the bad mapping
+        // out of the host instead of letting automation lanes corrupt later.
+        if !is_param_id_exposable(info.id, instance.host_context.plugin_format) {
+            log::error!(
+                "params.get_info: rejecting unsupported parameter id index={param_index} id={} format={}",
+                info.id,
+                instance.host_context.plugin_format.as_str()
+            );
+            return false;
+        }
         log::debug!(
             "params.get_info: index={param_index} id={} name={} flags={} thread={:?}",
             info.id,
@@ -90,6 +106,13 @@ unsafe extern "C" fn params_get_info(
         }
         true
     })
+}
+
+fn is_param_id_exposable(param_id: u32, plugin_format: PluginFormat) -> bool {
+    if param_id == CLAP_INVALID_PARAM_ID {
+        return false;
+    }
+    plugin_format != PluginFormat::Vst3 || param_id <= VST3_MAX_PUBLIC_PARAM_ID
 }
 
 unsafe extern "C" fn params_get_value(
@@ -270,4 +293,31 @@ fn parameter_flags(flags: ParamFlags) -> u32 {
         raw |= CLAP_PARAM_IS_ENUM;
     }
     raw
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_clap_invalid_param_id_for_all_formats() {
+        assert!(!is_param_id_exposable(
+            CLAP_INVALID_PARAM_ID,
+            PluginFormat::Unknown
+        ));
+        assert!(!is_param_id_exposable(
+            CLAP_INVALID_PARAM_ID,
+            PluginFormat::Vst3
+        ));
+    }
+
+    #[test]
+    fn rejects_vst3_reserved_param_id_range_only_for_vst3() {
+        assert!(is_param_id_exposable(0x8000_0000, PluginFormat::Unknown));
+        assert!(!is_param_id_exposable(0x8000_0000, PluginFormat::Vst3));
+        assert!(is_param_id_exposable(
+            VST3_MAX_PUBLIC_PARAM_ID,
+            PluginFormat::Vst3
+        ));
+    }
 }

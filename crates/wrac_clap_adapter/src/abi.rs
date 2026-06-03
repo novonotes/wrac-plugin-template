@@ -29,6 +29,7 @@ use clap_sys::process::{
 };
 use clap_sys::version::clap_version_is_compatible;
 use parking_lot::{Mutex, RwLock};
+use wrac_host_context::HostContext;
 
 mod audio_buffers;
 mod audio_ports;
@@ -91,6 +92,7 @@ pub(crate) struct PluginInstance {
     render: Option<Arc<dyn PluginRenderExtension>>,
     tail: Option<Arc<dyn PluginTailExtension>>,
     latency: Option<Arc<dyn PluginLatencyExtension>>,
+    host_context: HostContext,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
     gui_callback_busy: Mutex<()>,
@@ -130,17 +132,29 @@ impl PluginInstance {
         host: *const clap_host,
     ) -> Option<Box<Self>> {
         let parameter_edits = Arc::new(ParameterEditQueue::new(host));
+        let clap_host_name = unsafe { clap_host_name(host) };
+        let host_context = HostContext::detect_current(clap_host_name.as_deref());
         // Pass as a safe proxy so product GUI code can hold it without knowing about
         // host pointers or CLAP event lifetimes.
         let context = PluginCoreContext {
             host_parameter_edit_notifier: parameter_edits.clone(),
             host_state_dirty_notifier: Arc::new(HostStateDirtyNotification::new(host)),
             host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
+            host_context: host_context.clone(),
         };
         let core = registration
             .entry
             .plugin_factory()?
             .create_plugin(plugin_id, context)?;
+        // Product construction initializes logging. Emit immediately afterward so
+        // wrapper/host routing is visible before capability queries or GUI attachment.
+        log::info!(
+            "factory.create_plugin: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
+            host_context.host.display_name,
+            host_context.host.process_name,
+            host_context.plugin_format.as_str(),
+            clap_host_name.as_deref().unwrap_or("")
+        );
         // Freeze capabilities here, before callbacks begin. Waiting on the core lock
         // inside get_extension would make us dependent on host re-entry order. The Arc
         // is just an entry point; the source of truth remains in the plugin's store.
@@ -192,6 +206,7 @@ impl PluginInstance {
             render,
             tail,
             latency,
+            host_context,
             gui_callback_busy: Mutex::new(()),
             parameter_edits,
             processor: UnsafeCell::new(None),
@@ -299,6 +314,21 @@ impl PluginInstance {
             std::thread::yield_now();
         }
     }
+}
+
+unsafe fn clap_host_name(host: *const clap_host) -> Option<String> {
+    if host.is_null() {
+        return None;
+    }
+    let name = unsafe { (*host).name };
+    if name.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { CStr::from_ptr(name) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 struct LifecycleGuard<'a>(&'a AtomicBool);

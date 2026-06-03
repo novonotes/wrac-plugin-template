@@ -12,6 +12,7 @@ publish = false
 clap-sys = { workspace = true }
 log = "0.4"
 parking_lot = "0.12"
+wrac_host_context = { workspace = true }
 wrac_log = { workspace = true }
 
 [lints.rust]

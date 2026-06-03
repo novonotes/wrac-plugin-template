@@ -17,11 +17,12 @@ mod params;
 mod process_buffer;
 
 pub use api::{
-    ActivateContext, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, GuiApi,
-    GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier,
-    HostStateDirtyNotifier, HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo,
-    ParamValueEvent, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
-    PluginCoreContext, PluginError, PluginGuiExtension, PluginLatencyExtension,
+    ActivateContext, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
+    DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext, HostFamily,
+    HostGuiResizeRequester, HostParamsEditNotifier, HostStateDirtyNotifier, HostVersion,
+    HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo, ParamValueEvent,
+    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
+    PluginCoreContext, PluginError, PluginFormat, PluginGuiExtension, PluginLatencyExtension,
     PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension, PluginRenderMode,
     PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus,
     Processor, State,
