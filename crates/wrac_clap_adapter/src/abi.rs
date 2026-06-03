@@ -134,15 +134,6 @@ impl PluginInstance {
         let parameter_edits = Arc::new(ParameterEditQueue::new(host));
         let clap_host_name = unsafe { clap_host_name(host) };
         let host_context = HostContext::detect_current(clap_host_name.as_deref());
-        // Emit before product construction so wrapper/host routing is visible even when
-        // plugin initialization or WebView attachment fails later in the session.
-        log::info!(
-            "factory.create_plugin: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
-            host_context.host.display_name,
-            host_context.host.process_name,
-            host_context.plugin_format.as_str(),
-            clap_host_name.as_deref().unwrap_or("")
-        );
         // Pass as a safe proxy so product GUI code can hold it without knowing about
         // host pointers or CLAP event lifetimes.
         let context = PluginCoreContext {
@@ -155,6 +146,15 @@ impl PluginInstance {
             .entry
             .plugin_factory()?
             .create_plugin(plugin_id, context)?;
+        // Product construction initializes logging. Emit immediately afterward so
+        // wrapper/host routing is visible before capability queries or GUI attachment.
+        log::info!(
+            "factory.create_plugin: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
+            host_context.host.display_name,
+            host_context.host.process_name,
+            host_context.plugin_format.as_str(),
+            clap_host_name.as_deref().unwrap_or("")
+        );
         // Freeze capabilities here, before callbacks begin. Waiting on the core lock
         // inside get_extension would make us dependent on host re-entry order. The Arc
         // is just an entry point; the source of truth remains in the plugin's store.
