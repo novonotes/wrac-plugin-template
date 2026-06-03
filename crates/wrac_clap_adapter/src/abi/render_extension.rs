@@ -5,7 +5,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstance;
 use super::ffi::ffi_bool;
-use crate::RenderMode;
+use crate::PluginRenderMode;
 
 pub(super) static RENDER: clap_plugin_render = clap_plugin_render {
     has_hard_realtime_requirement: Some(render_has_hard_realtime_requirement),
@@ -50,10 +50,10 @@ unsafe extern "C" fn render_set(plugin: *const clap_plugin, mode: clap_plugin_re
     })
 }
 
-fn convert_render_mode(mode: clap_plugin_render_mode) -> Option<RenderMode> {
+fn convert_render_mode(mode: clap_plugin_render_mode) -> Option<PluginRenderMode> {
     match mode {
-        CLAP_RENDER_REALTIME => Some(RenderMode::Realtime),
-        CLAP_RENDER_OFFLINE => Some(RenderMode::Offline),
+        CLAP_RENDER_REALTIME => Some(PluginRenderMode::Realtime),
+        CLAP_RENDER_OFFLINE => Some(PluginRenderMode::Offline),
         _ => None,
     }
 }

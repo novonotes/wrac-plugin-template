@@ -15,7 +15,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstance;
 use super::ffi::{ffi_bool, ffi_u32, ffi_unit, fill_c_char_array, write_c_str_buffer};
-use crate::ParameterFlags;
+use crate::ParamFlags;
 
 pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
     count: Some(params_count),
@@ -39,7 +39,7 @@ unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
             log::warn!("params.count: plugin has no parameters");
             return 0;
         };
-        let count = parameters.parameter_count();
+        let count = parameters.param_count();
         log::debug!(
             "params.count: count={count} thread={:?}",
             std::thread::current().id()
@@ -66,7 +66,7 @@ unsafe extern "C" fn params_get_info(
             log::warn!("params.get_info: plugin has no parameters index={param_index}");
             return false;
         };
-        let Some(info) = parameters.parameter_info(param_index) else {
+        let Some(info) = parameters.param_info(param_index) else {
             log::warn!("params.get_info: invalid index={param_index}");
             return false;
         };
@@ -110,7 +110,7 @@ unsafe extern "C" fn params_get_value(
             log::warn!("params.get_value: plugin has no parameters param_id={param_id}");
             return false;
         };
-        let Ok(value) = parameters.parameter_value(param_id) else {
+        let Ok(value) = parameters.param_value(param_id) else {
             log::warn!("params.get_value: invalid param_id={param_id}");
             return false;
         };
@@ -141,7 +141,7 @@ unsafe extern "C" fn params_value_to_text(
             log::warn!("params.value_to_text: plugin has no parameters param_id={param_id}");
             return false;
         };
-        let Ok(text) = parameters.parameter_value_to_text(param_id, value) else {
+        let Ok(text) = parameters.value_to_text(param_id, value) else {
             log::warn!("params.value_to_text: invalid param_id={param_id} value={value}");
             return false;
         };
@@ -176,7 +176,7 @@ unsafe extern "C" fn params_text_to_value(
             log::warn!("params.text_to_value: plugin has no parameters param_id={param_id}");
             return false;
         };
-        let Ok(value) = parameters.parameter_text_to_value(param_id, text) else {
+        let Ok(value) = parameters.text_to_value(param_id, text) else {
             log::warn!("params.text_to_value: invalid param_id={param_id} text={text}");
             return false;
         };
@@ -216,7 +216,7 @@ unsafe extern "C" fn params_flush(
     });
 }
 
-fn parameter_flags(flags: ParameterFlags) -> u32 {
+fn parameter_flags(flags: ParamFlags) -> u32 {
     let mut raw = 0;
     if flags.is_stepped {
         raw |= CLAP_PARAM_IS_STEPPED;

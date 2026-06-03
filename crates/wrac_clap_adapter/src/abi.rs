@@ -56,9 +56,10 @@ use crate::host_gui::HostGuiResizeRequest;
 use crate::host_state::HostStateDirtyNotification;
 use crate::params::ParameterEditQueue;
 use crate::{
-    ActivateContext, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore, PluginCoreContext,
-    PluginGui, PluginLatency, PluginNotePorts, PluginParameters, PluginRender, PluginStateSupport,
-    PluginTail, ProcessContext, ProcessStatus, Processor, TransportEvent,
+    ActivateContext, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
+    PluginCoreContext, PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension,
+    PluginParamsExtension, PluginRenderExtension, PluginStateExtension, PluginTailExtension,
+    ProcessContext, ProcessStatus, Processor, TransportEvent,
 };
 
 // clap-wrapper reads this draft factory when generating AUv2 metadata. Without a
@@ -81,15 +82,15 @@ pub(crate) struct PluginInstance {
     // Capability presence is frozen at instance creation. Coupling it to runtime state
     // would make extensions appear to disappear transiently during queries.
     capabilities: PluginCapabilities,
-    audio_ports: Option<Arc<dyn PluginAudioPorts>>,
-    configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPorts>>,
-    note_ports: Option<Arc<dyn PluginNotePorts>>,
-    parameters: Option<Arc<dyn PluginParameters>>,
-    state: Option<Arc<dyn PluginStateSupport>>,
-    gui: Option<Arc<dyn PluginGui>>,
-    render: Option<Arc<dyn PluginRender>>,
-    tail: Option<Arc<dyn PluginTail>>,
-    latency: Option<Arc<dyn PluginLatency>>,
+    audio_ports: Option<Arc<dyn PluginAudioPortsExtension>>,
+    configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPortsExtension>>,
+    note_ports: Option<Arc<dyn PluginNotePortsExtension>>,
+    parameters: Option<Arc<dyn PluginParamsExtension>>,
+    state: Option<Arc<dyn PluginStateExtension>>,
+    gui: Option<Arc<dyn PluginGuiExtension>>,
+    render: Option<Arc<dyn PluginRenderExtension>>,
+    tail: Option<Arc<dyn PluginTailExtension>>,
+    latency: Option<Arc<dyn PluginLatencyExtension>>,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
     gui_callback_busy: Mutex<()>,
@@ -146,7 +147,7 @@ impl PluginInstance {
         let audio_ports = core.audio_ports();
         let configurable_audio_ports = core.configurable_audio_ports();
         let note_ports = core.note_ports();
-        let parameters = core.parameters();
+        let parameters = core.params();
         let state = core.state();
         let gui = core.gui();
         let render = core.render();

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use wrac_clap_adapter::{
-    ParameterFlags, ParameterInfo, ParameterValueEvent, PluginError, PluginParameters, PluginResult,
+    ParamFlags, ParamInfo, ParamValueEvent, PluginError, PluginParamsExtension, PluginResult,
 };
 
 use crate::state::SharedState;
 
 // Parameter IDs are stable values used by the host for automation and project saving.
 // Never change them after publishing. To add a new parameter: append an ID here and
-// keep the `PluginParameters` impl and `SharedState` match arms in sync.
+// keep the `PluginParamsExtension` impl and `SharedState` match arms in sync.
 pub(crate) const PARAM_GAIN_ID: u32 = 1;
 pub(crate) const PARAM_BYPASS_ID: u32 = 9;
 
@@ -22,43 +22,43 @@ pub(crate) const MAX_GAIN: f32 = 2.0;
 /// Schema and values are read concurrently from generic editors, automation, and post-restore
 /// rescans. Touching only the atomic source of truth in [`SharedState`] — without reaching
 /// into the GUI runtime or project state — decouples host queries from the plugin lifecycle.
-pub(super) struct WracGainParameters {
+pub(super) struct WracGainParamsExtension {
     shared: Arc<SharedState>,
 }
 
-impl WracGainParameters {
+impl WracGainParamsExtension {
     pub(super) fn new(shared: Arc<SharedState>) -> Self {
         Self { shared }
     }
 }
 
 // The host-facing publication point for new parameters (schema and string representation).
-impl PluginParameters for WracGainParameters {
-    fn parameter_count(&self) -> u32 {
-        // When adding a new parameter: keep this count in sync with the `parameter_info()` match.
+impl PluginParamsExtension for WracGainParamsExtension {
+    fn param_count(&self) -> u32 {
+        // When adding a new parameter: keep this count in sync with the `param_info()` match.
         2
     }
 
-    fn parameter_info(&self, index: u32) -> Option<ParameterInfo> {
+    fn param_info(&self, index: u32) -> Option<ParamInfo> {
         // Mapping of sequential index to stable ID. IDs persist in project/automation data — never change them.
         match index {
-            0 => Some(gain_parameter_info()),
-            1 => Some(bypass_parameter_info()),
+            0 => Some(gain_param_info()),
+            1 => Some(bypass_param_info()),
             _ => None,
         }
     }
 
     /// Answers the host's query for the current value of a parameter.
-    fn parameter_value(&self, parameter_id: u32) -> PluginResult<f64> {
-        match parameter_id {
+    fn param_value(&self, param_id: u32) -> PluginResult<f64> {
+        match param_id {
             PARAM_GAIN_ID => self
                 .shared
-                .parameter_value(parameter_id)
+                .parameter_value(param_id)
                 .map(gain_to_host_value)
                 .ok_or(PluginError::InvalidParameter),
             PARAM_BYPASS_ID => self
                 .shared
-                .parameter_value(parameter_id)
+                .parameter_value(param_id)
                 .map(|value| value as f64)
                 .ok_or(PluginError::InvalidParameter),
             _ => Err(PluginError::InvalidParameter),
@@ -66,35 +66,36 @@ impl PluginParameters for WracGainParameters {
     }
 
     /// Called when a parameter value arrives from the host as an input event.
-    fn apply_parameter_value(&self, event: ParameterValueEvent) -> PluginResult<f64> {
-        if event.parameter_id == PARAM_BYPASS_ID {
+    fn apply_param_value(&self, event: ParamValueEvent) -> PluginResult<f64> {
+        if event.param_id == PARAM_BYPASS_ID {
             return self
                 .shared
-                .set_parameter_value(event.parameter_id, event.value)
+                .set_parameter_value(event.param_id, event.value)
                 .map(|value| value as f64)
                 .ok_or(PluginError::InvalidParameter);
         }
         let value = self
             .shared
-            .set_parameter_value(event.parameter_id, host_value_to_gain(event.value))
+            .set_parameter_value(event.param_id, host_value_to_gain(event.value))
             .ok_or(PluginError::InvalidParameter)?;
         Ok(gain_to_host_value(value))
     }
 
     /// Converts an internal value to a display string. Example: 1.0 → "0.0 dB".
-    fn parameter_value_to_text(&self, parameter_id: u32, value: f64) -> PluginResult<String> {
-        match parameter_id {
-            PARAM_GAIN_ID => parameter_value_text(parameter_id, host_value_to_gain(value)),
+    fn value_to_text(&self, param_id: u32, value: f64) -> PluginResult<String> {
+        match param_id {
+            PARAM_GAIN_ID => parameter_value_text(param_id, host_value_to_gain(value)),
             PARAM_BYPASS_ID => Ok(if value >= 0.5 { "On" } else { "Off" }.to_string()),
             _ => Err(PluginError::InvalidParameter),
         }
     }
 
     /// Converts a display string to an internal value. Called when the user types "3 dB" into the host UI.
-    fn parameter_text_to_value(&self, parameter_id: u32, text: &str) -> PluginResult<f64> {
-        match parameter_id {
-            PARAM_GAIN_ID => parameter_text_value(parameter_id, text)
-                .map(|value| gain_to_host_value(value as f32)),
+    fn text_to_value(&self, param_id: u32, text: &str) -> PluginResult<f64> {
+        match param_id {
+            PARAM_GAIN_ID => {
+                parameter_text_value(param_id, text).map(|value| gain_to_host_value(value as f32))
+            }
             PARAM_BYPASS_ID => match text.trim().to_ascii_lowercase().as_str() {
                 "on" | "1" | "true" => Ok(1.0),
                 "off" | "0" | "false" => Ok(0.0),
@@ -110,40 +111,40 @@ pub(crate) fn clamp_gain(gain: f32) -> f32 {
     gain.clamp(MIN_GAIN, MAX_GAIN)
 }
 
-pub(crate) fn gain_parameter_info() -> ParameterInfo {
-    ParameterInfo {
+pub(crate) fn gain_param_info() -> ParamInfo {
+    ParamInfo {
         id: PARAM_GAIN_ID,
         name: "Gain",
         module: "",
         min_value: 0.0,
         max_value: 1.0,
         default_value: gain_to_host_value(DEFAULT_GAIN),
-        flags: ParameterFlags {
+        flags: ParamFlags {
             // Setting this false prevents automation in the DAW.
             is_automatable: true,
-            ..ParameterFlags::default()
+            ..ParamFlags::default()
         },
     }
 }
 
-pub(crate) fn bypass_parameter_info() -> ParameterInfo {
+pub(crate) fn bypass_param_info() -> ParamInfo {
     // Some hosts suppress all parameters in their generic editor if there is no bypass
     // parameter. Include a working bypass even in the template.
-    ParameterInfo {
+    ParamInfo {
         id: PARAM_BYPASS_ID,
         name: "Bypass",
         module: "",
         min_value: 0.0,
         max_value: 1.0,
         default_value: 0.0,
-        flags: ParameterFlags {
+        flags: ParamFlags {
             is_automatable: true,
             is_stepped: true,
-            // Also set the enum flag for stepped choice parameters. The wrapper converts
+            // Also set the enum flag for stepped choice params. The wrapper converts
             // this to the host's native list metadata, which some generic editors rely on.
             is_enum: true,
             is_bypass: true,
-            ..ParameterFlags::default()
+            ..ParamFlags::default()
         },
     }
 }

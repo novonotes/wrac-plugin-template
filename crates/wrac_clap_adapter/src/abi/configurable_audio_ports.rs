@@ -10,7 +10,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstance;
 use super::ffi::ffi_bool;
-use crate::{AudioPortConfigurationRequest, AudioPortType};
+use crate::{AudioPortConfigRequest, AudioPortType};
 
 pub(super) static CONFIGURABLE_AUDIO_PORTS: clap_plugin_configurable_audio_ports =
     clap_plugin_configurable_audio_ports {
@@ -111,7 +111,7 @@ unsafe extern "C" fn configurable_audio_ports_apply_configuration(
 fn convert_requests(
     requests: *const clap_audio_port_configuration_request,
     request_count: u32,
-) -> Option<Vec<AudioPortConfigurationRequest>> {
+) -> Option<Vec<AudioPortConfigRequest>> {
     if request_count == 0 {
         return Some(Vec::new());
     }
@@ -122,10 +122,8 @@ fn convert_requests(
     Some(requests.iter().map(convert_request).collect())
 }
 
-fn convert_request(
-    request: &clap_audio_port_configuration_request,
-) -> AudioPortConfigurationRequest {
-    AudioPortConfigurationRequest {
+fn convert_request(request: &clap_audio_port_configuration_request) -> AudioPortConfigRequest {
+    AudioPortConfigRequest {
         is_input: request.is_input,
         port_index: request.port_index,
         channel_count: request.channel_count,

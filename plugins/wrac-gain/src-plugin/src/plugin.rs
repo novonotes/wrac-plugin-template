@@ -13,22 +13,22 @@
 use std::sync::Arc;
 
 mod audio_ports;
-mod parameters;
-mod state_support;
+mod params;
+mod state;
 
-pub(crate) use parameters::{
-    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain, gain_parameter_info,
-    host_value_to_gain, parameter_default_value, parameter_host_value, parameter_text_value,
-    parameter_value_text,
+pub(crate) use params::{
+    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain, gain_param_info, host_value_to_gain,
+    parameter_default_value, parameter_host_value, parameter_text_value, parameter_value_text,
 };
 
 use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudioPorts};
-use parameters::{WracGainParameters, bypass_parameter_info};
-use state_support::WracGainStateSupport;
+use params::{WracGainParamsExtension, bypass_param_info};
+use state::WracGainStateExtension;
 use wrac_clap_adapter::{
-    ActivateContext, Auv2Descriptor, PluginAudioPorts, PluginConfigurableAudioPorts, PluginCore,
-    PluginCoreContext, PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGui,
-    PluginParameters, PluginResult, PluginStateSupport, Processor,
+    ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
+    PluginConfigurableAudioPortsExtension, PluginCore, PluginCoreContext, PluginDescriptor,
+    PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension, PluginParamsExtension,
+    PluginResult, PluginStateExtension, Processor,
 };
 use wrac_wxp_gui::WxpGuiController;
 
@@ -128,12 +128,12 @@ pub(crate) struct WracGainPlugin {
     audio_layout: Arc<AudioLayoutStore>,
     audio_ports: Arc<WracGainAudioPorts>,
     configurable_audio_ports: Arc<WracGainConfigurableAudioPorts>,
-    parameters: Arc<WracGainParameters>,
+    params: Arc<WracGainParamsExtension>,
     gui: Arc<WxpGuiController>,
     // Project state save/restore. A dedicated capability independent of the lifecycle
     // lock so that a committed snapshot can be returned even while active or during a
     // wrapper re-entry.
-    state_support: Arc<WracGainStateSupport>,
+    state_extension: Arc<WracGainStateExtension>,
 }
 
 impl WracGainPlugin {
@@ -143,7 +143,7 @@ impl WracGainPlugin {
         let audio_ports = Arc::new(WracGainAudioPorts::new(audio_layout.clone()));
         let configurable_audio_ports =
             Arc::new(WracGainConfigurableAudioPorts::new(audio_layout.clone()));
-        let parameters = Arc::new(WracGainParameters::new(shared.clone()));
+        let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
             project_state.clone(),
@@ -151,7 +151,7 @@ impl WracGainPlugin {
             context.host_parameter_edit_notifier,
             context.host_gui_resize_requester,
         );
-        let state_support = Arc::new(WracGainStateSupport::new(
+        let state_extension = Arc::new(WracGainStateExtension::new(
             project_state,
             shared.clone(),
             gui.notifier.clone(),
@@ -162,9 +162,9 @@ impl WracGainPlugin {
             audio_layout,
             audio_ports,
             configurable_audio_ports,
-            parameters,
+            params,
             gui: gui.controller,
-            state_support,
+            state_extension,
         }
     }
 }
@@ -179,7 +179,7 @@ pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCo
         PLUGIN_DESCRIPTOR.id,
         PLUGIN_DESCRIPTOR.name
     );
-    for parameter in [gain_parameter_info(), bypass_parameter_info()] {
+    for parameter in [gain_param_info(), bypass_param_info()] {
         log::debug!(
             "host parameter schema: id={}, name={}, min={}, max={}, default={}, automatable={}, stepped={}, enum={}, bypass={}",
             parameter.id,
@@ -233,23 +233,23 @@ impl PluginCore for WracGainPlugin {
 
     // Extension declarations. Some = implemented, None = unsupported. Implementations live in separate modules.
 
-    fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPorts>> {
+    fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPortsExtension>> {
         Some(self.audio_ports.clone())
     }
 
-    fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPorts>> {
+    fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPortsExtension>> {
         Some(self.configurable_audio_ports.clone())
     }
 
-    fn parameters(&self) -> Option<Arc<dyn PluginParameters>> {
-        Some(self.parameters.clone())
+    fn params(&self) -> Option<Arc<dyn PluginParamsExtension>> {
+        Some(self.params.clone())
     }
 
-    fn state(&self) -> Option<Arc<dyn PluginStateSupport>> {
-        Some(self.state_support.clone())
+    fn state(&self) -> Option<Arc<dyn PluginStateExtension>> {
+        Some(self.state_extension.clone())
     }
 
-    fn gui(&self) -> Option<Arc<dyn PluginGui>> {
+    fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         Some(self.gui.clone())
     }
 }

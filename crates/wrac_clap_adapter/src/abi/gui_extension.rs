@@ -11,7 +11,7 @@ use parking_lot::MutexGuard;
 
 use super::PluginInstance;
 use super::ffi::{ffi_bool, ffi_unit};
-use crate::{GuiApi, GuiConfiguration, GuiSize, HostWindow, PluginGui};
+use crate::{GuiApi, GuiConfig, GuiSize, HostWindow, PluginGuiExtension};
 
 pub(super) static GUI: clap_plugin_gui = clap_plugin_gui {
     is_api_supported: Some(gui_is_api_supported),
@@ -91,7 +91,7 @@ unsafe extern "C" fn gui_create(
             log::warn!("gui.create: invalid API pointer");
             return false;
         };
-        match gui.create(GuiConfiguration { api, is_floating }) {
+        match gui.create(GuiConfig { api, is_floating }) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.create: plugin create failed: {error}");
@@ -345,7 +345,7 @@ unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
     })
 }
 
-unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginGui>> {
+unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginGuiExtension>> {
     let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
         log::warn!("gui.query: missing plugin instance");
         return None;
@@ -358,12 +358,12 @@ unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginG
 }
 
 struct GuiMutationAccess {
-    gui: Arc<dyn PluginGui>,
+    gui: Arc<dyn PluginGuiExtension>,
     _guard: MutexGuard<'static, ()>,
 }
 
 impl Deref for GuiMutationAccess {
-    type Target = dyn PluginGui;
+    type Target = dyn PluginGuiExtension;
 
     fn deref(&self) -> &Self::Target {
         self.gui.as_ref()

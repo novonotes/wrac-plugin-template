@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use serde_json::json;
-use wrac_clap_adapter::{HostGuiResizeRequester, HostParameterEditNotifier};
+use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier};
 use wrac_wxp_gui::WxpGuiResizeHandle;
 use wxp::{Channel, WxpCommandHandler};
 
@@ -29,7 +29,7 @@ pub(crate) fn register_commands(
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     gui_notifier: Arc<GuiStateNotifier>,
-    host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
+    host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     gui_resize_handle: WxpGuiResizeHandle,
 ) {

@@ -26,15 +26,15 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 - `PluginEntry`: DSO-level lifecycle and typed factory provider
 - `PluginFactory`: CLAP `clap.plugin-factory`
 - `PluginCore`: instance lifecycle and declaration of supported extensions
-- `PluginAudioPorts`: CLAP `audio-ports`
-- `PluginConfigurableAudioPorts`: CLAP `configurable-audio-ports`
-- `PluginNotePorts`: CLAP `note-ports`
-- `PluginParameters`: CLAP `params`
-- `PluginStateSupport`: CLAP `state`
-- `PluginGui`: CLAP `gui`
-- `PluginRender`: CLAP `render`
-- `PluginTail`: CLAP `tail`
-- `PluginLatency`: CLAP `latency`
+- `PluginAudioPortsExtension`: CLAP `audio-ports`
+- `PluginConfigurableAudioPortsExtension`: CLAP `configurable-audio-ports`
+- `PluginNotePortsExtension`: CLAP `note-ports`
+- `PluginParamsExtension`: CLAP `params`
+- `PluginStateExtension`: CLAP `state`
+- `PluginGuiExtension`: CLAP `gui`
+- `PluginRenderExtension`: CLAP `render`
+- `PluginTailExtension`: CLAP `tail`
+- `PluginLatencyExtension`: CLAP `latency`
 - `export_clap_entry!`: exports the CLAP entry point
 
 Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.

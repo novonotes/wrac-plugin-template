@@ -1,6 +1,6 @@
 # wrac_wxp_gui
 
-`wrac_wxp_gui` is a helper crate that connects `wrac_clap_adapter`'s `PluginGui` with the wxp WebView runtime.
+`wrac_wxp_gui` is a helper crate that connects `wrac_clap_adapter`'s `PluginGuiExtension` with the wxp WebView runtime.
 
 It has two responsibilities: converting the host window handle provided by `wrac_clap_adapter` into `raw-window-handle` types for passing to wxp, and holding a WebView runtime (which can only be operated from a specific thread) on the host UI thread. Interaction with the CLAP C ABI is the responsibility of `wrac_clap_adapter`, not this crate.
 

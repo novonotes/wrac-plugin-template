@@ -5,7 +5,7 @@ use std::thread::ThreadId;
 
 use novonotes_run_loop::{RunLoop, RunLoopSender};
 use parking_lot::Mutex;
-use wrac_clap_adapter::{GuiConfiguration, GuiSize, PluginError, PluginResult};
+use wrac_clap_adapter::{GuiConfig, GuiSize, PluginError, PluginResult};
 
 use crate::window::ParentWindowHandle;
 
@@ -77,7 +77,7 @@ pub trait WxpGuiRuntime: 'static {
 pub trait WxpGuiFactory: Send + Sync + 'static {
     fn create_gui_runtime(
         &self,
-        configuration: GuiConfiguration,
+        configuration: GuiConfig,
         initial_size: GuiSize,
         parent: ParentWindowHandle,
     ) -> PluginResult<Box<dyn WxpGuiRuntime>>;
@@ -85,14 +85,14 @@ pub trait WxpGuiFactory: Send + Sync + 'static {
 
 impl<F> WxpGuiFactory for F
 where
-    F: Fn(GuiConfiguration, GuiSize, ParentWindowHandle) -> PluginResult<Box<dyn WxpGuiRuntime>>
+    F: Fn(GuiConfig, GuiSize, ParentWindowHandle) -> PluginResult<Box<dyn WxpGuiRuntime>>
         + Send
         + Sync
         + 'static,
 {
     fn create_gui_runtime(
         &self,
-        configuration: GuiConfiguration,
+        configuration: GuiConfig,
         initial_size: GuiSize,
         parent: ParentWindowHandle,
     ) -> PluginResult<Box<dyn WxpGuiRuntime>> {

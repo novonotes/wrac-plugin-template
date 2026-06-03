@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    GuiApi, GuiConfiguration, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow,
-    PluginError, PluginGui, PluginResult,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
+    PluginGuiExtension, PluginResult,
 };
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
@@ -21,10 +21,10 @@ pub struct GuiSizeLimits {
     pub max: GuiSize,
 }
 
-/// Send/Sync controller that exposes the wxp WebView runtime as a [`PluginGui`].
+/// Send/Sync controller that exposes the wxp WebView runtime as a [`PluginGuiExtension`].
 ///
 /// The actual runtime lives in TLS on the UI thread; this type receives GUI lifecycle
-/// callbacks as the [`PluginGui`] handle shared across CLAP instances. Only embedded GUI
+/// callbacks as the [`PluginGuiExtension`] handle shared across CLAP instances. Only embedded GUI
 /// (attached as a child view to the host parent) is supported; floating windows are rejected.
 /// Methods may be entered from host callback threads; GUI runtime work is serialized through the
 /// GUI run loop once a parent has established the owning GUI thread.
@@ -76,7 +76,7 @@ const WEBVIEW_RECREATE_QUIET_PERIOD: Duration = Duration::from_millis(500);
 // the parent arrives.
 struct GuiSession {
     generation: u64,
-    configuration: GuiConfiguration,
+    configuration: GuiConfig,
     scale: f64,
     parent: Option<StoredParentWindow>,
     parent_lease: Option<GuiThreadLease>,
@@ -381,7 +381,7 @@ fn create_runtime_on_gui_thread(
     factory: &dyn WxpGuiFactory,
     runtime: &Mutex<GuiRuntimeState>,
     layout: &HostGuiLayout,
-    configuration: GuiConfiguration,
+    configuration: GuiConfig,
     parent: StoredParentWindow,
     generation: u64,
 ) -> PluginResult<GuiRuntimeHandle> {
@@ -431,7 +431,7 @@ fn create_runtime_on_gui_thread(
 fn create_runtime_after_wait(
     factory: &dyn WxpGuiFactory,
     runtime: &Mutex<GuiRuntimeState>,
-    configuration: GuiConfiguration,
+    configuration: GuiConfig,
     size: GuiSize,
     parent: StoredParentWindow,
     scale: f64,
@@ -681,16 +681,16 @@ fn unpack_size(size: u64) -> GuiSize {
     }
 }
 
-impl PluginGui for WxpGuiController {
+impl PluginGuiExtension for WxpGuiController {
     fn is_api_supported(&self, api: GuiApi, is_floating: bool) -> bool {
         !is_floating && api == default_gui_api()
     }
 
-    fn preferred_api(&self) -> Option<GuiConfiguration> {
+    fn preferred_api(&self) -> Option<GuiConfig> {
         Some(default_gui_configuration())
     }
 
-    fn create(&self, configuration: GuiConfiguration) -> PluginResult<()> {
+    fn create(&self, configuration: GuiConfig) -> PluginResult<()> {
         log::debug!("wxp controller: create called: configuration={configuration:?}");
         if !self.is_api_supported(configuration.api, configuration.is_floating) {
             log::debug!("wxp controller: create rejected unsupported configuration");
@@ -989,8 +989,8 @@ fn default_gui_api() -> GuiApi {
     }
 }
 
-fn default_gui_configuration() -> GuiConfiguration {
-    GuiConfiguration {
+fn default_gui_configuration() -> GuiConfig {
+    GuiConfig {
         api: default_gui_api(),
         is_floating: false,
     }

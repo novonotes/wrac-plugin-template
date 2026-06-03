@@ -13,7 +13,7 @@ use clap_sys::events::{
     clap_output_events,
 };
 
-use crate::api::ParameterValueEvent;
+use crate::api::ParamValueEvent;
 
 const CLAP_FIXED_TIME_FACTOR: f64 = (1_i64 << 31) as f64;
 const TRANSPORT_HAS_TEMPO: u32 = 1 << 0;
@@ -99,7 +99,7 @@ impl<'a> InputEvents<'a> {
         }
     }
 
-    pub fn parameter_values(&self) -> impl Iterator<Item = ParameterValueEvent> + '_ {
+    pub fn parameter_values(&self) -> impl Iterator<Item = ParamValueEvent> + '_ {
         self.iter().filter_map(|event| match event {
             InputEvent::ParamValue(event) => Some(event),
             _ => None,
@@ -234,10 +234,10 @@ pub enum InputEvent {
     Midi(MidiEvent),
     MidiSysex(MidiSysexEvent),
     Midi2(Midi2Event),
-    ParamValue(ParameterValueEvent),
-    ParamMod(ParameterModEvent),
-    ParamGestureBegin(ParameterGestureEvent),
-    ParamGestureEnd(ParameterGestureEvent),
+    ParamValue(ParamValueEvent),
+    ParamMod(ParamModEvent),
+    ParamGestureBegin(ParamGestureEvent),
+    ParamGestureEnd(ParamGestureEvent),
     Transport(TransportEvent),
     Unknown(UnknownEvent),
 }
@@ -291,19 +291,17 @@ impl InputEvent {
                 })))
             }
             CLAP_EVENT_PARAM_MOD if has_size::<clap_event_param_mod>(header) => {
-                Some(Self::ParamMod(ParameterModEvent::from_raw(unsafe {
+                Some(Self::ParamMod(ParamModEvent::from_raw(unsafe {
                     cast_event(header)
                 })))
             }
-            CLAP_EVENT_PARAM_GESTURE_BEGIN if has_size::<clap_event_param_gesture>(header) => {
-                Some(Self::ParamGestureBegin(ParameterGestureEvent::from_raw(
-                    unsafe { cast_event(header) },
-                )))
-            }
+            CLAP_EVENT_PARAM_GESTURE_BEGIN if has_size::<clap_event_param_gesture>(header) => Some(
+                Self::ParamGestureBegin(ParamGestureEvent::from_raw(unsafe { cast_event(header) })),
+            ),
             CLAP_EVENT_PARAM_GESTURE_END if has_size::<clap_event_param_gesture>(header) => {
-                Some(Self::ParamGestureEnd(ParameterGestureEvent::from_raw(
-                    unsafe { cast_event(header) },
-                )))
+                Some(Self::ParamGestureEnd(ParamGestureEvent::from_raw(unsafe {
+                    cast_event(header)
+                })))
             }
             CLAP_EVENT_TRANSPORT if has_size::<clap_event_transport>(header) => {
                 Some(Self::Transport(TransportEvent::from_raw(unsafe {
@@ -368,10 +366,10 @@ pub enum OutputEvent {
     Midi(MidiEvent),
     MidiSysex(MidiSysexEvent),
     Midi2(Midi2Event),
-    ParamValue(ParameterValueEvent),
-    ParamMod(ParameterModEvent),
-    ParamGestureBegin(ParameterGestureEvent),
-    ParamGestureEnd(ParameterGestureEvent),
+    ParamValue(ParamValueEvent),
+    ParamMod(ParamModEvent),
+    ParamGestureBegin(ParamGestureEvent),
+    ParamGestureEnd(ParamGestureEvent),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -530,9 +528,9 @@ impl NoteExpressionEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ParameterModEvent {
+pub struct ParamModEvent {
     pub time: u32,
-    pub parameter_id: u32,
+    pub param_id: u32,
     pub amount: f64,
     pub note_id: i32,
     pub port_index: i16,
@@ -540,11 +538,11 @@ pub struct ParameterModEvent {
     pub key: i16,
 }
 
-impl ParameterModEvent {
+impl ParamModEvent {
     fn from_raw(raw: &clap_event_param_mod) -> Self {
         Self {
             time: raw.header.time,
-            parameter_id: raw.param_id,
+            param_id: raw.param_id,
             amount: raw.amount,
             note_id: raw.note_id,
             port_index: raw.port_index,
@@ -556,7 +554,7 @@ impl ParameterModEvent {
     fn to_raw(self) -> clap_event_param_mod {
         clap_event_param_mod {
             header: event_header::<clap_event_param_mod>(self.time, CLAP_EVENT_PARAM_MOD),
-            param_id: self.parameter_id,
+            param_id: self.param_id,
             cookie: ptr::null_mut(),
             note_id: self.note_id,
             port_index: self.port_index,
@@ -568,23 +566,23 @@ impl ParameterModEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ParameterGestureEvent {
+pub struct ParamGestureEvent {
     pub time: u32,
-    pub parameter_id: u32,
+    pub param_id: u32,
 }
 
-impl ParameterGestureEvent {
+impl ParamGestureEvent {
     fn from_raw(raw: &clap_event_param_gesture) -> Self {
         Self {
             time: raw.header.time,
-            parameter_id: raw.param_id,
+            param_id: raw.param_id,
         }
     }
 
     fn to_raw(self, event_type: u16) -> clap_event_param_gesture {
         clap_event_param_gesture {
             header: event_header::<clap_event_param_gesture>(self.time, event_type),
-            param_id: self.parameter_id,
+            param_id: self.param_id,
         }
     }
 }
@@ -686,10 +684,10 @@ impl UnknownEvent {
     }
 }
 
-fn parameter_value_from_raw(raw: &clap_event_param_value) -> ParameterValueEvent {
-    ParameterValueEvent {
+fn parameter_value_from_raw(raw: &clap_event_param_value) -> ParamValueEvent {
+    ParamValueEvent {
         time: raw.header.time,
-        parameter_id: raw.param_id,
+        param_id: raw.param_id,
         value: raw.value,
         note_id: raw.note_id,
         port_index: raw.port_index,
@@ -698,10 +696,10 @@ fn parameter_value_from_raw(raw: &clap_event_param_value) -> ParameterValueEvent
     }
 }
 
-fn param_value_to_raw(event: ParameterValueEvent) -> clap_event_param_value {
+fn param_value_to_raw(event: ParamValueEvent) -> clap_event_param_value {
     clap_event_param_value {
         header: event_header::<clap_event_param_value>(event.time, CLAP_EVENT_PARAM_VALUE),
-        param_id: event.parameter_id,
+        param_id: event.param_id,
         cookie: ptr::null_mut(),
         note_id: event.note_id,
         port_index: event.port_index,
@@ -805,7 +803,7 @@ mod tests {
         match events.get(0).unwrap() {
             InputEvent::ParamValue(event) => {
                 assert_eq!(event.time, 12);
-                assert_eq!(event.parameter_id, 7);
+                assert_eq!(event.param_id, 7);
                 assert_eq!(event.value, 0.75);
             }
             _ => panic!("expected param value"),
@@ -1013,7 +1011,7 @@ mod tests {
 
         assert_eq!(parsed.len(), 1);
         match &parsed[0] {
-            InputEvent::ParamValue(event) => assert_eq!(event.parameter_id, 9),
+            InputEvent::ParamValue(event) => assert_eq!(event.param_id, 9),
             _ => panic!("expected param value"),
         }
     }

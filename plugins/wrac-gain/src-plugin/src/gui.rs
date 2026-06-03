@@ -22,7 +22,7 @@ pub(crate) use notifier::{
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{HostGuiResizeRequester, HostParameterEditNotifier};
+use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier};
 use wrac_wxp_gui::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle, WxpGuiRuntime};
 
 use crate::state::{ProjectStateStore, SharedState};
@@ -37,7 +37,7 @@ pub(crate) struct GuiIntegration {
 pub(crate) fn create_gui_integration(
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
-    host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
+    host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());

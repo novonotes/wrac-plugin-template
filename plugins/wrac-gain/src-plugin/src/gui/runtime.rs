@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
-    GuiConfiguration, GuiSize, HostGuiResizeRequester, HostParameterEditNotifier, PluginError,
-    PluginResult,
+    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginError, PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
@@ -41,7 +40,7 @@ pub(super) struct GuiRuntimeDependencies {
     pub(super) project_state: Arc<ProjectStateStore>,
     pub(super) shared: Arc<SharedState>,
     pub(super) gui_notifier: Arc<GuiStateNotifier>,
-    pub(super) host_parameter_edit_notifier: Arc<dyn HostParameterEditNotifier>,
+    pub(super) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     pub(super) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     pub(super) resize_handle: WxpGuiResizeHandle,
 }
@@ -62,7 +61,7 @@ impl WracGainGuiRuntime {
     /// Creates a WebView attached to the parent window and returns it.
     pub(super) fn create(
         dependencies: GuiRuntimeDependencies,
-        configuration: GuiConfiguration,
+        configuration: GuiConfig,
         initial_size: GuiSize,
         parent: ParentWindowHandle,
     ) -> PluginResult<Self> {

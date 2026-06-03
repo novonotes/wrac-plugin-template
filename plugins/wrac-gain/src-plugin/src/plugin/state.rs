@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use wrac_clap_adapter::{PluginError, PluginResult, PluginState, PluginStateSupport};
+use wrac_clap_adapter::{PluginError, PluginResult, PluginStateExtension, State};
 
 use crate::gui::GuiStateNotifier;
 use crate::plugin::{PARAM_BYPASS_ID, PARAM_GAIN_ID};
@@ -14,7 +14,7 @@ use crate::state::{
 /// Realtime parameters are snapshotted from [`SharedState`] and editor-only state from
 /// [`ProjectStateStore`]; both are merged into this single format before passing to the host.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct SavedPluginState {
+pub(crate) struct SavedState {
     pub(crate) gain: f32,
     #[serde(default)]
     pub(crate) bypass: bool,
@@ -22,13 +22,13 @@ pub(crate) struct SavedPluginState {
     pub(crate) editor_page: EditorPage,
 }
 
-pub(super) struct WracGainStateSupport {
+pub(super) struct WracGainStateExtension {
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     gui_notifier: Arc<GuiStateNotifier>,
 }
 
-impl WracGainStateSupport {
+impl WracGainStateExtension {
     pub(super) fn new(
         project_state: Arc<ProjectStateStore>,
         shared: Arc<SharedState>,
@@ -44,22 +44,22 @@ impl WracGainStateSupport {
 
 // `save_state` is called on project save, `restore_state` on load. The byte format is
 // unrestricted, so JSON is used here for ease of debugging.
-impl PluginStateSupport for WracGainStateSupport {
-    fn save_state(&self) -> PluginResult<PluginState> {
+impl PluginStateExtension for WracGainStateExtension {
+    fn save_state(&self) -> PluginResult<State> {
         let project = self.project_state.snapshot();
         let params = self.shared.snapshot_parameters();
-        let bytes = serde_json::to_vec(&SavedPluginState {
+        let bytes = serde_json::to_vec(&SavedState {
             gain: params.gain,
             bypass: params.bypass,
             editor_page: project.editor_page,
         })
         .map_err(|_| PluginError::InvalidState)?;
-        Ok(PluginState { bytes })
+        Ok(State { bytes })
     }
 
-    fn restore_state(&self, state: PluginState) -> PluginResult<()> {
+    fn restore_state(&self, state: State) -> PluginResult<()> {
         log::debug!("restoring plugin state: byte_count={}", state.bytes.len());
-        let state: SavedPluginState =
+        let state: SavedState =
             serde_json::from_slice(&state.bytes).map_err(|_| PluginError::InvalidState)?;
         let project = ProjectState {
             editor_page: state.editor_page,

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use wrac_clap_adapter::{
-    AudioPortConfigurationRequest, AudioPortFlags, AudioPortInfo, AudioPortType, PluginAudioPorts,
-    PluginConfigurableAudioPorts, PluginError, PluginResult,
+    AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
+    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginResult,
 };
 
 /// Source of truth for the audio layout negotiated with the host. **Non-realtime only.**
@@ -47,7 +47,7 @@ impl WracGainAudioPorts {
 
 // Gain has one main input and one main output. Channel count can be changed by the
 // host via configurable audio ports.
-impl PluginAudioPorts for WracGainAudioPorts {
+impl PluginAudioPortsExtension for WracGainAudioPorts {
     fn audio_port_count(&self, _is_input: bool) -> u32 {
         1
     }
@@ -100,18 +100,15 @@ impl WracGainConfigurableAudioPorts {
 
 // Example: host proposes stereo→mono → answer feasibility via `can_apply_*`,
 // commit the change via `apply_*`.
-impl PluginConfigurableAudioPorts for WracGainConfigurableAudioPorts {
-    fn can_apply_audio_port_configuration(
-        &self,
-        requests: &[AudioPortConfigurationRequest],
-    ) -> bool {
+impl PluginConfigurableAudioPortsExtension for WracGainConfigurableAudioPorts {
+    fn can_apply_audio_port_configuration(&self, requests: &[AudioPortConfigRequest]) -> bool {
         let accepted = resolve_audio_channel_count(self.layout.channel_count(), requests);
         accepted.is_some()
     }
 
     fn apply_audio_port_configuration(
         &self,
-        requests: &[AudioPortConfigurationRequest],
+        requests: &[AudioPortConfigRequest],
     ) -> PluginResult<()> {
         // The adapter rejects configuration apply while a Processor exists. This updates
         // only the non-RT query store; the audio thread uses the snapshot captured at activate.
@@ -148,7 +145,7 @@ fn audio_port_type(channel_count: u32) -> AudioPortType {
 /// semantics that cannot be defined in a generic gain sample.
 fn resolve_audio_channel_count(
     current_channel_count: u32,
-    requests: &[AudioPortConfigurationRequest],
+    requests: &[AudioPortConfigRequest],
 ) -> Option<u32> {
     let mut input_channel_count = current_channel_count;
     let mut output_channel_count = current_channel_count;
@@ -170,7 +167,7 @@ fn resolve_audio_channel_count(
     (input_channel_count == output_channel_count).then_some(input_channel_count)
 }
 
-fn is_supported_audio_port_request(request: &AudioPortConfigurationRequest) -> bool {
+fn is_supported_audio_port_request(request: &AudioPortConfigRequest) -> bool {
     matches!(
         (request.channel_count, request.port_type),
         (1, AudioPortType::Mono | AudioPortType::Unspecified)
@@ -182,20 +179,20 @@ fn is_supported_audio_port_request(request: &AudioPortConfigurationRequest) -> b
 mod tests {
     // Unit test examples for pure logic that can be verified without a host or CLAP runtime.
 
-    use wrac_clap_adapter::{AudioPortConfigurationRequest, AudioPortType};
+    use wrac_clap_adapter::{AudioPortConfigRequest, AudioPortType};
 
     use super::resolve_audio_channel_count;
 
     #[test]
     fn accepts_matching_mono_configuration() {
         let requests = [
-            AudioPortConfigurationRequest {
+            AudioPortConfigRequest {
                 is_input: true,
                 port_index: 0,
                 channel_count: 1,
                 port_type: AudioPortType::Mono,
             },
-            AudioPortConfigurationRequest {
+            AudioPortConfigRequest {
                 is_input: false,
                 port_index: 0,
                 channel_count: 1,
@@ -209,13 +206,13 @@ mod tests {
     #[test]
     fn rejects_mismatched_input_output_configuration() {
         let requests = [
-            AudioPortConfigurationRequest {
+            AudioPortConfigRequest {
                 is_input: true,
                 port_index: 0,
                 channel_count: 1,
                 port_type: AudioPortType::Mono,
             },
-            AudioPortConfigurationRequest {
+            AudioPortConfigRequest {
                 is_input: false,
                 port_index: 0,
                 channel_count: 2,

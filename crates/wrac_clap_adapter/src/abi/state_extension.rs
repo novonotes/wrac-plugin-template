@@ -4,7 +4,7 @@ use clap_sys::stream::{clap_istream, clap_ostream};
 
 use super::PluginInstance;
 use super::ffi::{ffi_bool, read_stream_exact, write_stream};
-use crate::PluginState;
+use crate::State;
 
 pub(super) static STATE: clap_plugin_state = clap_plugin_state {
     save: Some(state_save),
@@ -88,7 +88,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::debug!("state.load: plugin has no state support");
             return false;
         };
-        if let Err(error) = state_support.restore_state(PluginState { bytes }) {
+        if let Err(error) = state_support.restore_state(State { bytes }) {
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }

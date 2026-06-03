@@ -5,8 +5,8 @@ use clap_sys::host::clap_host;
 use parking_lot::Mutex;
 
 use crate::{
-    HostParameterEditNotifier, InputEvents, OutputEvent, OutputEvents, ParameterGestureEvent,
-    ParameterValueEvent, PluginParameters,
+    HostParamsEditNotifier, InputEvents, OutputEvent, OutputEvents, ParamGestureEvent,
+    ParamValueEvent, PluginParamsExtension,
 };
 
 /// Queue that holds UI-originated parameter edits until the host can receive them.
@@ -30,14 +30,14 @@ impl ParameterEditQueue {
 
     pub(crate) unsafe fn apply_input_parameter_events(
         &self,
-        parameters: &dyn PluginParameters,
+        parameters: &dyn PluginParamsExtension,
         events: &InputEvents<'_>,
     ) {
         for event in events.parameter_values() {
-            if let Err(error) = parameters.apply_parameter_value(event) {
+            if let Err(error) = parameters.apply_param_value(event) {
                 log::warn!(
-                    "parameter_edits.apply_input: parameter apply failed parameter_id={} value={} error={error}",
-                    event.parameter_id,
+                    "parameter_edits.apply_input: parameter apply failed param_id={} value={} error={error}",
+                    event.param_id,
                     event.value
                 );
             }
@@ -105,54 +105,50 @@ impl ParameterEditQueue {
     }
 }
 
-impl HostParameterEditNotifier for ParameterEditQueue {
-    fn begin_edit(&self, parameter_id: u32) {
-        self.push(ParameterEditEvent::Begin { parameter_id });
+impl HostParamsEditNotifier for ParameterEditQueue {
+    fn begin_edit(&self, param_id: u32) {
+        self.push(ParameterEditEvent::Begin { param_id });
     }
 
-    fn update_edit(&self, parameter_id: u32, value: f64) {
-        self.push(ParameterEditEvent::Update {
-            parameter_id,
-            value,
-        });
+    fn update_edit(&self, param_id: u32, value: f64) {
+        self.push(ParameterEditEvent::Update { param_id, value });
     }
 
-    fn end_edit(&self, parameter_id: u32) {
-        self.push(ParameterEditEvent::End { parameter_id });
+    fn end_edit(&self, param_id: u32) {
+        self.push(ParameterEditEvent::End { param_id });
     }
 }
 
 #[derive(Clone, Copy)]
 enum ParameterEditEvent {
-    Begin { parameter_id: u32 },
-    Update { parameter_id: u32, value: f64 },
-    End { parameter_id: u32 },
+    Begin { param_id: u32 },
+    Update { param_id: u32, value: f64 },
+    End { param_id: u32 },
 }
 
 fn push_parameter_edit(events: &mut OutputEvents<'_>, event: ParameterEditEvent) -> bool {
     match event {
-        ParameterEditEvent::Begin { parameter_id } => {
-            events.try_push(OutputEvent::ParamGestureBegin(ParameterGestureEvent {
+        ParameterEditEvent::Begin { param_id } => {
+            events.try_push(OutputEvent::ParamGestureBegin(ParamGestureEvent {
                 time: 0,
-                parameter_id,
+                param_id,
             }))
         }
-        ParameterEditEvent::Update {
-            parameter_id,
-            value,
-        } => events.try_push(OutputEvent::ParamValue(ParameterValueEvent {
-            time: 0,
-            parameter_id,
-            value,
-            note_id: -1,
-            port_index: -1,
-            channel: -1,
-            key: -1,
-        })),
-        ParameterEditEvent::End { parameter_id } => {
-            events.try_push(OutputEvent::ParamGestureEnd(ParameterGestureEvent {
+        ParameterEditEvent::Update { param_id, value } => {
+            events.try_push(OutputEvent::ParamValue(ParamValueEvent {
                 time: 0,
-                parameter_id,
+                param_id,
+                value,
+                note_id: -1,
+                port_index: -1,
+                channel: -1,
+                key: -1,
+            }))
+        }
+        ParameterEditEvent::End { param_id } => {
+            events.try_push(OutputEvent::ParamGestureEnd(ParamGestureEvent {
+                time: 0,
+                param_id,
             }))
         }
     }

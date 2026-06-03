@@ -96,15 +96,15 @@ impl WracGainAudioProcessor {
 
             // Only gain/bypass parameter events are handled here; others (notes, etc.) are ignored.
             if let InputEvent::ParamValue(event) = event {
-                if event.parameter_id == PARAM_GAIN_ID {
+                if event.param_id == PARAM_GAIN_ID {
                     gain = self
                         .shared
-                        .set_parameter_value(event.parameter_id, host_value_to_gain(event.value))
+                        .set_parameter_value(event.param_id, host_value_to_gain(event.value))
                         .unwrap_or(gain);
-                } else if event.parameter_id == PARAM_BYPASS_ID {
+                } else if event.param_id == PARAM_BYPASS_ID {
                     bypass = self
                         .shared
-                        .set_parameter_value(event.parameter_id, event.value)
+                        .set_parameter_value(event.param_id, event.value)
                         .map(|value| value >= 0.5)
                         .unwrap_or(bypass);
                 }
