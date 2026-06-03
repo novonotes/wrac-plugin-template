@@ -230,7 +230,7 @@ unsafe extern "C" fn params_flush(
                     .parameter_edits
                     .apply_input_parameter_events(parameters.as_ref(), &events.input);
             } else {
-                log::warn!("params.flush: plugin has no parameters");
+                wrac_log::rtwarn!("params.flush: plugin has no parameters");
             }
             instance
                 .parameter_edits

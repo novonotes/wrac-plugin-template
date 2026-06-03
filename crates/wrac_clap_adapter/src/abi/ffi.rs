@@ -151,10 +151,10 @@ pub(super) fn ffi_unit(f: impl FnOnce()) {
 
 fn log_panic(payload: &(dyn Any + Send)) {
     if let Some(message) = payload.downcast_ref::<&str>() {
-        log::error!("panic in CLAP callback: {message}");
+        wrac_log::rterror!("panic in CLAP callback: {message}");
     } else if let Some(message) = payload.downcast_ref::<String>() {
-        log::error!("panic in CLAP callback: {message}");
+        wrac_log::rterror!("panic in CLAP callback: {message}");
     } else {
-        log::error!("panic in CLAP callback");
+        wrac_log::rterror!("panic in CLAP callback");
     }
 }

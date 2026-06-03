@@ -637,7 +637,7 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("plugin.start_processing: missing plugin instance");
+            wrac_log::rtwarn!("plugin.start_processing: missing plugin instance");
             return false;
         };
         // In wrapper formats, `start_processing` / `stop_processing` may not be
@@ -646,7 +646,7 @@ unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool
         // is possible is determined solely by the presence of a Processor.
         let can_process = instance.has_processor_or_busy();
         if !can_process {
-            log::warn!("plugin.start_processing: no processor is available");
+            wrac_log::rtwarn!("plugin.start_processing: no processor is available");
         }
         can_process
     })
@@ -659,7 +659,7 @@ unsafe extern "C" fn plugin_stop_processing(_plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
     ffi_unit(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("plugin.reset: missing plugin instance");
+            wrac_log::rtwarn!("plugin.reset: missing plugin instance");
             return;
         };
         let Some(()) = instance.with_processor_mut(|processor| {
@@ -681,7 +681,7 @@ unsafe extern "C" fn plugin_process(
 ) -> clap_process_status {
     ffi_status(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::error!("plugin.process: missing plugin instance");
+            wrac_log::rterror!("plugin.process: missing plugin instance");
             return CLAP_PROCESS_ERROR;
         };
 
@@ -742,12 +742,12 @@ unsafe extern "C" fn plugin_get_extension(
 ) -> *const c_void {
     ffi_ptr(|| {
         if id.is_null() {
-            log::warn!("plugin.get_extension: null extension id");
+            wrac_log::rtwarn!("plugin.get_extension: null extension id");
             return ptr::null();
         }
         let id = unsafe { CStr::from_ptr(id) };
         let Some(instance) = (unsafe { PluginInstance::from_plugin(_plugin) }) else {
-            log::warn!("plugin.get_extension: missing plugin instance");
+            wrac_log::rtwarn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
         if id == CLAP_EXT_AUDIO_PORTS && instance.capabilities.audio_ports {

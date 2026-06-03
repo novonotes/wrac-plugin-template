@@ -35,7 +35,7 @@ impl ParameterEditQueue {
     ) {
         for event in events.parameter_values() {
             if let Err(error) = parameters.apply_param_value(event) {
-                log::warn!(
+                wrac_log::rtwarn!(
                     "parameter_edits.apply_input: parameter apply failed param_id={} value={} error={error}",
                     event.param_id,
                     event.value
