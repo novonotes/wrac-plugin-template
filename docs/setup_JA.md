@@ -38,7 +38,7 @@ VS Code のデバッグ設定を用意しています。
 ### 1. リポジトリのセットアップ
 
 GitHub の [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) ページ右上の `Use this template` ボタンを使って新しいリポジトリを作成します。
-作成後、新しいリポジトリをクローンし、wrapper target が必要な場合は残りの SDK サブモジュールを初期化してください。
+作成後、新しいリポジトリをクローンしてサブモジュールを初期化してください。
 
 ```sh
 git clone https://github.com/your-org/my-plugin.git

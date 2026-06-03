@@ -38,7 +38,7 @@ The [CodeLLDB](https://marketplace.visualstudio.com/items?itemName=vadimcn.vscod
 ### 1. Repository Setup
 
 Use the `Use this template` button in the upper right of the [wrac-plugin-template](https://github.com/novonotes/wrac-plugin-template) page on GitHub to create a new repository.
-After creating it, clone the new repository and initialize the remaining SDK submodules if you need wrapper targets.
+After creating it, clone the new repository and initialize the submodules.
 
 ```sh
 git clone https://github.com/your-org/my-plugin.git
