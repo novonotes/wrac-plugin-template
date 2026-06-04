@@ -47,7 +47,7 @@ type SubscribeParametersResponse = {
   subscriptionId: number;
 };
 
-// Keep these ids in sync with PARAM_* constants in src-plugin/src/plugin.rs.
+// Keep these ids in sync with PARAM_* constants in src-plugin/src/plugin/params.rs.
 // When adding parameters to the template, add one id here and route its UI in render().
 const PARAM_GAIN_ID = 1;
 

@@ -324,6 +324,9 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   void param_rescan(clap_param_rescan_flags flags) override;
   void param_clear(clap_id param, clap_param_clear_flags flags) override;
   void param_request_flush() override;
+  bool wrac_param_begin_edit(clap_id param) override;
+  bool wrac_param_update_edit(clap_id param, double value) override;
+  bool wrac_param_end_edit(clap_id param) override;
 
   bool gui_can_resize() override;
   bool gui_request_resize(uint32_t width, uint32_t height) override;
@@ -369,6 +372,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
 
  private:
   std::vector<clap_id> _gesturedparameters;
+  bool shouldUseLunaVst3AutomationCompatMode();
   // from Clap::IAutomation
   void onBeginEdit(clap_id id) override;
   void onPerformEdit(const clap_event_param_value_t *value) override;

@@ -15,6 +15,9 @@ namespace Clap
 {
 namespace HostExt
 {
+static constexpr const char *WRAC_CLAP_EXT_HOST_PARAMETER_EDIT =
+    "com.novonotes.wrac.host-parameter-edit/1";
+
 static Plugin *self(const clap_host_t *host)
 {
   return static_cast<Plugin *>(host->host_data);
@@ -53,6 +56,28 @@ void request_flush(const clap_host_t *host)
   self(host)->param_request_flush();
 }
 clap_host_params_t params = {rescan, clear, request_flush};
+
+struct wrac_clap_host_parameter_edit
+{
+  bool (*begin_edit)(const clap_host_t *host, clap_id param_id);
+  bool (*update_edit)(const clap_host_t *host, clap_id param_id, double value);
+  bool (*end_edit)(const clap_host_t *host, clap_id param_id);
+};
+
+// Private WRAC extension used by the Rust adapter to route UI-originated edit
+// gestures directly to wrapper-specific host APIs. Native CLAP still uses the
+// standard params event path; this exists so VST3 compatibility fixes do not
+// leak into the plugin-facing parameter API.
+wrac_clap_host_parameter_edit wrac_parameter_edit = {
+    [](const clap_host_t *host, clap_id param_id) -> bool {
+      return self(host)->wrac_param_begin_edit(param_id);
+    },
+    [](const clap_host_t *host, clap_id param_id, double value) -> bool {
+      return self(host)->wrac_param_update_edit(param_id, value);
+    },
+    [](const clap_host_t *host, clap_id param_id) -> bool {
+      return self(host)->wrac_param_end_edit(param_id);
+    }};
 
 bool is_main_thread(const clap_host_t *host)
 {
@@ -522,10 +547,27 @@ void Plugin::param_request_flush()
   _parentHost->param_request_flush();
 }
 
+bool Plugin::wrac_param_begin_edit(clap_id param)
+{
+  return _parentHost->wrac_param_begin_edit(param);
+}
+
+bool Plugin::wrac_param_update_edit(clap_id param, double value)
+{
+  return _parentHost->wrac_param_update_edit(param, value);
+}
+
+bool Plugin::wrac_param_end_edit(clap_id param)
+{
+  return _parentHost->wrac_param_end_edit(param);
+}
+
 // Query an extension.
 // [thread-safe]
 const void *Plugin::clapExtension(const clap_host * /*host*/, const char *extension)
 {
+  if (!strcmp(extension, HostExt::WRAC_CLAP_EXT_HOST_PARAMETER_EDIT))
+    return &HostExt::wrac_parameter_edit;
   if (!strcmp(extension, CLAP_EXT_LOG)) return &HostExt::log;
   if (!strcmp(extension, CLAP_EXT_PARAMS)) return &HostExt::params;
   if (!strcmp(extension, CLAP_EXT_TRACK_INFO)) return &HostExt::trackinfo;

@@ -58,6 +58,9 @@ class IHost
   virtual void param_rescan(clap_param_rescan_flags flags) = 0;  // ext_host_params
   virtual void param_clear(clap_id param, clap_param_clear_flags flags) = 0;
   virtual void param_request_flush() = 0;
+  virtual bool wrac_param_begin_edit(clap_id param) { return false; }
+  virtual bool wrac_param_update_edit(clap_id param, double value) { return false; }
+  virtual bool wrac_param_end_edit(clap_id param) { return false; }
 
   virtual void latency_changed() = 0;
   virtual void tail_changed() = 0;
@@ -200,6 +203,9 @@ class Plugin
   void param_rescan(clap_param_rescan_flags flags);
   void param_clear(clap_id param, clap_param_clear_flags flags);
   void param_request_flush();
+  bool wrac_param_begin_edit(clap_id param);
+  bool wrac_param_update_edit(clap_id param, double value);
+  bool wrac_param_end_edit(clap_id param);
 
   // state
   void mark_dirty();

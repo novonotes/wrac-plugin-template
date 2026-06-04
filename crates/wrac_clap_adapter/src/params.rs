@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ffi::c_char};
 
 use clap_sys::ext::params::{CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_VALUES, clap_host_params};
 use clap_sys::host::clap_host;
@@ -68,6 +68,15 @@ impl ParameterEditQueue {
     }
 
     fn push(&self, event: ParameterEditEvent) {
+        // VST3 hosts expect UI-originated automation gestures through component-handler
+        // edit callbacks. The private wrapper extension lets adapters provide that path
+        // without changing the plugin-facing parameter API or the native CLAP event path.
+        if let Some(direct_edit) = self.host_params.and_then(|params| params.direct_edit)
+            && direct_edit.try_push(event)
+        {
+            return;
+        }
+
         self.pending.lock().push_back(event);
         // Issue request_flush after enqueuing. Some hosts will not call `flush()`
         // without this notification, causing UI edits to never reach the automation lane.
@@ -159,14 +168,50 @@ struct HostParams {
     host: *const clap_host,
     rescan: Option<unsafe extern "C" fn(host: *const clap_host, flags: u32)>,
     request_flush: Option<unsafe extern "C" fn(host: *const clap_host)>,
+    direct_edit: Option<HostDirectParameterEdit>,
 }
 
 // The instance lifetime of the host pointer is the minimal unavoidable assumption of the
-// CLAP ABI. Product-facing usage is limited to `request_flush()`; adapter-internal
-// `rescan_values()` is called only after state load, where CLAP gives the callback a
-// main-thread contract.
+// CLAP ABI. These callbacks are used from non-audio UI/control paths; realtime automation
+// continues to use CLAP input/output events in `process()`.
 unsafe impl Send for HostParams {}
 unsafe impl Sync for HostParams {}
+
+#[derive(Clone, Copy)]
+struct HostDirectParameterEdit {
+    host: *const clap_host,
+    begin_edit: unsafe extern "C" fn(host: *const clap_host, param_id: u32) -> bool,
+    update_edit: unsafe extern "C" fn(host: *const clap_host, param_id: u32, value: f64) -> bool,
+    end_edit: unsafe extern "C" fn(host: *const clap_host, param_id: u32) -> bool,
+}
+
+unsafe impl Send for HostDirectParameterEdit {}
+unsafe impl Sync for HostDirectParameterEdit {}
+
+impl HostDirectParameterEdit {
+    fn try_push(self, event: ParameterEditEvent) -> bool {
+        unsafe {
+            match event {
+                ParameterEditEvent::Begin { param_id } => (self.begin_edit)(self.host, param_id),
+                ParameterEditEvent::Update { param_id, value } => {
+                    (self.update_edit)(self.host, param_id, value)
+                }
+                ParameterEditEvent::End { param_id } => (self.end_edit)(self.host, param_id),
+            }
+        }
+    }
+}
+
+#[repr(C)]
+struct WracClapHostParameterEdit {
+    begin_edit: Option<unsafe extern "C" fn(host: *const clap_host, param_id: u32) -> bool>,
+    update_edit:
+        Option<unsafe extern "C" fn(host: *const clap_host, param_id: u32, value: f64) -> bool>,
+    end_edit: Option<unsafe extern "C" fn(host: *const clap_host, param_id: u32) -> bool>,
+}
+
+const WRAC_CLAP_EXT_HOST_PARAMETER_EDIT: *const c_char =
+    c"com.novonotes.wrac.host-parameter-edit/1".as_ptr();
 
 fn host_params(host: *const clap_host) -> Option<HostParams> {
     if host.is_null() {
@@ -179,10 +224,32 @@ fn host_params(host: *const clap_host) -> Option<HostParams> {
         if params.is_null() {
             return None;
         }
+        let direct_edit = host_direct_parameter_edit(
+            host,
+            get_extension(host, WRAC_CLAP_EXT_HOST_PARAMETER_EDIT),
+        );
         Some(HostParams {
             host,
             rescan: (*params).rescan,
             request_flush: (*params).request_flush,
+            direct_edit,
         })
     }
+}
+
+unsafe fn host_direct_parameter_edit(
+    host: *const clap_host,
+    extension: *const std::ffi::c_void,
+) -> Option<HostDirectParameterEdit> {
+    if extension.is_null() {
+        return None;
+    }
+
+    let direct = extension as *const WracClapHostParameterEdit;
+    Some(HostDirectParameterEdit {
+        host,
+        begin_edit: unsafe { (*direct).begin_edit? },
+        update_edit: unsafe { (*direct).update_edit? },
+        end_edit: unsafe { (*direct).end_edit? },
+    })
 }

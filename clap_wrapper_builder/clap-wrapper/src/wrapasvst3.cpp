@@ -22,6 +22,7 @@
 #include "detail/vst3/process.h"
 #include "detail/vst3/parameter.h"
 #include "detail/clap/fsutil.h"
+#include <cstdlib>
 #include <locale>
 #include <sstream>
 
@@ -1238,6 +1239,42 @@ void ClapAsVst3::param_request_flush()
   _requestedFlush = true;
 }
 
+bool ClapAsVst3::wrac_param_begin_edit(clap_id param)
+{
+  // The normal wrapper path queues CLAP parameter events and relies on
+  // request_flush()/onIdle(). LUNA 2.0.3.4381 VST3 does not write automation from
+  // that path, but it does write when UI gestures are forwarded as VST3 component
+  // handler edits. Keep this compatibility path host-specific so hosts that already
+  // handle the standard wrapper behavior keep their existing timing.
+  if (!shouldUseLunaVst3AutomationCompatMode() || !componentHandler) return false;
+
+  auto vst3id = param & 0x7FFFFFFF;
+  return beginEdit(vst3id) == kResultOk;
+}
+
+bool ClapAsVst3::wrac_param_update_edit(clap_id param, double value)
+{
+  if (!shouldUseLunaVst3AutomationCompatMode() || !componentHandler) return false;
+
+  auto *vst3param = (Vst3Parameter *)(parameters.getParameter(param & 0x7FFFFFFF));
+  if (!vst3param) return false;
+
+  auto vst3id = vst3param->getInfo().id;
+  auto vst3value = vst3param->asVst3Value(value);
+  // performEdit is the automation-writing notification. setParamNormalized is
+  // intentionally not called here: LUNA writes correctly without it, and the plugin
+  // state has already been updated by the UI-side parameter edit.
+  return performEdit(vst3id, vst3value) == kResultOk;
+}
+
+bool ClapAsVst3::wrac_param_end_edit(clap_id param)
+{
+  if (!shouldUseLunaVst3AutomationCompatMode() || !componentHandler) return false;
+
+  auto vst3id = param & 0x7FFFFFFF;
+  return endEdit(vst3id) == kResultOk;
+}
+
 bool ClapAsVst3::gui_can_resize()
 {
   // the plugin asks if the host can do a resize
@@ -1400,6 +1437,20 @@ const char *ClapAsVst3::host_get_name()
     }
   }
   return wrapper_hostname.c_str();
+}
+
+bool ClapAsVst3::shouldUseLunaVst3AutomationCompatMode()
+{
+  // Prefer the VST3 host name, but LUNA's process name is a useful fallback while
+  // the wrapper host name is still unavailable or normalized differently by the host.
+  const auto *hostName = host_get_name();
+#if MAC
+  const auto *processName = getprogname();
+#else
+  const char *processName = nullptr;
+#endif
+  return (hostName && std::string(hostName).find("LUNA") != std::string::npos) ||
+         (processName && std::string(processName).find("LUNA") != std::string::npos);
 }
 
 void ClapAsVst3::onIdle()
