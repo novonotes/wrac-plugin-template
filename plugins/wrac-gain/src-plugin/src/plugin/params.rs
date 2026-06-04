@@ -7,10 +7,11 @@ use wrac_clap_adapter::{
 use crate::state::SharedState;
 
 // Parameter IDs are stable values used by the host for automation and project saving.
-// Never change them after publishing. To add a new parameter: append an ID here and
-// keep the `PluginParamsExtension` impl and `SharedState` match arms in sync.
+// Never change them after publishing. This starter template keeps initial IDs equal
+// to parameter-list indices because LUNA 2.0.3.4381 VST3 automation writes fail
+// when the automated parameter's ParamID differs from its index.
+pub(crate) const PARAM_BYPASS_ID: u32 = 0;
 pub(crate) const PARAM_GAIN_ID: u32 = 1;
-pub(crate) const PARAM_BYPASS_ID: u32 = 9;
 
 // Gain is a linear amplitude. 1.0 = 0 dB (unity), 0.0 = silence, 2.0 = +6 dB.
 pub(crate) const DEFAULT_GAIN: f32 = 1.0;
@@ -40,10 +41,9 @@ impl PluginParamsExtension for WracGainParamsExtension {
     }
 
     fn param_info(&self, index: u32) -> Option<ParamInfo> {
-        // Mapping of sequential index to stable ID. IDs persist in project/automation data — never change them.
         match index {
-            0 => Some(gain_param_info()),
-            1 => Some(bypass_param_info()),
+            0 => Some(bypass_param_info()),
+            1 => Some(gain_param_info()),
             _ => None,
         }
     }
