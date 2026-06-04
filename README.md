@@ -123,11 +123,6 @@ cargo xtask --help
 cargo xtask build --help
 ```
 
-## Built with WRAC
-
-Built a plugin with this template? Share it in the [Showcase Discussion](https://github.com/novonotes/wrac-plugin-template/discussions/43).
-Open-source, freeware, and commercial releases are all welcome.
-
 ## Reference
 
 For known DAW compatibility status, see the [DAW Compatibility Matrix](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix).

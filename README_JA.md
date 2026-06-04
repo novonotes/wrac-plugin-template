@@ -120,11 +120,6 @@ cargo xtask --help
 cargo xtask build --help
 ```
 
-## Built with WRAC
-
-このテンプレートでプラグインを作ったら、ぜひ [Showcase Discussion](https://github.com/novonotes/wrac-plugin-template/discussions/43) で共有してください。
-オープンソース、フリーウェア、商用リリースのいずれも歓迎です。
-
 ## 参考
 
 主要 DAW での動作確認状況は [Wiki](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix) を参照してください。
