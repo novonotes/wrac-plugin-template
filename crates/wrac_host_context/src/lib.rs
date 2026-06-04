@@ -21,10 +21,6 @@ impl HostContext {
             plugin_format: PluginFormat::detect(clap_host_name.unwrap_or_default()),
         }
     }
-
-    pub fn is_cubase_vst3(&self) -> bool {
-        self.host.family == HostFamily::SteinbergCubase && self.plugin_format == PluginFormat::Vst3
-    }
 }
 
 /// Parsed host identity from the process executable.

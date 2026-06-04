@@ -28,7 +28,7 @@ use clap_sys::process::{
     CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process, clap_process_status,
 };
 use clap_sys::version::clap_version_is_compatible;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use wrac_host_context::HostContext;
 
 mod audio_buffers;
@@ -79,7 +79,7 @@ const CLAP_PLUGIN_FACTORY_INFO_AUV2: &CStr = c"clap.plugin-factory-info-as-auv2.
 pub(crate) struct PluginInstance {
     plugin: clap_plugin,
     // Owner of the processor lifecycle; only activate/deactivate take this lock.
-    core: RwLock<Box<dyn PluginCore>>,
+    core: Mutex<Box<dyn PluginCore>>,
     // Capability presence is frozen at instance creation. Coupling it to runtime state
     // would make extensions appear to disappear transiently during queries.
     capabilities: PluginCapabilities,
@@ -195,7 +195,7 @@ impl PluginInstance {
                 get_extension: Some(plugin_get_extension),
                 on_main_thread: Some(plugin_on_main_thread),
             },
-            core: RwLock::new(core),
+            core: Mutex::new(core),
             capabilities,
             audio_ports,
             configurable_audio_ports,
@@ -566,7 +566,7 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         }
 
         if let Some(processor) = instance.take_processor_blocking() {
-            if let Err(error) = instance.core.write().deactivate(processor) {
+            if let Err(error) = instance.core.lock().deactivate(processor) {
                 log::warn!("plugin.destroy: plugin deactivate failed: {error}");
             }
         }
@@ -599,7 +599,7 @@ unsafe extern "C" fn plugin_activate(
             return false;
         }
 
-        let processor = match instance.core.write().activate(ActivateContext {
+        let processor = match instance.core.lock().activate(ActivateContext {
             sample_rate,
             min_frames_count,
             max_frames_count,
@@ -627,7 +627,7 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         // concurrently, wait here to avoid missing the teardown.
         let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
-            if let Err(error) = instance.core.write().deactivate(processor) {
+            if let Err(error) = instance.core.lock().deactivate(processor) {
                 log::warn!("plugin.deactivate: plugin deactivate failed: {error}");
             }
         }
@@ -637,7 +637,7 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("plugin.start_processing: missing plugin instance");
+            wrac_log::rtwarn!("plugin.start_processing: missing plugin instance");
             return false;
         };
         // In wrapper formats, `start_processing` / `stop_processing` may not be
@@ -646,7 +646,7 @@ unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool
         // is possible is determined solely by the presence of a Processor.
         let can_process = instance.has_processor_or_busy();
         if !can_process {
-            log::warn!("plugin.start_processing: no processor is available");
+            wrac_log::rtwarn!("plugin.start_processing: no processor is available");
         }
         can_process
     })
@@ -659,7 +659,7 @@ unsafe extern "C" fn plugin_stop_processing(_plugin: *const clap_plugin) {
 unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
     ffi_unit(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("plugin.reset: missing plugin instance");
+            wrac_log::rtwarn!("plugin.reset: missing plugin instance");
             return;
         };
         let Some(()) = instance.with_processor_mut(|processor| {
@@ -681,7 +681,7 @@ unsafe extern "C" fn plugin_process(
 ) -> clap_process_status {
     ffi_status(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::error!("plugin.process: missing plugin instance");
+            wrac_log::rterror!("plugin.process: missing plugin instance");
             return CLAP_PROCESS_ERROR;
         };
 
@@ -742,12 +742,12 @@ unsafe extern "C" fn plugin_get_extension(
 ) -> *const c_void {
     ffi_ptr(|| {
         if id.is_null() {
-            log::warn!("plugin.get_extension: null extension id");
+            wrac_log::rtwarn!("plugin.get_extension: null extension id");
             return ptr::null();
         }
         let id = unsafe { CStr::from_ptr(id) };
         let Some(instance) = (unsafe { PluginInstance::from_plugin(_plugin) }) else {
-            log::warn!("plugin.get_extension: missing plugin instance");
+            wrac_log::rtwarn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
         if id == CLAP_EXT_AUDIO_PORTS && instance.capabilities.audio_ports {

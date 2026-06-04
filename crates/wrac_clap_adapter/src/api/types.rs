@@ -5,7 +5,7 @@ use clap_sys::ext::note_ports::{
     CLAP_NOTE_DIALECT_MIDI2,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AudioPortInfo {
     pub id: u32,
     pub name: &'static str,
@@ -23,7 +23,7 @@ pub struct AudioPortConfigRequest {
     pub port_type: AudioPortType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct NotePortInfo {
     pub id: u32,
     pub supported_dialects: NoteDialects,
@@ -71,7 +71,7 @@ pub enum AudioPortType {
     Stereo,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParamInfo {
     pub id: u32,
     pub name: &'static str,

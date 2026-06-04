@@ -10,8 +10,16 @@ use crate::{GuiSize, PluginResult};
 /// `Send + Sync` allows GUI or control callbacks to share the notifier. It is not
 /// realtime-safe; do not call it from `Processor::process()`.
 pub trait HostParamsEditNotifier: Send + Sync {
+    /// Queues a CLAP `PARAM_GESTURE_BEGIN` event and requests `host_params.request_flush`.
+    /// `[thread-safe & control-thread]`
     fn begin_edit(&self, param_id: u32);
+
+    /// Queues a CLAP `PARAM_VALUE` event and requests `host_params.request_flush`.
+    /// `[thread-safe & control-thread]`
     fn update_edit(&self, param_id: u32, value: f64);
+
+    /// Queues a CLAP `PARAM_GESTURE_END` event and requests `host_params.request_flush`.
+    /// `[thread-safe & control-thread]`
     fn end_edit(&self, param_id: u32);
 }
 
@@ -24,6 +32,7 @@ pub trait HostParamsEditNotifier: Send + Sync {
 /// does not marshal calls, so call this from the product's GUI/control path, not
 /// directly from `Processor::process()` or a background worker.
 pub trait HostStateDirtyNotifier: Send + Sync {
+    /// Calls CLAP `host_state.mark_dirty`. `[main-thread]`
     fn mark_dirty(&self);
 }
 
@@ -33,5 +42,8 @@ pub trait HostStateDirtyNotifier: Send + Sync {
 /// not because every method is meaningful from every thread. Call `request_resize` only
 /// from the product's GUI event path.
 pub trait HostGuiResizeRequester: Send + Sync {
+    /// Calls CLAP `host_gui.request_resize`. `[thread-safe & control-thread]`
+    ///
+    /// Product code should normally call this from its GUI event path.
     fn request_resize(&self, size: GuiSize) -> PluginResult<()>;
 }

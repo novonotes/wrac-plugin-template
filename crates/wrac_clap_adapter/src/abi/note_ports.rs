@@ -12,19 +12,13 @@ pub(super) static NOTE_PORTS: clap_plugin_note_ports = clap_plugin_note_ports {
 unsafe extern "C" fn note_ports_count(plugin: *const clap_plugin, is_input: bool) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("note_ports.count: missing plugin instance is_input={is_input}");
+            wrac_log::rtwarn!("note_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
         let Some(note_ports) = instance.note_ports.as_ref() else {
-            log::debug!("note_ports.count: plugin has no note ports is_input={is_input}");
             return 0;
         };
-        let count = note_ports.note_port_count(is_input);
-        log::debug!(
-            "note_ports.count: is_input={is_input} count={count} thread={:?}",
-            std::thread::current().id()
-        );
-        count
+        note_ports.note_port_count(is_input)
     })
 }
 
@@ -36,29 +30,24 @@ unsafe extern "C" fn note_ports_get(
 ) -> bool {
     ffi_bool(|| {
         if info.is_null() {
-            log::warn!("note_ports.get: null output pointer index={index} is_input={is_input}");
+            wrac_log::rtwarn!(
+                "note_ports.get: null output pointer index={index} is_input={is_input}"
+            );
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("note_ports.get: missing plugin instance index={index} is_input={is_input}");
-            return false;
-        };
-        let Some(note_ports) = instance.note_ports.as_ref() else {
-            log::debug!(
-                "note_ports.get: plugin has no note ports index={index} is_input={is_input}"
+            wrac_log::rtwarn!(
+                "note_ports.get: missing plugin instance index={index} is_input={is_input}"
             );
             return false;
         };
-        let Some(port) = note_ports.note_port_info(index, is_input) else {
-            log::warn!("note_ports.get: invalid index={index} is_input={is_input}");
+        let Some(note_ports) = instance.note_ports.as_ref() else {
             return false;
         };
-        log::debug!(
-            "note_ports.get: index={index} is_input={is_input} id={} dialects={} thread={:?}",
-            port.id,
-            port.supported_dialects.bits(),
-            std::thread::current().id()
-        );
+        let Some(port) = note_ports.note_port_info(index, is_input) else {
+            wrac_log::rtwarn!("note_ports.get: invalid index={index} is_input={is_input}");
+            return false;
+        };
 
         unsafe {
             (*info).id = port.id;

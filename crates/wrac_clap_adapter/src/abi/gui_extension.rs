@@ -25,8 +25,8 @@ pub(super) static GUI: clap_plugin_gui = clap_plugin_gui {
     adjust_size: Some(gui_adjust_size),
     set_size: Some(gui_set_size),
     set_parent: Some(gui_set_parent),
-    set_transient: Some(gui_set_transient),
-    suggest_title: Some(gui_suggest_title),
+    set_transient: None,
+    suggest_title: None,
     show: Some(gui_show),
     hide: Some(gui_hide),
 };
@@ -270,49 +270,6 @@ unsafe extern "C" fn gui_set_parent(
             }
         }
     })
-}
-
-unsafe extern "C" fn gui_set_transient(
-    plugin: *const clap_plugin,
-    window: *const clap_window,
-) -> bool {
-    ffi_bool(|| {
-        if window.is_null() {
-            log::warn!("gui.set_transient: null window pointer");
-            return false;
-        }
-        let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_transient") }) else {
-            return false;
-        };
-        let Some(parent) = (unsafe { clap_window_to_rust(&*window) }) else {
-            log::warn!("gui.set_transient: unsupported or invalid window API");
-            return false;
-        };
-        match gui.set_transient(parent) {
-            Ok(()) => true,
-            Err(error) => {
-                log::warn!("gui.set_transient: plugin set_transient failed: {error}");
-                false
-            }
-        }
-    })
-}
-
-unsafe extern "C" fn gui_suggest_title(plugin: *const clap_plugin, title: *const c_char) {
-    ffi_unit(|| {
-        if title.is_null() {
-            log::warn!("gui.suggest_title: null title pointer");
-            return;
-        }
-        let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "suggest_title") }) else {
-            return;
-        };
-        let Ok(title) = (unsafe { CStr::from_ptr(title) }).to_str() else {
-            log::warn!("gui.suggest_title: title is not valid UTF-8");
-            return;
-        };
-        gui.suggest_title(title);
-    });
 }
 
 unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {

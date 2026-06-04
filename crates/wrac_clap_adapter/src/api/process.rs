@@ -9,7 +9,10 @@ use crate::process_buffer::AudioProcessBuffer;
 /// copied at activate time, or atomic/lock-free shared state the audio thread never
 /// waits on.
 pub trait Processor: Send {
+    /// Called from CLAP `plugin.reset`. `[audio-thread]`
     fn reset(&mut self) {}
+
+    /// Called from CLAP `plugin.process`. `[audio-thread]`
     fn process(&mut self, context: ProcessContext<'_>) -> PluginResult<ProcessStatus>;
 }
 

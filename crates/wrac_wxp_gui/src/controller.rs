@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
@@ -8,10 +8,10 @@ use wrac_clap_adapter::{
     GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
     PluginGuiExtension, PluginResult,
 };
-use wrac_host_context::HostContext;
+use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
-use crate::dpi::DpiConverter;
+use crate::dpi::{DpiConverter, HostGuiSizeUnit};
 use crate::runtime::{
     GuiRuntimeHandle, GuiThreadLease, WxpGuiFactory, create_gui_runtime_handle, is_gui_thread,
 };
@@ -49,6 +49,7 @@ struct HostGuiLayout {
     accepted_size_revision: AtomicU64,
     limits: GuiSizeLimits,
     resize_policy: GuiResizePolicy,
+    host_size_unit: AtomicU8,
 }
 
 struct GuiRuntimeState {
@@ -116,6 +117,7 @@ impl WxpGuiController {
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
     ) -> Self {
+        resize_handle.set_host_size_unit(host_gui_size_unit_for_context(&host_context));
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
@@ -157,11 +159,11 @@ impl WxpGuiController {
     }
 
     fn should_async_resync_bounds_after_set_size(&self) -> bool {
-        self.host_context.is_cubase_vst3()
+        is_cubase_vst3(&self.host_context)
     }
 
     fn correct_host_scale(&self, scale: f64, parent: Option<StoredParentWindow>) -> f64 {
-        if !self.host_context.is_cubase_vst3() {
+        if !is_cubase_vst3(&self.host_context) {
             return scale;
         }
         // Cubase 10 on Windows has been observed to report integer VST3 scale factors
@@ -187,6 +189,27 @@ impl WxpGuiController {
             self.layout.clone(),
             generation,
         )
+    }
+}
+
+fn is_cubase_vst3(host_context: &HostContext) -> bool {
+    host_context.host.family == HostFamily::SteinbergCubase
+        && host_context.plugin_format == PluginFormat::Vst3
+}
+
+fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit {
+    // macOS wrapper formats expose Cocoa/NSView geometry at the CLAP GUI boundary.
+    // Treating those logical coordinates as physical pixels would divide the child
+    // WebView bounds by the scale factor and clip the editor to the top-left area.
+    if cfg!(target_os = "macos")
+        && matches!(
+            host_context.plugin_format,
+            PluginFormat::Vst3 | PluginFormat::Au | PluginFormat::Aax
+        )
+    {
+        HostGuiSizeUnit::LogicalPoints
+    } else {
+        HostGuiSizeUnit::PhysicalPixels
     }
 }
 
@@ -584,6 +607,7 @@ impl HostGuiLayout {
             accepted_size_revision: AtomicU64::new(0),
             limits,
             resize_policy,
+            host_size_unit: AtomicU8::new(HostGuiSizeUnit::PhysicalPixels.to_u8()),
         }
     }
 
@@ -596,13 +620,20 @@ impl HostGuiLayout {
     }
 
     fn clamp_logical_size(&self, size: LogicalSize<f64>, scale: f64) -> LogicalSize<f64> {
-        let dpi = DpiConverter::new(scale);
-        // Resize commands receive frontend logical pixels, while the host's min/max
-        // contract is physical pixels. Convert before clamping so limits mean the
-        // same thing at every DPI scale.
+        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        // Resize commands receive frontend logical pixels. Convert through the host
+        // boundary unit before clamping so limits remain comparable to host callbacks.
         let physical = dpi.logical_size_to_gui(size);
         let clamped = clamp_size_with_limits(physical, self.limits);
         dpi.gui_size_to_logical(clamped)
+    }
+
+    fn set_host_size_unit(&self, unit: HostGuiSizeUnit) {
+        self.host_size_unit.store(unit.to_u8(), Ordering::Relaxed);
+    }
+
+    fn host_size_unit(&self) -> HostGuiSizeUnit {
+        HostGuiSizeUnit::from_u8(self.host_size_unit.load(Ordering::Relaxed))
     }
 
     fn store_accepted_size(&self, size: GuiSize) {
@@ -635,6 +666,14 @@ impl WxpGuiResizeHandle {
         }
     }
 
+    pub fn host_size_unit(&self) -> HostGuiSizeUnit {
+        self.layout.host_size_unit()
+    }
+
+    fn set_host_size_unit(&self, unit: HostGuiSizeUnit) {
+        self.layout.set_host_size_unit(unit);
+    }
+
     /// Requests a host-approved resize from the GUI event path and mirrors accepted bounds to wxp.
     ///
     /// `WxpGuiResizeHandle` is `Send + Sync` so command registration can share it, but this method
@@ -650,7 +689,8 @@ impl WxpGuiResizeHandle {
         // command registration boundary rather than making this a generic background-thread API.
         let scale = *self.scale.lock();
         let logical_size = self.layout.clamp_logical_size(requested, scale);
-        let gui_size = DpiConverter::new(scale).logical_size_to_gui(logical_size);
+        let dpi = DpiConverter::with_host_size_unit(scale, self.layout.host_size_unit());
+        let gui_size = dpi.logical_size_to_gui(logical_size);
 
         let previous_revision = self.layout.accepted_size_revision();
         let resize_result = host_gui_resize_requester.request_resize(gui_size);
@@ -660,7 +700,6 @@ impl WxpGuiResizeHandle {
         // `set_size()` re-entrantly, and then returns false to CLAP. Treat that re-entrant
         // `set_size()` as the ground truth. Optimistically resizing the WebView here would
         // race geometry with the host and cause visual jitter during grip dragging.
-        let dpi = DpiConverter::new(scale);
         if current_revision != previous_revision {
             return Ok(dpi.gui_size_to_logical(self.layout.accepted_size()));
         }
@@ -899,8 +938,8 @@ impl PluginGuiExtension for WxpGuiController {
         Ok(self.layout.clamp_size(size))
     }
 
-    fn set_size(&self, size: GuiSize) -> PluginResult<()> {
-        let size = self.layout.clamp_size(size);
+    fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
+        let size = self.layout.clamp_size(requested_size);
         let previous_size = self.layout.accepted_size();
         let size_changed = previous_size.width != size.width || previous_size.height != size.height;
         let handle = {
@@ -1012,12 +1051,6 @@ impl PluginGuiExtension for WxpGuiController {
         log::debug!("wxp controller: set_parent completed");
         Ok(())
     }
-
-    fn set_transient(&self, _window: HostWindow) -> PluginResult<()> {
-        Err(PluginError::Message("floating GUI is unsupported"))
-    }
-
-    fn suggest_title(&self, _title: &str) {}
 
     fn show(&self) -> PluginResult<()> {
         log::debug!("wxp controller: show called");
@@ -1146,6 +1179,7 @@ fn default_gui_configuration() -> GuiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wrac_host_context::DetectedHost;
 
     #[test]
     fn clamps_logical_resize_request_in_physical_pixels() {
@@ -1171,5 +1205,30 @@ mod tests {
 
         assert_eq!(clamped.width, 600.0);
         assert_eq!(clamped.height, 200.0 / 1.5);
+    }
+
+    #[test]
+    fn selects_logical_host_size_for_macos_wrappers() {
+        let formats = [PluginFormat::Vst3, PluginFormat::Au, PluginFormat::Aax];
+
+        for plugin_format in formats {
+            let context = HostContext {
+                host: DetectedHost {
+                    family: HostFamily::Unknown,
+                    display_name: "test".to_string(),
+                    process_name: "test".to_string(),
+                    process_path: String::new(),
+                    version: None,
+                },
+                plugin_format,
+            };
+
+            let expected = if cfg!(target_os = "macos") {
+                HostGuiSizeUnit::LogicalPoints
+            } else {
+                HostGuiSizeUnit::PhysicalPixels
+            };
+            assert_eq!(host_gui_size_unit_for_context(&context), expected);
+        }
     }
 }

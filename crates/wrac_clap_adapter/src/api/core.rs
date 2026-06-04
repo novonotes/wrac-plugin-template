@@ -32,42 +32,72 @@ pub struct PluginCoreContext {
 /// concurrently-called parameter/state/GUI queries in the same mutable state would make
 /// it impossible to answer one while the other is running. Split each capability into
 /// its own thread-safe store and return it as `Arc<dyn ...>` from this trait.
-pub trait PluginCore: Send + Sync + 'static {
+pub trait PluginCore: Send + 'static {
+    /// Called from the plugin activation callback. `[control-thread]`
     fn activate(&mut self, context: ActivateContext) -> PluginResult<Box<dyn Processor>>;
+
+    /// Called from the plugin deactivation or destruction callback. `[control-thread]`
     fn deactivate(&mut self, processor: Box<dyn Processor>) -> PluginResult<()>;
 
+    /// Returns the CLAP audio-ports extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPortsExtension>> {
         None
     }
 
+    /// Returns the CLAP configurable-audio-ports extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPortsExtension>> {
         None
     }
 
+    /// Returns the CLAP note-ports extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn note_ports(&self) -> Option<Arc<dyn PluginNotePortsExtension>> {
         None
     }
 
+    /// Returns the CLAP params extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn params(&self) -> Option<Arc<dyn PluginParamsExtension>> {
         None
     }
 
+    /// Returns the CLAP state extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn state(&self) -> Option<Arc<dyn PluginStateExtension>> {
         None
     }
 
+    /// Returns the CLAP GUI extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         None
     }
 
+    /// Returns the CLAP render extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn render(&self) -> Option<Arc<dyn PluginRenderExtension>> {
         None
     }
 
+    /// Returns the CLAP tail extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn tail(&self) -> Option<Arc<dyn PluginTailExtension>> {
         None
     }
 
+    /// Returns the CLAP latency extension during plugin instance creation.
+    ///
+    /// Called once before CLAP callbacks are exposed to the host.
     fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
         None
     }

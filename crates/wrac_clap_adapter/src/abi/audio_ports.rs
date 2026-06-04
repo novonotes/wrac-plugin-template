@@ -20,19 +20,14 @@ pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports
 unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: bool) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("audio_ports.count: missing plugin instance is_input={is_input}");
+            wrac_log::rtwarn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
         let Some(audio_ports) = instance.audio_ports.as_ref() else {
-            log::warn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
+            wrac_log::rtwarn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
             return 0;
         };
-        let count = audio_ports.audio_port_count(is_input);
-        log::debug!(
-            "audio_ports.count: is_input={is_input} count={count} thread={:?}",
-            std::thread::current().id()
-        );
-        count
+        audio_ports.audio_port_count(is_input)
     })
 }
 
@@ -44,31 +39,27 @@ unsafe extern "C" fn audio_ports_get(
 ) -> bool {
     ffi_bool(|| {
         if info.is_null() {
-            log::warn!("audio_ports.get: null output pointer index={index} is_input={is_input}");
+            wrac_log::rtwarn!(
+                "audio_ports.get: null output pointer index={index} is_input={is_input}"
+            );
             return false;
         }
         let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!(
+            wrac_log::rtwarn!(
                 "audio_ports.get: missing plugin instance index={index} is_input={is_input}"
             );
             return false;
         };
         let Some(audio_ports) = instance.audio_ports.as_ref() else {
-            log::warn!(
+            wrac_log::rtwarn!(
                 "audio_ports.get: plugin has no audio ports index={index} is_input={is_input}"
             );
             return false;
         };
         let Some(port) = audio_ports.audio_port_info(index, is_input) else {
-            log::warn!("audio_ports.get: invalid index={index} is_input={is_input}");
+            wrac_log::rtwarn!("audio_ports.get: invalid index={index} is_input={is_input}");
             return false;
         };
-        log::debug!(
-            "audio_ports.get: index={index} is_input={is_input} id={} channels={} thread={:?}",
-            port.id,
-            port.channel_count,
-            std::thread::current().id()
-        );
 
         unsafe {
             (*info).id = port.id;

@@ -1,37 +1,34 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use parking_lot::RwLock;
 use wrac_clap_adapter::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginResult,
 };
 
-/// Source of truth for the audio layout negotiated with the host. **Non-realtime only.**
+/// Source of truth for the audio layout negotiated with the host.
 ///
 /// Host port queries and configurable-audio-ports apply operations read/write this store,
-/// but `Processor::process()` never does. Reading an `RwLock` from the audio thread risks
-/// priority inversion, so the layout is treated as "the configuration for the next
-/// processor to be activated" and snapshotted in `activate()` before being passed in
-/// (see [`WracGainAudioProcessor`](crate::audio::WracGainAudioProcessor)). The same
-/// "record in store → snapshot at activate" pattern applies to complex layouts such as
-/// sidechain or ambisonics.
+/// and wrappers may issue those queries from audio/render workers. `Processor::process()`
+/// still uses the snapshot captured at `activate()`, so layout changes cannot alter the
+/// running processor's buffer contract.
 pub(super) struct AudioLayoutStore {
-    channel_count: RwLock<u32>,
+    channel_count: AtomicU32,
 }
 
 impl AudioLayoutStore {
     pub(super) fn new(channel_count: u32) -> Self {
         Self {
-            channel_count: RwLock::new(channel_count),
+            channel_count: AtomicU32::new(channel_count),
         }
     }
 
     pub(super) fn channel_count(&self) -> u32 {
-        *self.channel_count.read()
+        self.channel_count.load(Ordering::Relaxed)
     }
 
     fn set_channel_count(&self, channel_count: u32) {
-        *self.channel_count.write() = channel_count;
+        self.channel_count.store(channel_count, Ordering::Relaxed);
     }
 }
 
