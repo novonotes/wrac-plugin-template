@@ -11,6 +11,7 @@
 //!   thread; implementations must satisfy realtime constraints.
 //! - `[control-thread,audio-thread]`: may be called from control or audio threads,
 //!   but not concurrently for the same plugin instance.
+//!
 //! Comma means "or", and `&` adds a condition as in the CLAP headers.
 //!
 //! Some WRAC contracts are stricter than native CLAP because VST3/AU/AAX wrappers do
