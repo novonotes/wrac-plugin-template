@@ -1,8 +1,15 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use clap_sys::ext::audio_ports::CLAP_AUDIO_PORT_IS_MAIN;
 use clap_sys::ext::params::{
     CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY,
     CLAP_PARAM_IS_STEPPED,
+};
+use clap_sys::plugin_features::{
+    CLAP_PLUGIN_FEATURE_ANALYZER, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, CLAP_PLUGIN_FEATURE_INSTRUMENT,
+    CLAP_PLUGIN_FEATURE_NOTE_DETECTOR, CLAP_PLUGIN_FEATURE_NOTE_EFFECT,
+    CLAP_PLUGIN_FEATURE_SAMPLER, CLAP_PLUGIN_FEATURE_SYNTHESIZER,
 };
 
 use crate::metadata::{PluginMetadata, ValidationMetadata};
@@ -18,6 +25,14 @@ const RULE_BYPASS_PARAM_SHAPE: &str = "bypass-param-shape";
 const RULE_PLUGIN_REQUIRES_BYPASS: &str = "plugin-requires-bypass";
 const RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST: &str = "clap-descriptors-match-manifest";
 const RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST: &str = "macos-clap-info-plist-matches-manifest";
+const RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST: &str =
+    "macos-wrapper-info-plists-match-manifest";
+const RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT: &str = "wrapper-targets-require-single-product";
+const RULE_PARAM_INFO_SHAPE: &str = "param-info-shape";
+const RULE_STATE_EXTENSION_REQUIRED: &str = "state-extension-required";
+const RULE_AUDIO_PORT_SHAPE: &str = "audio-port-shape";
+const RULE_NOTE_PORT_SHAPE: &str = "note-port-shape";
+const RULE_FEATURES_MATCH_CAPABILITIES: &str = "features-match-capabilities";
 
 const KNOWN_RULES: &[&str] = &[
     RULE_FENDER_SINGLE_KNOB,
@@ -26,6 +41,13 @@ const KNOWN_RULES: &[&str] = &[
     RULE_PLUGIN_REQUIRES_BYPASS,
     RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
     RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+    RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+    RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
+    RULE_PARAM_INFO_SHAPE,
+    RULE_STATE_EXTENSION_REQUIRED,
+    RULE_AUDIO_PORT_SHAPE,
+    RULE_NOTE_PORT_SHAPE,
+    RULE_FEATURES_MATCH_CAPABILITIES,
 ];
 
 pub(crate) fn validate_disabled_rules(validation: &ValidationMetadata) -> Result<()> {
@@ -46,7 +68,11 @@ pub(crate) fn evaluate_bundle_checks(
     validation: &ValidationMetadata,
     location: &Path,
     platform: Platform,
+    targets: &[ValidateTarget],
     clap_bundle: &Path,
+    vst3_bundle: &Path,
+    au_bundle: &Path,
+    standalone_artifact: &Path,
 ) -> Vec<CheckResult> {
     let subject = CheckSubject::bundle(metadata);
     let mut results = Vec::new();
@@ -72,6 +98,26 @@ pub(crate) fn evaluate_bundle_checks(
                 &clap_bundle.join("Contents").join("Info.plist"),
             )),
         );
+        let wrapper_metadata_requested = targets
+            .iter()
+            .any(|target| matches!(target, Target::Vst3 | Target::Au | Target::Standalone));
+        push_check_result_for_subject(
+            &mut results,
+            validation,
+            &subject,
+            RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+            if wrapper_metadata_requested {
+                CheckStatus::from_violations(wrapper_info_plist_violations(
+                    metadata,
+                    targets,
+                    vst3_bundle,
+                    au_bundle,
+                    standalone_artifact,
+                ))
+            } else {
+                CheckStatus::Skipped("No VST3, AU, or standalone validation target was requested.")
+            },
+        );
     } else {
         push_check_result_for_subject(
             &mut results,
@@ -80,7 +126,42 @@ pub(crate) fn evaluate_bundle_checks(
             RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
             CheckStatus::Skipped("macOS CLAP bundle metadata is not available on this platform."),
         );
+        push_check_result_for_subject(
+            &mut results,
+            validation,
+            &subject,
+            RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+            CheckStatus::Skipped(
+                "macOS wrapper bundle metadata is not available on this platform.",
+            ),
+        );
     }
+
+    let wrapper_requested = targets
+        .iter()
+        .any(|target| matches!(target, Target::Vst3 | Target::Au));
+    let wrapper_product_violations = if wrapper_requested && metadata.plugins.len() > 1 {
+        vec![RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
+            message: format!(
+                "VST3/AU wrapper validation currently supports one manifest product per bundle. manifest_product_count={}",
+                metadata.plugins.len()
+            ),
+            fix: "Release wrapper formats as single-product bundles, or disable this rule with a documented reason after confirming wrapper metadata and host scans for every product.",
+        }]
+    } else {
+        Vec::new()
+    };
+    push_check_result_for_subject(
+        &mut results,
+        validation,
+        &subject,
+        RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
+        CheckStatus::from_violations(wrapper_product_violations),
+    );
 
     results
 }
@@ -106,6 +187,13 @@ pub(crate) fn evaluate_checks(
         .collect::<Vec<_>>();
 
     let mut results = Vec::new();
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_PARAM_INFO_SHAPE,
+        CheckStatus::from_violations(param_info_shape_violations(schema, location)),
+    );
 
     // Keep target-inapplicable checks in the report as `skipped`. Without this, CI logs
     // cannot distinguish "not relevant for this target" from "the check was never registered".
@@ -248,7 +336,441 @@ pub(crate) fn evaluate_checks(
         CheckStatus::from_violations(bypass_required_violations),
     );
 
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_STATE_EXTENSION_REQUIRED,
+        CheckStatus::from_violations(state_extension_violations(schema, location)),
+    );
+
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_AUDIO_PORT_SHAPE,
+        CheckStatus::from_violations(audio_port_shape_violations(schema, location)),
+    );
+
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_NOTE_PORT_SHAPE,
+        CheckStatus::from_violations(note_port_shape_violations(schema, location)),
+    );
+
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_FEATURES_MATCH_CAPABILITIES,
+        CheckStatus::from_violations(feature_capability_violations(schema, location)),
+    );
+
     results
+}
+
+fn param_info_shape_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
+    let mut violations = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    for param in &schema.params {
+        if !seen_ids.insert(param.id) {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_PARAM_INFO_SHAPE,
+                message: format!(
+                    "Public parameter IDs must be unique. duplicate_id={} name=\"{}\"",
+                    param.id, param.name
+                ),
+                fix: "Assign one stable unique parameter ID to each public parameter.",
+            });
+        }
+        if param.name.trim().is_empty() {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_PARAM_INFO_SHAPE,
+                message: format!("Public parameter names must not be empty. id={}", param.id),
+                fix: "Expose a non-empty stable name for every public parameter.",
+            });
+        }
+        if !param.min_value.is_finite()
+            || !param.max_value.is_finite()
+            || !param.default_value.is_finite()
+        {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_PARAM_INFO_SHAPE,
+                message: format!(
+                    "Parameter ranges and defaults must be finite. id={} name=\"{}\" min={} max={} default={}",
+                    param.id, param.name, param.min_value, param.max_value, param.default_value
+                ),
+                fix: "Use finite min, max, and default values.",
+            });
+            continue;
+        }
+        if param.min_value >= param.max_value {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_PARAM_INFO_SHAPE,
+                message: format!(
+                    "Parameter min must be less than max. id={} name=\"{}\" min={} max={}",
+                    param.id, param.name, param.min_value, param.max_value
+                ),
+                fix: "Set each parameter range so min < max.",
+            });
+        }
+        if param.default_value < param.min_value || param.default_value > param.max_value {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_PARAM_INFO_SHAPE,
+                message: format!(
+                    "Parameter default must be inside its range. id={} name=\"{}\" min={} max={} default={}",
+                    param.id, param.name, param.min_value, param.max_value, param.default_value
+                ),
+                fix: "Set each default value inside its declared range.",
+            });
+        }
+    }
+
+    violations
+}
+
+fn state_extension_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
+    if schema.has_state {
+        return Vec::new();
+    }
+
+    vec![RuleViolation {
+        plugin_id: schema.plugin_id.clone(),
+        plugin_name: schema.plugin_name.clone(),
+        location: location.to_path_buf(),
+        rule_id: RULE_STATE_EXTENSION_REQUIRED,
+        message: "Production plugins should expose the CLAP state extension for project recall."
+            .to_string(),
+        fix: "Implement state save/load for the plugin, or disable this rule with a documented reason.",
+    }]
+}
+
+fn audio_port_shape_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
+    let mut violations = Vec::new();
+    let has_audio_input = !schema.audio_inputs.is_empty();
+    let has_audio_output = !schema.audio_outputs.is_empty();
+    let is_audio_effect = has_feature(schema, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT.to_str().unwrap());
+    let is_note_only = has_feature(schema, CLAP_PLUGIN_FEATURE_NOTE_EFFECT.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_NOTE_DETECTOR.to_str().unwrap());
+    let is_generator = has_feature(schema, CLAP_PLUGIN_FEATURE_INSTRUMENT.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_SYNTHESIZER.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_SAMPLER.to_str().unwrap());
+    let is_analyzer = has_feature(schema, CLAP_PLUGIN_FEATURE_ANALYZER.to_str().unwrap());
+
+    if is_audio_effect && (!has_audio_input || !has_audio_output) {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_AUDIO_PORT_SHAPE,
+            message: format!(
+                "Audio-effect plugins should expose at least one input and one output audio port. input_count={} output_count={}",
+                schema.audio_inputs.len(),
+                schema.audio_outputs.len()
+            ),
+            fix: "Expose one main audio input and one main audio output, or disable this rule with a documented reason for non-audio products.",
+        });
+    }
+    if is_generator && !has_audio_output {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_AUDIO_PORT_SHAPE,
+            message: "Instrument/synth/sampler plugins should expose an audio output port."
+                .to_string(),
+            fix: "Expose one main audio output, or disable this rule with a documented reason.",
+        });
+    }
+    if !is_note_only && !is_analyzer {
+        require_one_main_port(
+            &mut violations,
+            schema,
+            location,
+            &schema.audio_outputs,
+            "output",
+        );
+        if is_audio_effect {
+            require_one_main_port(
+                &mut violations,
+                schema,
+                location,
+                &schema.audio_inputs,
+                "input",
+            );
+        }
+    }
+    validate_audio_port_list(
+        &mut violations,
+        schema,
+        location,
+        &schema.audio_inputs,
+        "input",
+    );
+    validate_audio_port_list(
+        &mut violations,
+        schema,
+        location,
+        &schema.audio_outputs,
+        "output",
+    );
+
+    violations
+}
+
+fn validate_audio_port_list(
+    violations: &mut Vec<RuleViolation>,
+    schema: &PluginSchema,
+    location: &Path,
+    ports: &[super::clap_schema::AudioPortSchema],
+    direction: &'static str,
+) {
+    let mut seen_ids = HashSet::new();
+    for port in ports {
+        if !seen_ids.insert(port.id) {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_AUDIO_PORT_SHAPE,
+                message: format!(
+                    "Audio {direction} port IDs must be unique. duplicate_id={} name=\"{}\"",
+                    port.id, port.name
+                ),
+                fix: "Assign one stable unique ID to each audio port.",
+            });
+        }
+        if port.name.trim().is_empty() {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_AUDIO_PORT_SHAPE,
+                message: format!(
+                    "Audio {direction} port names must not be empty. id={}",
+                    port.id
+                ),
+                fix: "Expose a non-empty stable name for each audio port.",
+            });
+        }
+        if port.channel_count == 0 {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_AUDIO_PORT_SHAPE,
+                message: format!(
+                    "Audio {direction} port channel count must be non-zero. id={} name=\"{}\"",
+                    port.id, port.name
+                ),
+                fix: "Expose a concrete channel count for each audio port.",
+            });
+        }
+        if port.port_type.trim().is_empty() {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_AUDIO_PORT_SHAPE,
+                message: format!(
+                    "Audio {direction} port type should be declared. id={} name=\"{}\"",
+                    port.id, port.name
+                ),
+                fix: "Declare the CLAP port type, such as mono or stereo.",
+            });
+        }
+    }
+}
+
+fn require_one_main_port(
+    violations: &mut Vec<RuleViolation>,
+    schema: &PluginSchema,
+    location: &Path,
+    ports: &[super::clap_schema::AudioPortSchema],
+    direction: &'static str,
+) {
+    let main_count = ports
+        .iter()
+        .filter(|port| port.flags.contains(CLAP_AUDIO_PORT_IS_MAIN))
+        .count();
+    if ports.is_empty() || main_count == 1 {
+        return;
+    }
+
+    violations.push(RuleViolation {
+        plugin_id: schema.plugin_id.clone(),
+        plugin_name: schema.plugin_name.clone(),
+        location: location.to_path_buf(),
+        rule_id: RULE_AUDIO_PORT_SHAPE,
+        message: format!(
+            "Audio port list should expose exactly one main {direction} port when {direction} ports exist. {direction}_port_count={} main_{direction}_port_count={main_count}",
+            ports.len()
+        ),
+        fix: "Mark one host-facing audio port as main and keep additional ports non-main.",
+    });
+}
+
+fn feature_capability_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
+    let mut violations = Vec::new();
+    let is_audio_effect = has_feature(schema, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT.to_str().unwrap());
+    let is_note_processor = has_feature(schema, CLAP_PLUGIN_FEATURE_NOTE_EFFECT.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_NOTE_DETECTOR.to_str().unwrap());
+    let is_instrument = has_feature(schema, CLAP_PLUGIN_FEATURE_INSTRUMENT.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_SYNTHESIZER.to_str().unwrap())
+        || has_feature(schema, CLAP_PLUGIN_FEATURE_SAMPLER.to_str().unwrap());
+
+    if schema.plugin_features.is_empty() {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_FEATURES_MATCH_CAPABILITIES,
+            message: "Plugin descriptor should expose at least one CLAP feature.".to_string(),
+            fix: "Declare product features that match the plugin capability, such as audio-effect, instrument, or note-effect.",
+        });
+    }
+    if is_audio_effect && (schema.audio_inputs.is_empty() || schema.audio_outputs.is_empty()) {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_FEATURES_MATCH_CAPABILITIES,
+            message: "The audio-effect feature should match input/output audio ports.".to_string(),
+            fix: "Expose audio input/output ports for audio effects, or change the feature list.",
+        });
+    }
+    if is_instrument && schema.audio_outputs.is_empty() {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_FEATURES_MATCH_CAPABILITIES,
+            message: "Instrument/synth/sampler features should match an audio output capability."
+                .to_string(),
+            fix: "Expose an audio output for generator products, or change the feature list.",
+        });
+    }
+    if is_note_processor && schema.note_inputs.is_empty() && schema.note_outputs.is_empty() {
+        violations.push(RuleViolation {
+            plugin_id: schema.plugin_id.clone(),
+            plugin_name: schema.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_FEATURES_MATCH_CAPABILITIES,
+            message: "Note-processing features should match a note input or output capability."
+                .to_string(),
+            fix: "Expose note ports for note-processing products, or change the feature list.",
+        });
+    }
+
+    violations
+}
+
+fn note_port_shape_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
+    let mut violations = Vec::new();
+    validate_note_port_list(
+        &mut violations,
+        schema,
+        location,
+        &schema.note_inputs,
+        "input",
+    );
+    validate_note_port_list(
+        &mut violations,
+        schema,
+        location,
+        &schema.note_outputs,
+        "output",
+    );
+    violations
+}
+
+fn validate_note_port_list(
+    violations: &mut Vec<RuleViolation>,
+    schema: &PluginSchema,
+    location: &Path,
+    ports: &[super::clap_schema::NotePortSchema],
+    direction: &'static str,
+) {
+    let mut seen_ids = HashSet::new();
+    for port in ports {
+        if !seen_ids.insert(port.id) {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_NOTE_PORT_SHAPE,
+                message: format!(
+                    "Note {direction} port IDs must be unique. duplicate_id={} name=\"{}\"",
+                    port.id, port.name
+                ),
+                fix: "Assign one stable unique ID to each note port.",
+            });
+        }
+        if port.name.trim().is_empty() {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_NOTE_PORT_SHAPE,
+                message: format!(
+                    "Note {direction} port names must not be empty. id={}",
+                    port.id
+                ),
+                fix: "Expose a non-empty stable name for each note port.",
+            });
+        }
+        if port.supported_dialects == 0 {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_NOTE_PORT_SHAPE,
+                message: format!(
+                    "Note {direction} port supported dialects must be non-empty. id={} name=\"{}\"",
+                    port.id, port.name
+                ),
+                fix: "Declare at least one supported note dialect for each note port.",
+            });
+        }
+        if port.preferred_dialect == 0 || port.preferred_dialect & port.supported_dialects == 0 {
+            violations.push(RuleViolation {
+                plugin_id: schema.plugin_id.clone(),
+                plugin_name: schema.plugin_name.clone(),
+                location: location.to_path_buf(),
+                rule_id: RULE_NOTE_PORT_SHAPE,
+                message: format!(
+                    "Note {direction} port preferred dialect must be one of the supported dialects. id={} name=\"{}\" supported={} preferred={}",
+                    port.id, port.name, port.supported_dialects, port.preferred_dialect
+                ),
+                fix: "Set the preferred note dialect to one of the supported dialects.",
+            });
+        }
+    }
+}
+
+fn has_feature(schema: &PluginSchema, feature: &str) -> bool {
+    schema
+        .plugin_features
+        .iter()
+        .any(|candidate| candidate == feature)
 }
 
 fn clap_descriptor_manifest_violations(
@@ -431,6 +953,293 @@ fn clap_info_plist_violations(metadata: &PluginMetadata, plist_path: &Path) -> V
     violations
 }
 
+fn wrapper_info_plist_violations(
+    metadata: &PluginMetadata,
+    targets: &[ValidateTarget],
+    vst3_bundle: &Path,
+    au_bundle: &Path,
+    standalone_artifact: &Path,
+) -> Vec<RuleViolation> {
+    let subject = CheckSubject::bundle(metadata);
+    let mut violations = Vec::new();
+
+    if targets.contains(&Target::Vst3) {
+        check_vst3_info_plist(
+            &mut violations,
+            &subject,
+            metadata,
+            &vst3_bundle.join("Contents").join("Info.plist"),
+        );
+    }
+    if targets.contains(&Target::Au) {
+        check_au_info_plist(
+            &mut violations,
+            &subject,
+            metadata,
+            &au_bundle.join("Contents").join("Info.plist"),
+        );
+    }
+    if targets.contains(&Target::Standalone) {
+        check_standalone_info_plist(
+            &mut violations,
+            &subject,
+            metadata,
+            &standalone_artifact.join("Contents").join("Info.plist"),
+        );
+    }
+
+    violations
+}
+
+fn check_vst3_info_plist(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    metadata: &PluginMetadata,
+    plist_path: &Path,
+) {
+    let Some(dict) = read_plist_dict(violations, subject, plist_path, "VST3 Info.plist") else {
+        return;
+    };
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "VST3 Info.plist",
+        "CFBundleExecutable",
+        &metadata.bundle_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep VST3 bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "VST3 Info.plist",
+        "CFBundleName",
+        &metadata.bundle_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep VST3 bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "VST3 Info.plist",
+        "CFBundleShortVersionString",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep VST3 bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "VST3 Info.plist",
+        "CFBundleVersion",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep VST3 bundle metadata generated from package.metadata.wrac.",
+    );
+}
+
+fn check_au_info_plist(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    metadata: &PluginMetadata,
+    plist_path: &Path,
+) {
+    let Some(dict) = read_plist_dict(violations, subject, plist_path, "AU Info.plist") else {
+        return;
+    };
+    let primary = metadata.primary_plugin();
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "AU Info.plist",
+        "CFBundleExecutable",
+        &metadata.bundle_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AU bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "AU Info.plist",
+        "CFBundleName",
+        &metadata.bundle_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AU bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "AU Info.plist",
+        "CFBundleShortVersionString",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AU bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "AU Info.plist",
+        "CFBundleVersion",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AU bundle metadata generated from package.metadata.wrac.",
+    );
+    check_plist_bool_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "AU Info.plist",
+        "NSHighResolutionCapable",
+        true,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AU bundle metadata generated from package.metadata.wrac.",
+    );
+
+    let components = dict.get("AudioComponents").and_then(plist::Value::as_array);
+    let Some(component) = components
+        .and_then(|items| items.first())
+        .and_then(plist::Value::as_dictionary)
+    else {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: plist_path.to_path_buf(),
+            rule_id: RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+            message: "AU Info.plist AudioComponents[0] must be present.".to_string(),
+            fix: "Regenerate the AU bundle metadata from package.metadata.wrac.",
+        });
+        return;
+    };
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        component,
+        "AU AudioComponents[0]",
+        "manufacturer",
+        &metadata.auv2_manufacturer_code,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AUv2 manufacturer metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        component,
+        "AU AudioComponents[0]",
+        "type",
+        &primary.auv2_type,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AUv2 type metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        component,
+        "AU AudioComponents[0]",
+        "subtype",
+        &primary.auv2_subtype,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AUv2 subtype metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        component,
+        "AU AudioComponents[0]",
+        "name",
+        &format!("{}: {}", metadata.company_name, primary.plugin_name),
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AUv2 display metadata generated from package.metadata.wrac.",
+    );
+    check_plist_integer_for_rule(
+        violations,
+        subject,
+        plist_path,
+        component,
+        "AU AudioComponents[0]",
+        "version",
+        auv2_encoded_version(&metadata.version),
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep AUv2 version metadata generated from the package version.",
+    );
+}
+
+fn check_standalone_info_plist(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    metadata: &PluginMetadata,
+    plist_path: &Path,
+) {
+    let Some(dict) = read_plist_dict(violations, subject, plist_path, "Standalone Info.plist")
+    else {
+        return;
+    };
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "Standalone Info.plist",
+        "CFBundleExecutable",
+        &metadata.standalone_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep standalone app metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "Standalone Info.plist",
+        "CFBundleName",
+        &metadata.standalone_name,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep standalone app metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "Standalone Info.plist",
+        "CFBundleShortVersionString",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep standalone app metadata generated from package.metadata.wrac.",
+    );
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        &dict,
+        "Standalone Info.plist",
+        "CFBundleVersion",
+        &metadata.version,
+        RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+        "Keep standalone app metadata generated from package.metadata.wrac.",
+    );
+}
+
 fn check_plist_string(
     violations: &mut Vec<RuleViolation>,
     subject: &CheckSubject,
@@ -439,18 +1248,42 @@ fn check_plist_string(
     key: &'static str,
     expected: &str,
 ) {
+    check_plist_string_for_rule(
+        violations,
+        subject,
+        plist_path,
+        dict,
+        "CLAP Info.plist",
+        key,
+        expected,
+        RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+        "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+    );
+}
+
+fn check_plist_string_for_rule(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    dict: &plist::Dictionary,
+    section: &'static str,
+    key: &'static str,
+    expected: &str,
+    rule_id: &'static str,
+    fix: &'static str,
+) {
     let actual = dict.get(key).and_then(plist::Value::as_string);
     if actual != Some(expected) {
         violations.push(RuleViolation {
             plugin_id: subject.plugin_id.clone(),
             plugin_name: subject.plugin_name.clone(),
             location: plist_path.to_path_buf(),
-            rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            rule_id,
             message: format!(
-                "CLAP Info.plist {key} does not match manifest metadata. expected=\"{expected}\" actual=\"{}\"",
+                "{section} {key} does not match manifest metadata. expected=\"{expected}\" actual=\"{}\"",
                 actual.unwrap_or("<missing or non-string>")
             ),
-            fix: "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+            fix,
         });
     }
 }
@@ -463,22 +1296,120 @@ fn check_plist_bool(
     key: &'static str,
     expected: bool,
 ) {
+    check_plist_bool_for_rule(
+        violations,
+        subject,
+        plist_path,
+        dict,
+        "CLAP Info.plist",
+        key,
+        expected,
+        RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+        "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+    );
+}
+
+fn check_plist_bool_for_rule(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    dict: &plist::Dictionary,
+    section: &'static str,
+    key: &'static str,
+    expected: bool,
+    rule_id: &'static str,
+    fix: &'static str,
+) {
     let actual = dict.get(key).and_then(plist::Value::as_boolean);
     if actual != Some(expected) {
         violations.push(RuleViolation {
             plugin_id: subject.plugin_id.clone(),
             plugin_name: subject.plugin_name.clone(),
             location: plist_path.to_path_buf(),
-            rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            rule_id,
             message: format!(
-                "CLAP Info.plist {key} does not match manifest metadata. expected={expected} actual={}",
+                "{section} {key} does not match manifest metadata. expected={expected} actual={}",
                 actual
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "<missing or non-boolean>".to_string())
             ),
-            fix: "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+            fix,
         });
     }
+}
+
+fn check_plist_integer_for_rule(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    dict: &plist::Dictionary,
+    section: &'static str,
+    key: &'static str,
+    expected: i64,
+    rule_id: &'static str,
+    fix: &'static str,
+) {
+    let actual = dict.get(key).and_then(plist::Value::as_signed_integer);
+    if actual != Some(expected) {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: plist_path.to_path_buf(),
+            rule_id,
+            message: format!(
+                "{section} {key} does not match manifest metadata. expected={expected} actual={}",
+                actual
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "<missing or non-integer>".to_string())
+            ),
+            fix,
+        });
+    }
+}
+
+fn read_plist_dict(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    section: &'static str,
+) -> Option<plist::Dictionary> {
+    match plist::Value::from_file(plist_path) {
+        Ok(value) => match value.into_dictionary() {
+            Some(dict) => Some(dict),
+            None => {
+                violations.push(RuleViolation {
+                    plugin_id: subject.plugin_id.clone(),
+                    plugin_name: subject.plugin_name.clone(),
+                    location: plist_path.to_path_buf(),
+                    rule_id: RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+                    message: format!("{section} must be a dictionary."),
+                    fix: "Regenerate wrapper bundle metadata from package.metadata.wrac.",
+                });
+                None
+            }
+        },
+        Err(error) => {
+            violations.push(RuleViolation {
+                plugin_id: subject.plugin_id.clone(),
+                plugin_name: subject.plugin_name.clone(),
+                location: plist_path.to_path_buf(),
+                rule_id: RULE_MACOS_WRAPPER_INFO_PLISTS_MATCH_MANIFEST,
+                message: format!("Failed to read {section}: {error}"),
+                fix: "Build the requested wrapper artifact and keep Contents/Info.plist generated from package.metadata.wrac.",
+            });
+            None
+        }
+    }
+}
+
+fn auv2_encoded_version(version: &str) -> i64 {
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<i64>().unwrap_or_default());
+    let major = parts.next().unwrap_or_default().clamp(0, 255);
+    let minor = parts.next().unwrap_or_default().clamp(0, 255);
+    let patch = parts.next().unwrap_or_default().clamp(0, 255);
+    (major << 16) | (minor << 8) | patch
 }
 
 fn push_check_result(
@@ -606,7 +1537,9 @@ mod tests {
     };
     use crate::targets::ValidateTarget;
 
-    use super::super::clap_schema::{ParameterSchema, PluginSchema};
+    use super::super::clap_schema::{
+        AudioPortSchema, NotePortSchema, ParameterSchema, PluginSchema,
+    };
     use super::*;
 
     fn schema(params: Vec<ParameterSchema>) -> PluginSchema {
@@ -615,7 +1548,32 @@ mod tests {
             plugin_name: "Test Plugin".to_string(),
             plugin_vendor: "Example".to_string(),
             plugin_version: "1.0.0".to_string(),
+            plugin_features: vec!["audio-effect".to_string(), "stereo".to_string()],
+            has_state: true,
+            audio_inputs: vec![main_stereo_port(0, "Input")],
+            audio_outputs: vec![main_stereo_port(1, "Output")],
+            note_inputs: Vec::new(),
+            note_outputs: Vec::new(),
             params,
+        }
+    }
+
+    fn main_stereo_port(id: u32, name: &str) -> AudioPortSchema {
+        AudioPortSchema {
+            id,
+            name: name.to_string(),
+            flags: CLAP_AUDIO_PORT_IS_MAIN,
+            channel_count: 2,
+            port_type: "stereo".to_string(),
+        }
+    }
+
+    fn note_port(id: u32, name: &str) -> NotePortSchema {
+        NotePortSchema {
+            id,
+            name: name.to_string(),
+            supported_dialects: 1,
+            preferred_dialect: 1,
         }
     }
 
@@ -910,6 +1868,114 @@ mod tests {
             status_for(&results, RULE_PLUGIN_REQUIRES_BYPASS),
             CheckStatus::Passed
         ));
+    }
+
+    #[test]
+    fn parameter_info_requires_unique_ids() {
+        let results = evaluate_checks(
+            &schema(vec![valid_bypass_param(0), param(0, 0)]),
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_PARAM_INFO_SHAPE));
+    }
+
+    #[test]
+    fn parameter_info_requires_default_inside_range() {
+        let mut gain = param(1, 0);
+        gain.default_value = 2.0;
+        let results = evaluate_checks(
+            &schema(vec![valid_bypass_param(0), gain]),
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_PARAM_INFO_SHAPE));
+    }
+
+    #[test]
+    fn state_extension_is_required() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.has_state = false;
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_STATE_EXTENSION_REQUIRED));
+    }
+
+    #[test]
+    fn audio_effect_requires_input_and_output_audio_ports() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.audio_outputs = Vec::new();
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_AUDIO_PORT_SHAPE));
+        assert!(rule_failed(&results, RULE_FEATURES_MATCH_CAPABILITIES));
+    }
+
+    #[test]
+    fn audio_ports_reject_multiple_main_outputs() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.audio_outputs = vec![
+            main_stereo_port(1, "Output 1"),
+            main_stereo_port(2, "Output 2"),
+        ];
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_AUDIO_PORT_SHAPE));
+    }
+
+    #[test]
+    fn descriptor_features_are_required() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.plugin_features = Vec::new();
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_FEATURES_MATCH_CAPABILITIES));
+    }
+
+    #[test]
+    fn note_ports_require_preferred_dialect_to_be_supported() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        let mut notes = note_port(0, "Notes");
+        notes.preferred_dialect = 2;
+        schema.note_inputs = vec![notes];
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_NOTE_PORT_SHAPE));
+    }
+
+    #[test]
+    fn note_processing_features_require_note_ports() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.plugin_features = vec!["note-effect".to_string()];
+        let results = evaluate_checks(
+            &schema,
+            &[ValidateTarget::Clap],
+            &no_disabled_rules(),
+            Path::new("Cargo.toml"),
+        );
+        assert!(rule_failed(&results, RULE_FEATURES_MATCH_CAPABILITIES));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Production-Readiness Checks
 
-`cargo xtask validate` builds the requested plugin formats, runs WRAC production-readiness checks, and then runs external format validators such as clap-validator, Steinberg's VST3 validator, and auval. WRAC check violations are errors and return a non-zero exit code.
+`cargo xtask validate` builds the requested CLAP, VST3, AU, and/or standalone targets, runs WRAC production-readiness checks, and then runs external format validators such as clap-validator, Steinberg's VST3 validator, and auval when they apply. Standalone validation currently runs WRAC checks only. WRAC check violations are errors and return a non-zero exit code.
 
 WRAC production-readiness checks are opinionated NovoNotes release-policy checks for commercial plugins, not format-spec validators. They can require a low-cost convention when NovoNotes expects it to reduce compatibility risk, support burden, or product inconsistency, even without a known format-spec violation or confirmed host-specific bug.
 
@@ -55,6 +55,22 @@ New checks are release-policy changes, not just code changes. Before opening a P
 
 **Fix:** Reorder parameters or adjust public parameter IDs so each public parameter ID matches its index.
 
+### `param-info-shape`
+
+**Expectation:** Public parameters have stable, host-safe identity and value metadata.
+
+**Reason:** Hosts, automation lanes, generic editors, control surfaces, and project recall depend on parameter IDs, names, ranges, and defaults being deterministic and coherent.
+
+**Error conditions:**
+
+- A public parameter ID is duplicated.
+- A public parameter name is empty.
+- A public parameter min, max, or default is not finite.
+- A public parameter min is greater than or equal to max.
+- A public parameter default is outside its declared range.
+
+**Fix:** Give every public parameter one stable unique ID, one non-empty name, a finite `min < max` range, and a finite default inside the range.
+
 ### `bypass-param-shape`
 
 **Expectation:** Plugins expose at most one bypass parameter, and that parameter behaves as a boolean host bypass control.
@@ -80,6 +96,64 @@ New checks are release-policy changes, not just code changes. Before opening a P
 
 **Fix:** Add one bypass parameter, or disable the rule with a documented reason when the product intentionally does not provide host bypass.
 
+### `state-extension-required`
+
+**Expectation:** Production plugins expose a state extension.
+
+**Reason:** DAW project recall, preset workflows, duplicate/restore behavior, and wrapper-host state bridging are release requirements for commercial products.
+
+**Error condition:** The built plugin does not expose the CLAP state extension.
+
+**Fix:** Implement plugin state save/load, or disable the rule with a documented reason when the product intentionally has no project-recall state.
+
+### `audio-port-shape`
+
+**Expectation:** Audio-capable products expose coherent audio port metadata.
+
+**Reason:** Hosts and wrappers use audio port lists to scan capabilities, create tracks, choose channel layouts, validate buses, and route audio.
+
+**Error conditions:**
+
+- An `audio-effect` plugin does not expose at least one audio input and one audio output.
+- An `instrument`, `synthesizer`, or `sampler` plugin does not expose an audio output.
+- A non-note-only, non-analyzer plugin exposes multiple main ports in the same direction.
+- Audio port IDs are duplicated within one direction.
+- An audio port name is empty.
+- An audio port channel count is zero.
+- An audio port type is empty.
+
+**Fix:** Expose stable named audio ports with unique IDs, concrete channel counts, declared port types, and exactly one main host-facing port per direction when ports exist.
+
+### `note-port-shape`
+
+**Expectation:** Note-capable products expose coherent note port metadata.
+
+**Reason:** Hosts and wrappers use note port lists to route MIDI/CLAP note events and to decide whether note-processing workflows are available.
+
+**Error conditions:**
+
+- Note port IDs are duplicated within one direction.
+- A note port name is empty.
+- A note port supports no note dialects.
+- A note port preferred dialect is empty or not included in its supported dialects.
+
+**Fix:** Expose stable named note ports with unique IDs and a preferred dialect that is included in the supported dialect set.
+
+### `features-match-capabilities`
+
+**Expectation:** CLAP descriptor features match the capabilities exposed by the built plugin.
+
+**Reason:** Hosts and plugin browsers use descriptor features for categorization, track creation, routing, and search/filter behavior.
+
+**Error conditions:**
+
+- The CLAP descriptor exposes no features.
+- The `audio-effect` feature is present without audio input and output ports.
+- An `instrument`, `synthesizer`, or `sampler` feature is present without an audio output.
+- A `note-effect` or `note-detector` feature is present without note input or output ports.
+
+**Fix:** Declare descriptor features that match the plugin's actual ports and capabilities.
+
 ### `clap-descriptors-match-manifest`
 
 **Expectation:** The CLAP factory descriptors match `package.metadata.wrac.plugins`.
@@ -92,6 +166,16 @@ New checks are release-policy changes, not just code changes. Before opening a P
 - A CLAP descriptor ID, name, vendor, or version differs from manifest metadata.
 
 **Fix:** Generate CLAP descriptors from `package.metadata.wrac` instead of hard-coding product metadata.
+
+### `wrapper-targets-require-single-product`
+
+**Expectation:** VST3 and AU wrapper validation releases one product per wrapper bundle.
+
+**Reason:** The CLAP factory can expose multiple products, but wrapper formats and standalone launch currently use one primary product identity for bundle metadata and host registration. Failing wrapper validation for multi-product bundles avoids silently validating only the primary product.
+
+**Error condition:** VST3 or AU validation is requested and `package.metadata.wrac.plugins` contains more than one product.
+
+**Fix:** Release wrapper formats as single-product bundles, or disable this rule with a documented reason after confirming wrapper metadata and host scans for every product.
 
 ### `macos-clap-info-plist-matches-manifest`
 
@@ -108,3 +192,20 @@ New checks are release-policy changes, not just code changes. Before opening a P
 - `NSHighResolutionCapable` is not `true`.
 
 **Fix:** Keep CLAP bundle metadata generated from `package.metadata.wrac`.
+
+### `macos-wrapper-info-plists-match-manifest`
+
+**Expectation:** macOS VST3, AU, and standalone bundle metadata match `package.metadata.wrac`.
+
+**Reason:** macOS hosts, plugin scanners, AU registration, Launch Services, and user-facing app/plugin lists inspect bundle metadata separately from the plugin binary. Stale wrapper metadata can cause scan cache, display, registration, loading, or standalone identity problems.
+
+**Error conditions:**
+
+- A requested VST3, AU, or standalone `Contents/Info.plist` is missing or unreadable.
+- VST3 `CFBundleExecutable`, `CFBundleName`, `CFBundleShortVersionString`, or `CFBundleVersion` differs from manifest metadata.
+- AU `CFBundleExecutable`, `CFBundleName`, `CFBundleShortVersionString`, `CFBundleVersion`, or `NSHighResolutionCapable` differs from manifest metadata.
+- AU `AudioComponents[0]` is missing.
+- AU `AudioComponents[0].manufacturer`, `type`, `subtype`, `name`, or `version` differs from manifest metadata.
+- Standalone `CFBundleExecutable`, `CFBundleName`, `CFBundleShortVersionString`, or `CFBundleVersion` differs from manifest metadata.
+
+**Fix:** Keep wrapper and standalone bundle metadata generated from `package.metadata.wrac`.

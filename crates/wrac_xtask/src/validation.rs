@@ -24,7 +24,11 @@ pub(crate) fn validate_wrac_rules(
         &ctx.metadata.validation,
         &ctx.plugin_manifest(),
         ctx.platform,
+        targets,
         &clap,
+        &ctx.vst3_bundle(profile),
+        &ctx.au_bundle(profile),
+        &ctx.standalone_artifact(profile),
     );
     results.extend(
         schemas
