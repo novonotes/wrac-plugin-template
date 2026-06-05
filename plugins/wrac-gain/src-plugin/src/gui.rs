@@ -64,6 +64,7 @@ impl WxpGuiFactory for WracGainGuiFactory {
 /// Assembles the complete GUI extension set used by the plugin core.
 /// Entry point that keeps GUI-specific details out of `plugin.rs`.
 pub(crate) fn create_gui_integration(
+    descriptor: wrac_clap_adapter::PluginDescriptor,
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
@@ -79,6 +80,7 @@ pub(crate) fn create_gui_integration(
         },
     );
     let runtime_dependencies = GuiRuntimeDependencies {
+        descriptor,
         project_state,
         shared,
         gui_notifier: notifier.clone(),

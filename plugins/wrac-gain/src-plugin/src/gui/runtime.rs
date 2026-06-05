@@ -5,7 +5,8 @@ use std::time::Duration;
 use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginError, PluginResult,
+    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
+    PluginError, PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
@@ -13,9 +14,9 @@ use wrac_wxp_gui::{
 };
 use wxp::WxpCommandHandler;
 
-use crate::commands::register_commands;
+use crate::commands::{CommandRegistrationDependencies, register_commands};
 use crate::gui::GuiStateNotifier;
-use crate::plugin::{PARAM_GAIN_ID, PLUGIN_ID};
+use crate::plugin::notify_gui_parameters;
 use crate::state::{ProjectStateStore, SharedState};
 
 // GUI window size bounds (pixels). The host opens at the default; resize is clamped to min..=max.
@@ -38,6 +39,7 @@ const FRONTEND_ZIP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wrac_gain_
 
 #[derive(Clone)]
 pub(super) struct GuiRuntimeDependencies {
+    pub(super) descriptor: PluginDescriptor,
     pub(super) project_state: Arc<ProjectStateStore>,
     pub(super) shared: Arc<SharedState>,
     pub(super) gui_notifier: Arc<GuiStateNotifier>,
@@ -83,17 +85,20 @@ impl WracGainGuiRuntime {
         let host_size_unit = dependencies.resize_handle.host_size_unit();
         register_commands(
             command_handler.clone(),
-            dependencies.project_state.clone(),
-            dependencies.shared.clone(),
-            dependencies.gui_notifier.clone(),
-            dependencies.host_parameter_edit_notifier,
-            dependencies.host_gui_resize_requester,
-            dependencies.resize_handle,
+            CommandRegistrationDependencies {
+                project_state: dependencies.project_state.clone(),
+                shared: dependencies.shared.clone(),
+                gui_notifier: dependencies.gui_notifier.clone(),
+                descriptor: dependencies.descriptor,
+                host_parameter_edit_notifier: dependencies.host_parameter_edit_notifier,
+                host_gui_resize_requester: dependencies.host_gui_resize_requester,
+                gui_resize_handle: dependencies.resize_handle,
+            },
         );
 
         let webview = WxpWebViewSession::create(
             WxpWebViewConfig {
-                plugin_id: PLUGIN_ID,
+                plugin_id: dependencies.descriptor.id,
                 initial_size,
                 limits: GuiSizeLimits {
                     min: MIN_GUI_SIZE,
@@ -116,7 +121,9 @@ impl WracGainGuiRuntime {
             let shared = dependencies.shared.clone();
             let gui_notifier = dependencies.gui_notifier.clone();
             move || {
-                gui_notifier.notify_parameter(PARAM_GAIN_ID, shared.gain());
+                notify_gui_parameters(&shared, |parameter_id, value| {
+                    gui_notifier.notify_parameter(parameter_id, value);
+                });
             }
         });
         gui_update_timer.start(run_loop);

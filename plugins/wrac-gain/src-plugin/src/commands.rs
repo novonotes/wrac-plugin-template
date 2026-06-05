@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use serde_json::json;
-use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier};
+use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor};
 use wrac_wxp_gui::WxpGuiResizeHandle;
 use wxp::{Channel, WxpCommandHandler};
 
@@ -20,19 +20,45 @@ mod resize;
 
 use resize::register_resize_commands;
 
+pub(crate) struct CommandRegistrationDependencies {
+    pub(crate) project_state: Arc<ProjectStateStore>,
+    pub(crate) shared: Arc<SharedState>,
+    pub(crate) gui_notifier: Arc<GuiStateNotifier>,
+    pub(crate) descriptor: PluginDescriptor,
+    pub(crate) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
+    pub(crate) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    pub(crate) gui_resize_handle: WxpGuiResizeHandle,
+}
+
 /// Registers commands callable from the WebView frontend with the [`WxpCommandHandler`].
 ///
 /// The frontend (TypeScript in `src-gui`) invokes these commands using calls like
 /// `invoke("set_parameter_value", { parameterId, value })`.
 pub(crate) fn register_commands(
     command_handler: Rc<WxpCommandHandler>,
-    project_state: Arc<ProjectStateStore>,
-    shared: Arc<SharedState>,
-    gui_notifier: Arc<GuiStateNotifier>,
-    host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
-    host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
-    gui_resize_handle: WxpGuiResizeHandle,
+    dependencies: CommandRegistrationDependencies,
 ) {
+    let CommandRegistrationDependencies {
+        project_state,
+        shared,
+        gui_notifier,
+        descriptor,
+        host_parameter_edit_notifier,
+        host_gui_resize_requester,
+        gui_resize_handle,
+    } = dependencies;
+
+    // Metadata comes from the descriptor selected by the host, not from Vite build-time
+    // constants. That keeps the GUI correct if one binary exposes multiple products.
+    command_handler.register_sync("get_plugin_metadata", move |_| {
+        Ok::<_, String>(json!({
+            "pluginId": descriptor.id,
+            "pluginName": descriptor.name,
+            "companyName": descriptor.vendor,
+            "version": descriptor.version,
+        }))
+    });
+
     // The WebView console is often invisible inside a DAW. Bridge frontend logs to the
     // plugin's logger so GUI initialisation progress is visible in native log output.
     command_handler.register_sync("write_to_log", move |ctx| {

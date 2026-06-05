@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "generate:parameters": "cargo run -p wrac_gain_parameter_contract --bin generate_typescript_parameters",
+    "check:parameters": "cargo run -p wrac_gain_parameter_contract --bin check_typescript_parameters",
+    "prebuild": "npm run check:parameters",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -12,7 +15,6 @@
     "@novonotes/webview-bridge": "https://files.novonotes.download/libs/novonotes-webview-bridge-0.1.0-alpha.1.tgz"
   },
   "devDependencies": {
-    "smol-toml": "^1.4.2",
     "typescript": "^5.8.3",
     "vite": "^6.3.5"
   }

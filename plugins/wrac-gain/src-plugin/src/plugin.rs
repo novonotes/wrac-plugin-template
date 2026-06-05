@@ -1,7 +1,7 @@
 //! The plugin contract as seen by the host.
 //!
 //! What is declared here:
-//! 1. The plugin's self-description ([`PLUGIN_DESCRIPTOR`])
+//! 1. Plugin self-descriptions generated from package metadata
 //! 2. [`SharedState`] shared by the audio thread, GUI, and host
 //! 3. The audio [`Processor`] handed over at activation, and how host extension
 //!    capabilities are bundled
@@ -17,12 +17,13 @@ mod params;
 mod state;
 
 pub(crate) use params::{
-    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain, gain_param_info, host_value_to_gain,
-    parameter_default_value, parameter_host_value, parameter_text_value, parameter_value_text,
+    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain, notify_gui_parameters,
+    parameter_default_value, parameter_host_input_to_plain, parameter_host_value, parameter_infos,
+    parameter_text_value, parameter_value_text,
 };
 
 use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudioPorts};
-use params::{WracGainParamsExtension, bypass_param_info};
+use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
 use wrac_clap_adapter::{
     ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
@@ -36,41 +37,16 @@ use crate::audio::WracGainAudioProcessor;
 use crate::gui::create_gui_integration;
 use crate::state::{ProjectStateStore, SharedState};
 
-// The single source of truth for plugin identity is [package.metadata.wrac] in
-// src-plugin/Cargo.toml. The GUI, xtask, and wrapper build all read the same metadata,
-// so env! macros are used here instead of hard-coded strings to prevent mismatches
-// (mismatched bundle names or About-dialog text) when renaming the template.
-pub(crate) const PLUGIN_ID: &str = env!("WRAC_PLUGIN_0_ID");
-pub(crate) const PLUGIN_NAME: &str = env!("WRAC_PLUGIN_0_NAME");
-pub(crate) const COMPANY_NAME: &str = env!("WRAC_COMPANY_NAME");
-const AUV2_TYPE: [u8; 4] = four_char_code(env!("WRAC_PLUGIN_0_AUV2_TYPE"));
-const AUV2_SUBTYPE: [u8; 4] = four_char_code(env!("WRAC_PLUGIN_0_AUV2_SUBTYPE"));
-const AUV2_MANUFACTURER_CODE: [u8; 4] = four_char_code(env!("WRAC_AUV2_MANUFACTURER_CODE"));
+const PLUGIN_FEATURES: &[PluginFeature] = &[
+    PluginFeature::AudioEffect,
+    PluginFeature::Utility,
+    PluginFeature::Stereo,
+];
 
-// Plugin self-description sent to the host. The adapter converts this into CLAP / AUv2 descriptors.
-pub(crate) const PLUGIN_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
-    id: PLUGIN_ID,
-    name: PLUGIN_NAME,
-    vendor: COMPANY_NAME,
-    url: "",
-    manual_url: "",
-    support_url: "",
-    version: env!("CARGO_PKG_VERSION"),
-    description: "Simple gain plugin",
-    features: &[
-        PluginFeature::AudioEffect,
-        PluginFeature::Utility,
-        PluginFeature::Stereo,
-    ],
-    // For AUv2 (macOS Audio Unit v2). The codes are 4-character ASCII identifiers
-    // that must be unique within a company's plugin catalogue.
-    auv2: Some(Auv2Descriptor {
-        manufacturer_code: AUV2_MANUFACTURER_CODE,
-        manufacturer_name: COMPANY_NAME,
-        plugin_type: AUV2_TYPE,
-        plugin_subtype: AUV2_SUBTYPE,
-    }),
-};
+// Generated from [package.metadata.wrac] in src-plugin/Cargo.toml. The manifest is
+// the single source of truth for product identity across descriptors, GUI metadata,
+// wrapper arguments, AUv2 registration, WebView data dirs, and logs.
+include!(concat!(env!("OUT_DIR"), "/wrac_plugin_products.rs"));
 
 pub(crate) static PLUGIN_ENTRY: WracGainEntry = WracGainEntry;
 
@@ -88,11 +64,11 @@ struct WracGainFactory;
 
 impl PluginFactory for WracGainFactory {
     fn plugin_count(&self) -> u32 {
-        1
+        PLUGIN_DESCRIPTORS.len() as u32
     }
 
     fn plugin_descriptor(&self, index: u32) -> Option<PluginDescriptor> {
-        (index == 0).then_some(PLUGIN_DESCRIPTOR)
+        PLUGIN_DESCRIPTORS.get(index as usize).copied()
     }
 
     fn create_plugin(
@@ -100,16 +76,14 @@ impl PluginFactory for WracGainFactory {
         plugin_id: &str,
         context: PluginCoreContext,
     ) -> Option<Box<dyn PluginCore>> {
-        (plugin_id == PLUGIN_ID).then(|| create_plugin_core(context))
+        // The host creates by descriptor id after discovery. Carry the matched descriptor
+        // into the instance so logs, WebView identity, and About metadata follow the product
+        // actually requested instead of falling back to the first manifest entry.
+        PLUGIN_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.id == plugin_id)
+            .map(|descriptor| create_plugin_core(context, *descriptor))
     }
-}
-
-const fn four_char_code(value: &str) -> [u8; 4] {
-    let bytes = value.as_bytes();
-    if bytes.len() != 4 {
-        panic!("AUv2 code must be exactly 4 ASCII bytes");
-    }
-    [bytes[0], bytes[1], bytes[2], bytes[3]]
 }
 
 /// One instance of the plugin, created each time the host loads the plugin.
@@ -122,6 +96,9 @@ const fn four_char_code(value: &str) -> [u8; 4] {
 /// re-entrantly during lifecycle callbacks, requiring them to be reachable without
 /// acquiring the `&mut self` lock on `PluginCore`.
 pub(crate) struct WracGainPlugin {
+    // The descriptor is instance data, not a global primary descriptor. This matters for
+    // multi-product bundles where the same binary can expose more than one plugin id.
+    descriptor: PluginDescriptor,
     // Parameter state shared by the audio thread, GUI, and host. See [`SharedState`].
     shared: Arc<SharedState>,
     // Audio layout negotiated with the host. Non-realtime only. See [`AudioLayoutStore`].
@@ -137,7 +114,7 @@ pub(crate) struct WracGainPlugin {
 }
 
 impl WracGainPlugin {
-    pub(crate) fn new(context: PluginCoreContext) -> Self {
+    pub(crate) fn new(context: PluginCoreContext, descriptor: PluginDescriptor) -> Self {
         let shared = Arc::new(SharedState::new());
         let audio_layout = Arc::new(AudioLayoutStore::new(2));
         let audio_ports = Arc::new(WracGainAudioPorts::new(audio_layout.clone()));
@@ -146,6 +123,7 @@ impl WracGainPlugin {
         let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
+            descriptor,
             project_state.clone(),
             shared.clone(),
             context.host_parameter_edit_notifier,
@@ -159,6 +137,7 @@ impl WracGainPlugin {
         ));
 
         Self {
+            descriptor,
             shared,
             audio_layout,
             audio_ports,
@@ -172,15 +151,18 @@ impl WracGainPlugin {
 
 /// Called from this product's [`PluginFactory`] implementation.
 /// Called each time the host requests a new instance; returns a [`PluginCore`].
-pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCore> {
-    wrac_log::init!(PLUGIN_DESCRIPTOR.name);
+pub(crate) fn create_plugin_core(
+    context: PluginCoreContext,
+    descriptor: PluginDescriptor,
+) -> Box<dyn PluginCore> {
+    wrac_log::init!(descriptor.name);
 
     log::debug!(
         "creating plugin core: id={}, name={}",
-        PLUGIN_DESCRIPTOR.id,
-        PLUGIN_DESCRIPTOR.name
+        descriptor.id,
+        descriptor.name
     );
-    for parameter in [bypass_param_info(), gain_param_info()] {
+    for parameter in parameter_infos() {
         log::debug!(
             "host parameter schema: id={}, name={}, min={}, max={}, default={}, automatable={}, stepped={}, enum={}, bypass={}",
             parameter.id,
@@ -194,7 +176,7 @@ pub(crate) fn create_plugin_core(context: PluginCoreContext) -> Box<dyn PluginCo
             parameter.flags.is_bypass
         );
     }
-    Box::new(WracGainPlugin::new(context))
+    Box::new(WracGainPlugin::new(context, descriptor))
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +195,8 @@ impl PluginCore for WracGainPlugin {
         // thread sees only immutable configuration."
         let audio_channel_count = self.audio_layout.channel_count();
         log::debug!(
-            "activating audio processor: sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}",
+            "activating audio processor: plugin_id={}, sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}",
+            self.descriptor.id,
             context.sample_rate,
             context.min_frames_count,
             context.max_frames_count,

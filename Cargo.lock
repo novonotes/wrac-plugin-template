@@ -3030,6 +3030,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "wrac_gain_parameter_contract"
+version = "0.1.0"
+
+[[package]]
 name = "wrac_gain_plugin"
 version = "0.1.0"
 dependencies = [
@@ -3044,6 +3048,7 @@ dependencies = [
  "time",
  "toml",
  "wrac_clap_adapter",
+ "wrac_gain_parameter_contract",
  "wrac_log",
  "wrac_wxp_gui",
  "wxp",

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "plugins/wrac-gain/parameter-contract",
     "plugins/wrac-gain/src-plugin",
     "xtask",
     "crates/wrac_clap_adapter",

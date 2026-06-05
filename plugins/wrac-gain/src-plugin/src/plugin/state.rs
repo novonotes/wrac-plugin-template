@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use wrac_clap_adapter::{PluginError, PluginResult, PluginStateExtension, State};
 
 use crate::gui::GuiStateNotifier;
-use crate::plugin::{PARAM_BYPASS_ID, PARAM_GAIN_ID};
+use crate::plugin::notify_gui_parameters;
 use crate::state::{
     EditorPage, ParameterStateSnapshot, ProjectState, ProjectStateStore, SharedState,
 };
@@ -16,6 +16,8 @@ use crate::state::{
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct SavedState {
     pub(crate) gain: f32,
+    // Defaults keep projects saved by the earlier one-parameter template loadable.
+    // Removing them requires an explicit state-version migration plan.
     #[serde(default)]
     pub(crate) bypass: bool,
     #[serde(default)]
@@ -43,7 +45,7 @@ impl WracGainStateExtension {
 }
 
 // `save_state` is called on project save, `restore_state` on load. The byte format is
-// unrestricted, so JSON is used here for ease of debugging.
+// unrestricted, so JSON is used here to keep project-state payloads inspectable.
 impl PluginStateExtension for WracGainStateExtension {
     fn save_state(&self) -> PluginResult<State> {
         let project = self.project_state.snapshot();
@@ -69,11 +71,23 @@ impl PluginStateExtension for WracGainStateExtension {
             gain: state.gain,
             bypass: state.bypass,
         });
-        self.gui_notifier
-            .notify_parameter(PARAM_GAIN_ID, self.shared.gain());
-        self.gui_notifier
-            .notify_parameter(PARAM_BYPASS_ID, f32::from(self.shared.bypass()));
+        notify_gui_parameters(&self.shared, |parameter_id, value| {
+            self.gui_notifier.notify_parameter(parameter_id, value);
+        });
         self.gui_notifier.notify_editor_page(project.editor_page);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_state_accepts_legacy_gain_only_payload() {
+        let state: SavedState = serde_json::from_str(r#"{"gain":1.25}"#).unwrap();
+        assert_eq!(state.gain, 1.25);
+        assert!(!state.bypass);
+        assert_eq!(state.editor_page, EditorPage::Controls);
     }
 }

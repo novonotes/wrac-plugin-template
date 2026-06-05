@@ -12,7 +12,7 @@ use wrac_clap_adapter::{
     ProcessContext, ProcessStatus, Processor,
 };
 
-use crate::plugin::{PARAM_BYPASS_ID, PARAM_GAIN_ID, host_value_to_gain};
+use crate::plugin::{PARAM_BYPASS_ID, PARAM_GAIN_ID, parameter_host_input_to_plain};
 use crate::state::SharedState;
 
 /// The DSP instance created at `activate()` and owned by the host's audio thread.
@@ -94,20 +94,14 @@ impl WracGainAudioProcessor {
                 segment_start = event_time;
             }
 
-            // Only gain/bypass parameter events are handled here; others (notes, etc.) are ignored.
             if let InputEvent::ParamValue(event) = event {
-                if event.param_id == PARAM_GAIN_ID {
-                    gain = self
-                        .shared
-                        .set_parameter_value(event.param_id, host_value_to_gain(event.value))
-                        .unwrap_or(gain);
-                } else if event.param_id == PARAM_BYPASS_ID {
-                    bypass = self
-                        .shared
-                        .set_parameter_value(event.param_id, event.value)
-                        .map(|value| value >= 0.5)
-                        .unwrap_or(bypass);
-                }
+                apply_realtime_param_event(
+                    &self.shared,
+                    event.param_id,
+                    event.value,
+                    &mut gain,
+                    &mut bypass,
+                );
             }
         }
 
@@ -125,6 +119,29 @@ impl WracGainAudioProcessor {
         // Signal that processing should continue for the next block unless the input is silent.
         // Returning `Quiet` lets the host use it as a hint for optimisation.
         Ok(ProcessStatus::ContinueIfNotQuiet)
+    }
+}
+
+fn apply_realtime_param_event(
+    shared: &SharedState,
+    parameter_id: u32,
+    host_value: f64,
+    gain: &mut f32,
+    bypass: &mut bool,
+) {
+    // Keep host-domain decoding shared with the non-RT parameter API, but keep DSP meaning
+    // explicit here. Gain and bypass affect the current block differently than arbitrary
+    // parameters, so hiding this behind a fully generic map would obscure realtime behavior.
+    let Ok(plain_value) = parameter_host_input_to_plain(parameter_id, host_value) else {
+        return;
+    };
+    let Some(applied) = shared.set_parameter_value(parameter_id, plain_value) else {
+        return;
+    };
+    match parameter_id {
+        PARAM_GAIN_ID => *gain = applied,
+        PARAM_BYPASS_ID => *bypass = applied >= 0.5,
+        _ => {}
     }
 }
 

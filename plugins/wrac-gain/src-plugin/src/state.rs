@@ -134,8 +134,8 @@ impl SharedState {
         self.bypass.store(snapshot.bypass, Ordering::Release);
     }
 
-    /// Returns the current value of a parameter. Add new parameters to the match arm
-    /// (GUI commands look up parameters by ID, so command names do not need to change).
+    /// Returns the current plain value of a parameter. Schema, defaults, and host/text
+    /// conversions live in `plugin::params`; this store only owns live values.
     pub(crate) fn parameter_value(&self, parameter_id: u32) -> Option<f32> {
         match parameter_id {
             PARAM_GAIN_ID => Some(self.gain()),
@@ -144,9 +144,8 @@ impl SharedState {
         }
     }
 
-    /// Clamps an externally supplied value to the valid range and stores it as the source
-    /// of truth. All per-parameter clamping and normalisation is centralised here.
-    /// Add new parameters to the match arm.
+    /// Stores a plain parameter value as the source of truth. Keep any host-domain
+    /// conversion out of this method so the realtime state remains a value store.
     pub(crate) fn set_parameter_value(&self, parameter_id: u32, value: f64) -> Option<f32> {
         match parameter_id {
             PARAM_GAIN_ID => {

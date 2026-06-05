@@ -47,6 +47,7 @@ serde_json = "1.0"
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 run_loop_timer = { workspace = true }
 wrac_clap_adapter = { workspace = true }
+wrac_gain_parameter_contract = { path = "../parameter-contract" }
 wrac_log = { workspace = true }
 wrac_wxp_gui = { workspace = true }
 wxp = { workspace = true }
@@ -57,4 +58,5 @@ unreachable_pub = "deny"
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+wrac_gain_parameter_contract = { path = "../parameter-contract" }
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }

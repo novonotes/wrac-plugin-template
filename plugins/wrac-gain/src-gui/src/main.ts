@@ -15,9 +15,10 @@
  *   the Rust side calls Channel::send().
  */
 import { Channel, invoke } from "@novonotes/webview-bridge";
+import { GAIN_PARAMETER } from "./generated/parameters";
 import "./style.css";
 
-declare const __WRAC_PLUGIN_METADATA__: {
+type PluginMetadata = {
   pluginId: string;
   pluginName: string;
   companyName: string;
@@ -47,13 +48,6 @@ type SubscribeParametersResponse = {
   subscriptionId: number;
 };
 
-// Keep these ids in sync with PARAM_* constants in src-plugin/src/plugin.rs.
-// When adding parameters to the template, add one id here and route its UI in render().
-const PARAM_GAIN_ID = 1;
-
-// Gain range. Must match MIN_GAIN / MAX_GAIN on the Rust side.
-const MIN_GAIN = 0;
-const MAX_GAIN = 2;
 // Knob rotation range (-135° to +135°, giving 270° of travel)
 const MIN_ANGLE = -135;
 const MAX_ANGLE = 135;
@@ -98,15 +92,6 @@ if (
 }
 
 const buildType = import.meta.env.PROD ? "Release" : "Debug";
-// Identity shown in About uses only values injected by Vite from src-plugin/Cargo.toml.
-// This prevents the Rust descriptor and the GUI display from diverging when the template user renames the plugin.
-pluginName.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
-aboutTitle.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
-aboutPluginName.textContent = __WRAC_PLUGIN_METADATA__.pluginName;
-aboutVersion.textContent = __WRAC_PLUGIN_METADATA__.version;
-aboutCompanyName.textContent = __WRAC_PLUGIN_METADATA__.companyName;
-aboutBuild.textContent = `${buildType} build`;
-document.title = __WRAC_PLUGIN_METADATA__.pluginName;
 
 // --- State ---
 let gain = 1;
@@ -118,6 +103,7 @@ let dragStartGain = gain;
 let gestureActive = false;
 let parameterSubscriptionId: number | undefined;
 let editorPageSubscriptionId: number | undefined;
+let pluginMetadata: PluginMetadata | undefined;
 
 type ResizeResponse = {
   ok?: boolean;
@@ -197,9 +183,13 @@ const editorPageChannel = new Channel<EditorPageState>((message) => {
 
 // Initialization: fetch the current gain state, render the UI, and subscribe to changes.
 void (async () => {
+  pluginMetadata = await invoke<PluginMetadata>("get_plugin_metadata");
+  renderPluginMetadata(pluginMetadata);
+
+  gain = clamp(GAIN_PARAMETER.defaultValue);
   // Call the Rust "get_parameter_state" command via invoke().
   const initialState = await invoke<ParameterState>("get_parameter_state", {
-    parameterId: PARAM_GAIN_ID,
+    parameterId: GAIN_PARAMETER.id,
   });
   render(initialState);
   // Register the Channel on the Rust side and remember the returned subscriptionId.
@@ -230,24 +220,45 @@ void (async () => {
 })();
 
 function clamp(value: number): number {
-  return Math.min(MAX_GAIN, Math.max(MIN_GAIN, value));
+  return Math.min(
+    GAIN_PARAMETER.maxValue,
+    Math.max(GAIN_PARAMETER.minValue, value),
+  );
 }
 
 /** Converts a linear gain value to a knob rotation angle */
 function gainToAngle(value: number): number {
-  const normalized = (value - MIN_GAIN) / (MAX_GAIN - MIN_GAIN);
+  const span = GAIN_PARAMETER.maxValue - GAIN_PARAMETER.minValue;
+  const normalized = span > 0 ? (value - GAIN_PARAMETER.minValue) / span : 0;
   return MIN_ANGLE + normalized * (MAX_ANGLE - MIN_ANGLE);
+}
+
+function requirePluginMetadata(): PluginMetadata {
+  if (!pluginMetadata) {
+    throw new Error("plugin metadata not loaded");
+  }
+  return pluginMetadata;
 }
 
 /** Receives a parameter state and updates the matching UI display */
 function render(state: ParameterState): void {
-  if (state.parameterId !== PARAM_GAIN_ID) {
+  if (state.parameterId !== GAIN_PARAMETER.id) {
     return;
   }
   gain = clamp(state.value);
   dbLabel.textContent = state.text;
   const angle = gainToAngle(gain);
   indicator.style.transform = `rotate(${angle}deg)`;
+}
+
+function renderPluginMetadata(metadata: PluginMetadata): void {
+  pluginName.textContent = metadata.pluginName;
+  aboutTitle.textContent = metadata.pluginName;
+  aboutPluginName.textContent = metadata.pluginName;
+  aboutVersion.textContent = metadata.version;
+  aboutCompanyName.textContent = metadata.companyName;
+  aboutBuild.textContent = `${buildType} build`;
+  document.title = metadata.pluginName;
 }
 
 function renderEditorPage(page: EditorPage): void {
@@ -261,7 +272,7 @@ function renderEditorPage(page: EditorPage): void {
     showControls ? "Show about page" : "Show controls",
   );
   headerAction.textContent = showControls
-    ? `v${__WRAC_PLUGIN_METADATA__.version}`
+    ? `v${requirePluginMetadata().version}`
     : "×";
   headerAction.disabled = showControls;
   headerAction.classList.toggle("is-close", !showControls);
@@ -292,7 +303,9 @@ function beginGesture(): void {
   gestureActive = true;
   // Call the Rust begin_parameter_gesture command via invoke().
   // void = fire-and-forget (do not await the result).
-  void invoke("begin_parameter_gesture", { parameterId: PARAM_GAIN_ID });
+  void invoke("begin_parameter_gesture", {
+    parameterId: GAIN_PARAMETER.id,
+  });
 }
 
 function endGesture(): void {
@@ -300,7 +313,9 @@ function endGesture(): void {
     return;
   }
   gestureActive = false;
-  void invoke("end_parameter_gesture", { parameterId: PARAM_GAIN_ID });
+  void invoke("end_parameter_gesture", {
+    parameterId: GAIN_PARAMETER.id,
+  });
 }
 
 /** Sets the gain, immediately updates the UI, and notifies the Rust side */
@@ -309,13 +324,13 @@ function applyGain(nextGain: number): void {
   // Render locally without waiting for a Rust response, for responsiveness.
   render({
     type: "parameter-value",
-    parameterId: PARAM_GAIN_ID,
+    parameterId: GAIN_PARAMETER.id,
     value,
     text: value <= 0 ? "-inf dB" : `${(20 * Math.log10(value)).toFixed(1)} dB`,
   });
   // Update the parameter via the Rust "set_parameter_value" command.
   void invoke("set_parameter_value", {
-    parameterId: PARAM_GAIN_ID,
+    parameterId: GAIN_PARAMETER.id,
     value,
   });
 }
@@ -341,7 +356,7 @@ function commitTextInput(): void {
   dbLabel.hidden = false;
   renderResponse(
     invoke<ParameterState>("set_parameter_text", {
-      parameterId: PARAM_GAIN_ID,
+      parameterId: GAIN_PARAMETER.id,
       text,
     }),
   );
@@ -398,7 +413,7 @@ knob.addEventListener("dblclick", (event) => {
   event.preventDefault();
   renderResponse(
     invoke<ParameterState>("reset_parameter_to_default", {
-      parameterId: PARAM_GAIN_ID,
+      parameterId: GAIN_PARAMETER.id,
     }),
   );
   restoreHostFocusIfNeeded(event.target);
@@ -457,7 +472,7 @@ pluginName.addEventListener("click", (event) => {
   restoreHostFocusIfNeeded(event.target);
 });
 
-// About is a temporary overlay equivalent to a full-screen modal, so the explicit close
+// About behaves like a full-screen modal overlay, so the explicit close
 // affordance in the top-right returns to controls. The plugin name in the center is kept
 // as an information display only, to avoid conflating it with the close action.
 headerAction.addEventListener("click", (event) => {
