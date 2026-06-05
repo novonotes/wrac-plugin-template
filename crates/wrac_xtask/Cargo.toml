@@ -12,5 +12,6 @@ cargo_metadata = "0.19"
 clap-sys = { workspace = true }
 clap = { version = "4.5.38", features = ["derive"] }
 libloading = "0.8"
+plist = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

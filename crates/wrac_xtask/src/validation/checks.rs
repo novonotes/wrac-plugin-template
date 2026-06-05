@@ -5,7 +5,8 @@ use clap_sys::ext::params::{
     CLAP_PARAM_IS_STEPPED,
 };
 
-use crate::metadata::ValidationMetadata;
+use crate::metadata::{PluginMetadata, ValidationMetadata};
+use crate::targets::Platform;
 use crate::targets::ValidateTarget;
 use crate::{Result, targets::ValidateTarget as Target};
 
@@ -15,12 +16,16 @@ const RULE_FENDER_SINGLE_KNOB: &str = "fender-studio-pro-generic-editor-single-k
 const RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX: &str = "luna-vst3-param-id-must-match-index";
 const RULE_BYPASS_PARAM_SHAPE: &str = "bypass-param-shape";
 const RULE_PLUGIN_REQUIRES_BYPASS: &str = "plugin-requires-bypass";
+const RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST: &str = "clap-descriptors-match-manifest";
+const RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST: &str = "macos-clap-info-plist-matches-manifest";
 
 const KNOWN_RULES: &[&str] = &[
     RULE_FENDER_SINGLE_KNOB,
     RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX,
     RULE_BYPASS_PARAM_SHAPE,
     RULE_PLUGIN_REQUIRES_BYPASS,
+    RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
+    RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
 ];
 
 pub(crate) fn validate_disabled_rules(validation: &ValidationMetadata) -> Result<()> {
@@ -33,6 +38,51 @@ pub(crate) fn validate_disabled_rules(validation: &ValidationMetadata) -> Result
         }
     }
     Ok(())
+}
+
+pub(crate) fn evaluate_bundle_checks(
+    schemas: &[PluginSchema],
+    metadata: &PluginMetadata,
+    validation: &ValidationMetadata,
+    location: &Path,
+    platform: Platform,
+    clap_bundle: &Path,
+) -> Vec<CheckResult> {
+    let subject = CheckSubject::bundle(metadata);
+    let mut results = Vec::new();
+
+    push_check_result_for_subject(
+        &mut results,
+        validation,
+        &subject,
+        RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
+        CheckStatus::from_violations(clap_descriptor_manifest_violations(
+            schemas, metadata, location,
+        )),
+    );
+
+    if platform == Platform::Macos {
+        push_check_result_for_subject(
+            &mut results,
+            validation,
+            &subject,
+            RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            CheckStatus::from_violations(clap_info_plist_violations(
+                metadata,
+                &clap_bundle.join("Contents").join("Info.plist"),
+            )),
+        );
+    } else {
+        push_check_result_for_subject(
+            &mut results,
+            validation,
+            &subject,
+            RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            CheckStatus::Skipped("macOS CLAP bundle metadata is not available on this platform."),
+        );
+    }
+
+    results
 }
 
 pub(crate) fn evaluate_checks(
@@ -201,6 +251,236 @@ pub(crate) fn evaluate_checks(
     results
 }
 
+fn clap_descriptor_manifest_violations(
+    schemas: &[PluginSchema],
+    metadata: &PluginMetadata,
+    location: &Path,
+) -> Vec<RuleViolation> {
+    let subject = CheckSubject::bundle(metadata);
+    let mut violations = Vec::new();
+    if schemas.len() != metadata.plugins.len() {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: location.to_path_buf(),
+            rule_id: RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
+            message: format!(
+                "CLAP descriptor count must match package.metadata.wrac.plugins. descriptor_count={} manifest_count={}",
+                schemas.len(),
+                metadata.plugins.len()
+            ),
+            fix: "Expose one CLAP descriptor for each package.metadata.wrac.plugins entry, in the same order.",
+        });
+    }
+
+    for (index, expected) in metadata.plugins.iter().enumerate() {
+        let Some(schema) = schemas.get(index) else {
+            continue;
+        };
+        if schema.plugin_id != expected.plugin_id {
+            violations.push(descriptor_manifest_violation(
+                schema,
+                location,
+                index,
+                "id",
+                &expected.plugin_id,
+                &schema.plugin_id,
+            ));
+        }
+        if schema.plugin_name != expected.plugin_name {
+            violations.push(descriptor_manifest_violation(
+                schema,
+                location,
+                index,
+                "name",
+                &expected.plugin_name,
+                &schema.plugin_name,
+            ));
+        }
+        if schema.plugin_vendor != metadata.company_name {
+            violations.push(descriptor_manifest_violation(
+                schema,
+                location,
+                index,
+                "vendor",
+                &metadata.company_name,
+                &schema.plugin_vendor,
+            ));
+        }
+        if schema.plugin_version != metadata.version {
+            violations.push(descriptor_manifest_violation(
+                schema,
+                location,
+                index,
+                "version",
+                &metadata.version,
+                &schema.plugin_version,
+            ));
+        }
+    }
+    violations
+}
+
+fn descriptor_manifest_violation(
+    schema: &PluginSchema,
+    location: &Path,
+    index: usize,
+    field: &str,
+    expected: &str,
+    actual: &str,
+) -> RuleViolation {
+    RuleViolation {
+        plugin_id: schema.plugin_id.clone(),
+        plugin_name: schema.plugin_name.clone(),
+        location: location.to_path_buf(),
+        rule_id: RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
+        message: format!(
+            "CLAP descriptor {field} does not match manifest metadata. index={index} expected=\"{expected}\" actual=\"{actual}\""
+        ),
+        fix: "Keep CLAP descriptors generated from package.metadata.wrac instead of hard-coded product metadata.",
+    }
+}
+
+fn clap_info_plist_violations(metadata: &PluginMetadata, plist_path: &Path) -> Vec<RuleViolation> {
+    let subject = CheckSubject::bundle(metadata);
+    let mut violations = Vec::new();
+    let value = match plist::Value::from_file(plist_path) {
+        Ok(value) => value,
+        Err(error) => {
+            violations.push(RuleViolation {
+                plugin_id: subject.plugin_id.clone(),
+                plugin_name: subject.plugin_name.clone(),
+                location: plist_path.to_path_buf(),
+                rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+                message: format!("Failed to read CLAP Info.plist: {error}"),
+                fix: "Build the CLAP artifact and keep Contents/Info.plist generated from package.metadata.wrac.",
+            });
+            return violations;
+        }
+    };
+    let Some(dict) = value.as_dictionary() else {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: plist_path.to_path_buf(),
+            rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            message: "CLAP Info.plist must be a dictionary.".to_string(),
+            fix: "Regenerate the CLAP bundle Info.plist from package.metadata.wrac.",
+        });
+        return violations;
+    };
+
+    let primary = metadata.primary_plugin();
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleExecutable",
+        &metadata.bundle_name,
+    );
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleName",
+        &metadata.bundle_name,
+    );
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleDisplayName",
+        &metadata.bundle_name,
+    );
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleIdentifier",
+        &primary.plugin_id,
+    );
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleShortVersionString",
+        &metadata.version,
+    );
+    check_plist_string(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "CFBundleVersion",
+        &metadata.version,
+    );
+    check_plist_bool(
+        &mut violations,
+        &subject,
+        plist_path,
+        dict,
+        "NSHighResolutionCapable",
+        true,
+    );
+
+    violations
+}
+
+fn check_plist_string(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    dict: &plist::Dictionary,
+    key: &'static str,
+    expected: &str,
+) {
+    let actual = dict.get(key).and_then(plist::Value::as_string);
+    if actual != Some(expected) {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: plist_path.to_path_buf(),
+            rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            message: format!(
+                "CLAP Info.plist {key} does not match manifest metadata. expected=\"{expected}\" actual=\"{}\"",
+                actual.unwrap_or("<missing or non-string>")
+            ),
+            fix: "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+        });
+    }
+}
+
+fn check_plist_bool(
+    violations: &mut Vec<RuleViolation>,
+    subject: &CheckSubject,
+    plist_path: &Path,
+    dict: &plist::Dictionary,
+    key: &'static str,
+    expected: bool,
+) {
+    let actual = dict.get(key).and_then(plist::Value::as_boolean);
+    if actual != Some(expected) {
+        violations.push(RuleViolation {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            location: plist_path.to_path_buf(),
+            rule_id: RULE_MACOS_CLAP_INFO_PLIST_MATCHES_MANIFEST,
+            message: format!(
+                "CLAP Info.plist {key} does not match manifest metadata. expected={expected} actual={}",
+                actual
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "<missing or non-boolean>".to_string())
+            ),
+            fix: "Keep CLAP bundle metadata generated from package.metadata.wrac.",
+        });
+    }
+}
+
 fn push_check_result(
     results: &mut Vec<CheckResult>,
     validation: &ValidationMetadata,
@@ -225,6 +505,45 @@ fn push_check_result(
         rule_id,
         status,
     });
+}
+
+fn push_check_result_for_subject(
+    results: &mut Vec<CheckResult>,
+    validation: &ValidationMetadata,
+    subject: &CheckSubject,
+    rule_id: &'static str,
+    status: CheckStatus,
+) {
+    if let Some(disabled) = validation.disabled_rules.get(rule_id) {
+        results.push(CheckResult {
+            plugin_id: subject.plugin_id.clone(),
+            plugin_name: subject.plugin_name.clone(),
+            rule_id,
+            status: CheckStatus::Disabled(disabled.reason.clone()),
+        });
+        return;
+    }
+    results.push(CheckResult {
+        plugin_id: subject.plugin_id.clone(),
+        plugin_name: subject.plugin_name.clone(),
+        rule_id,
+        status,
+    });
+}
+
+struct CheckSubject {
+    plugin_id: String,
+    plugin_name: String,
+}
+
+impl CheckSubject {
+    fn bundle(metadata: &PluginMetadata) -> Self {
+        let primary = metadata.primary_plugin();
+        Self {
+            plugin_id: primary.plugin_id.clone(),
+            plugin_name: metadata.bundle_name.clone(),
+        }
+    }
 }
 
 fn nearly_equal(a: f64, b: f64) -> bool {
@@ -282,7 +601,9 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use crate::metadata::{DisabledValidationRule, ValidationMetadata};
+    use crate::metadata::{
+        DisabledValidationRule, PluginMetadata, PluginProductMetadata, ValidationMetadata,
+    };
     use crate::targets::ValidateTarget;
 
     use super::super::clap_schema::{ParameterSchema, PluginSchema};
@@ -292,7 +613,27 @@ mod tests {
         PluginSchema {
             plugin_id: "com.example.test".to_string(),
             plugin_name: "Test Plugin".to_string(),
+            plugin_vendor: "Example".to_string(),
+            plugin_version: "1.0.0".to_string(),
             params,
+        }
+    }
+
+    fn metadata() -> PluginMetadata {
+        PluginMetadata {
+            package_name: "test_plugin".to_string(),
+            version: "1.0.0".to_string(),
+            company_name: "Example".to_string(),
+            auv2_manufacturer_code: "ExCo".to_string(),
+            bundle_name: "Test Plugin".to_string(),
+            standalone_name: "Test Plugin Standalone".to_string(),
+            plugins: vec![PluginProductMetadata {
+                plugin_id: "com.example.test".to_string(),
+                plugin_name: "Test Plugin".to_string(),
+                auv2_type: "aufx".to_string(),
+                auv2_subtype: "TstP".to_string(),
+            }],
+            validation: ValidationMetadata::default(),
         }
     }
 
@@ -569,5 +910,28 @@ mod tests {
             status_for(&results, RULE_PLUGIN_REQUIRES_BYPASS),
             CheckStatus::Passed
         ));
+    }
+
+    #[test]
+    fn clap_descriptors_must_match_manifest_metadata() {
+        let mut schema = schema(vec![valid_bypass_param(0)]);
+        schema.plugin_name = "Wrong Name".to_string();
+        let violations =
+            clap_descriptor_manifest_violations(&[schema], &metadata(), Path::new("Cargo.toml"));
+
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule_id, RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST);
+        assert!(violations[0].message.contains("name"));
+    }
+
+    #[test]
+    fn clap_descriptors_pass_when_manifest_metadata_matches() {
+        let violations = clap_descriptor_manifest_violations(
+            &[schema(vec![valid_bypass_param(0)])],
+            &metadata(),
+            Path::new("Cargo.toml"),
+        );
+
+        assert!(violations.is_empty());
     }
 }

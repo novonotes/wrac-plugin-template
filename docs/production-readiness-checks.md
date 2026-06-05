@@ -75,3 +75,32 @@ New checks are release-policy changes, not just code changes. Before opening a P
 **Error condition:** The plugin does not expose a bypass parameter.
 
 **Fix:** Add one bypass parameter, or disable the rule with a documented reason when the product intentionally does not provide host bypass.
+
+### `clap-descriptors-match-manifest`
+
+**Expectation:** The CLAP factory descriptors match `package.metadata.wrac.plugins`.
+
+**Reason:** Hosts and wrappers read product identity from the built plugin binary, while WRAC build tools read identity from the manifest. If those diverge, products can be scanned, displayed, automated, or wrapped under stale metadata.
+
+**Error conditions:**
+
+- The CLAP descriptor count differs from `package.metadata.wrac.plugins`.
+- A CLAP descriptor ID, name, vendor, or version differs from manifest metadata.
+
+**Fix:** Generate CLAP descriptors from `package.metadata.wrac` instead of hard-coding product metadata.
+
+### `macos-clap-info-plist-matches-manifest`
+
+**Expectation:** The macOS CLAP bundle `Info.plist` matches `package.metadata.wrac`.
+
+**Reason:** macOS hosts and plugin scanners inspect bundle metadata before or alongside the plugin binary. Stale bundle identifiers, names, versions, or HiDPI flags can cause scan cache, display, loading, or editor behavior problems even when the CLAP descriptor is correct.
+
+**Error conditions:**
+
+- `Contents/Info.plist` is missing or unreadable.
+- `CFBundleExecutable`, `CFBundleName`, or `CFBundleDisplayName` differs from `bundle_name`.
+- `CFBundleIdentifier` differs from the primary plugin ID.
+- `CFBundleShortVersionString` or `CFBundleVersion` differs from the package version.
+- `NSHighResolutionCapable` is not `true`.
+
+**Fix:** Keep CLAP bundle metadata generated from `package.metadata.wrac`.

@@ -18,6 +18,8 @@ use crate::targets::Platform;
 pub(crate) struct PluginSchema {
     pub(crate) plugin_id: String,
     pub(crate) plugin_name: String,
+    pub(crate) plugin_vendor: String,
+    pub(crate) plugin_version: String,
     pub(crate) params: Vec<ParameterSchema>,
 }
 
@@ -139,13 +141,9 @@ unsafe fn read_plugin_schema(
         return Err(format!("CLAP descriptor has a null plugin id at index {index}").into());
     }
     let plugin_id = unsafe { CStr::from_ptr(descriptor.id) };
-    let plugin_name = if descriptor.name.is_null() {
-        String::new()
-    } else {
-        unsafe { CStr::from_ptr(descriptor.name) }
-            .to_string_lossy()
-            .into_owned()
-    };
+    let plugin_name = unsafe { descriptor_string(descriptor.name) };
+    let plugin_vendor = unsafe { descriptor_string(descriptor.vendor) };
+    let plugin_version = unsafe { descriptor_string(descriptor.version) };
     let host = validator_clap_host();
     let plugin = unsafe { create_plugin(factory, &host, plugin_id.as_ptr()) };
     if plugin.is_null() {
@@ -171,8 +169,20 @@ unsafe fn read_plugin_schema(
     Ok(PluginSchema {
         plugin_id: plugin_id.to_string_lossy().into_owned(),
         plugin_name,
+        plugin_vendor,
+        plugin_version,
         params,
     })
+}
+
+unsafe fn descriptor_string(value: *const c_char) -> String {
+    if value.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(value) }
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 unsafe fn read_params(

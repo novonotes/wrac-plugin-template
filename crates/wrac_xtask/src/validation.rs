@@ -18,17 +18,27 @@ pub(crate) fn validate_wrac_rules(
     // when a format validator would also reject the artifact later.
     let clap = ctx.clap_bundle(profile);
     let schemas = unsafe { clap_schema::read_clap_schemas(ctx, profile, &clap)? };
-    let results = schemas
-        .iter()
-        .flat_map(|schema| {
-            checks::evaluate_checks(
-                schema,
-                targets,
-                &ctx.metadata.validation,
-                &ctx.plugin_manifest(),
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut results = checks::evaluate_bundle_checks(
+        &schemas,
+        &ctx.metadata,
+        &ctx.metadata.validation,
+        &ctx.plugin_manifest(),
+        ctx.platform,
+        &clap,
+    );
+    results.extend(
+        schemas
+            .iter()
+            .flat_map(|schema| {
+                checks::evaluate_checks(
+                    schema,
+                    targets,
+                    &ctx.metadata.validation,
+                    &ctx.plugin_manifest(),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
 
     // Print the full matrix first. CI logs need to show checks that passed, were disabled,
     // or were skipped; the final error only contains checks that failed.
