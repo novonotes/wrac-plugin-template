@@ -99,11 +99,12 @@ const LAUNCH_AFTER_HELP: &str = "\
 Examples:
   cargo xtask launch
   cargo xtask launch -p wrac_gain_plugin
+  cargo xtask launch -p wrac_gain_plugin --plugin-id=com.your-company.wrac-gain
   cargo xtask launch --package=wrac_gain_plugin
   cargo xtask launch -p wrac_gain_plugin --release
 
 Notes:
-  launch builds the standalone artifact before starting it.";
+  launch builds standalone artifacts before starting one. Use --plugin-id when a package exposes multiple plugin products.";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -301,6 +302,12 @@ pub(crate) struct LaunchArgs {
 
     #[arg(long, help = "Launch release artifact.")]
     pub(crate) release: bool,
+
+    #[arg(
+        long,
+        help = "Plugin ID to launch when the package has multiple products."
+    )]
+    pub(crate) plugin_id: Option<String>,
 }
 
 #[derive(Debug, Args)]

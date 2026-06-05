@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;
 
-use crate::metadata::PluginMetadata;
+use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::{Result, XtaskConfig};
@@ -40,7 +40,7 @@ impl Context {
         let target_dir = target_root
             .join(&config.target_namespace)
             .join(&package.artifact_namespace);
-        // CLAP_WRAPPER_DIR remains an escape hatch for testing SDK changes or a temporary external checkout.
+        // CLAP_WRAPPER_DIR lets wrapper developers point xtask at another clap_wrapper_builder checkout.
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.wrapper_dir.clone());
@@ -104,16 +104,45 @@ impl Context {
             .join(self.metadata.vst3_bundle_name())
     }
 
-    pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile)
-            .join(self.metadata.au_bundle_name())
+    pub(crate) fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| self.au_bundle(profile, plugin))
+            .collect()
     }
 
-    pub(crate) fn standalone_artifact(&self, profile: BuildProfile) -> PathBuf {
+    pub(crate) fn au_bundle(
+        &self,
+        profile: BuildProfile,
+        plugin: &PluginProductMetadata,
+    ) -> PathBuf {
+        // AUv2 products are installed as separate component bundles, named by
+        // product display name rather than the shared CLAP/VST3 bundle name.
+        self.plugins_dir(profile)
+            .join(self.metadata.au_bundle_name(plugin))
+    }
+
+    pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| self.standalone_artifact_for(profile, plugin))
+            .collect()
+    }
+
+    pub(crate) fn standalone_artifact_for(
+        &self,
+        profile: BuildProfile,
+        plugin: &PluginProductMetadata,
+    ) -> PathBuf {
+        // Standalone app names are product metadata so multi-product templates
+        // can expose distinct launchable artifacts without deriving names from
+        // bundle-level metadata.
         let filename = match self.platform {
-            Platform::Macos => format!("{}.app", self.metadata.standalone_name),
-            Platform::Windows => format!("{}.exe", self.metadata.standalone_name),
-            Platform::Linux => self.metadata.standalone_name.clone(),
+            Platform::Macos => format!("{}.app", plugin.standalone_name),
+            Platform::Windows => format!("{}.exe", plugin.standalone_name),
+            Platform::Linux => plugin.standalone_name.clone(),
         };
         self.standalone_dir(profile).join(filename)
     }

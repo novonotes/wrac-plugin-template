@@ -132,6 +132,7 @@ struct WracMetadata {
 struct WracPluginMetadata {
     plugin_id: String,
     plugin_name: String,
+    standalone_name: String,
     auv2_type: String,
     auv2_subtype: String,
 }
@@ -151,17 +152,35 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         return Err(missing_metadata("plugins"));
     }
     let mut plugin_ids = HashSet::new();
-    let mut auv2_subtypes = HashSet::new();
+    let mut standalone_names = HashSet::new();
+    let mut auv2_ids = HashSet::new();
     for plugin in &metadata.plugins {
         validate_required("package.metadata.wrac.plugins.plugin_id", &plugin.plugin_id)?;
         validate_required(
             "package.metadata.wrac.plugins.plugin_name",
             &plugin.plugin_name,
         )?;
+        validate_required(
+            "package.metadata.wrac.plugins.standalone_name",
+            &plugin.standalone_name,
+        )?;
         validate_four_ascii("auv2_type", &plugin.auv2_type)?;
         validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
         validate_unique("plugin_id", &plugin.plugin_id, &mut plugin_ids)?;
-        validate_unique("auv2_subtype", &plugin.auv2_subtype, &mut auv2_subtypes)?;
+        validate_unique(
+            "standalone_name",
+            &plugin.standalone_name,
+            &mut standalone_names,
+        )?;
+        if !auv2_ids.insert((plugin.auv2_type.as_str(), plugin.auv2_subtype.as_str())) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "package.metadata.wrac.plugins AUv2 type/subtype must be unique: {}/{}",
+                    plugin.auv2_type, plugin.auv2_subtype
+                ),
+            ));
+        }
     }
     Ok(metadata)
 }

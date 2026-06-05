@@ -273,6 +273,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
         .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
         .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF")
         .arg("-DCLAP_WRAPPER_CXX_STANDARD=23");
+    add_wrapper_product_args(ctx, &mut configure, build);
 
     match build {
         WrapperBuild::Plugin { vst3, au } => {
@@ -292,14 +293,6 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
-                .arg(format!(
-                    "-DCLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID={}",
-                    ctx.metadata.primary_plugin().plugin_id
-                ))
-                .arg(format!(
-                    "-DCLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME={}",
-                    ctx.metadata.standalone_name
-                ))
                 .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON");
         }
     }
@@ -313,20 +306,12 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                 ctx.wrapper_dir.join("AudioUnitSDK").display()
             ))
             .arg(format!(
-                "-DCLAP_WRAPPER_AUV2_INSTRUMENT_TYPE={}",
-                ctx.metadata.primary_plugin().auv2_type
-            ))
-            .arg(format!(
                 "-DCLAP_WRAPPER_AUV2_MANUFACTURER_NAME={}",
                 ctx.metadata.company_name
             ))
             .arg(format!(
                 "-DCLAP_WRAPPER_AUV2_MANUFACTURER_CODE={}",
                 ctx.metadata.auv2_manufacturer_code
-            ))
-            .arg(format!(
-                "-DCLAP_WRAPPER_AUV2_SUBTYPE_CODE={}",
-                ctx.metadata.primary_plugin().auv2_subtype
             ));
     }
 
@@ -360,25 +345,77 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                 ensure_exists(&ctx.vst3_bundle(profile), "VST3 artifact")?;
                 if ctx.platform == Platform::Macos {
                     // macOS hosts may reject unsigned bundles; apply an ad-hoc signature for development.
-                    codesign_nested_macos_bundle(ctx, &ctx.vst3_bundle(profile))?;
+                    codesign_nested_macos_bundle(&ctx.vst3_bundle(profile))?;
                 }
             }
             if au {
-                ensure_exists(&ctx.au_bundle(profile), "AU artifact")?;
-                // AU components are loaded via AudioComponentRegistrar, so they must be signed even for local builds.
-                codesign_nested_macos_bundle(ctx, &ctx.au_bundle(profile))?;
+                for artifact in ctx.au_bundles(profile) {
+                    ensure_exists(&artifact, "AU artifact")?;
+                    // AU components are loaded via AudioComponentRegistrar, so they must be signed even for local builds.
+                    codesign_nested_macos_bundle(&artifact)?;
+                }
             }
         }
         WrapperBuild::Standalone => {
-            ensure_exists(&ctx.standalone_artifact(profile), "standalone artifact")?;
-            if ctx.platform == Platform::Macos {
-                // Apply the same Gatekeeper/loader treatment to the standalone app as to plugin bundles.
-                codesign_nested_macos_bundle(ctx, &ctx.standalone_artifact(profile))?;
+            for artifact in ctx.standalone_artifacts(profile) {
+                ensure_exists(&artifact, "standalone artifact")?;
+                if ctx.platform == Platform::Macos {
+                    // Apply the same Gatekeeper/loader treatment to the standalone app as to plugin bundles.
+                    codesign_nested_macos_bundle(&artifact)?;
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn add_wrapper_product_args(ctx: &Context, command: &mut Command, build: WrapperBuild) {
+    command.arg(format!(
+        "-DCLAP_WRAPPER_BUILDER_PRODUCT_COUNT={}",
+        ctx.metadata.plugins.len()
+    ));
+    for (index, plugin) in ctx.metadata.plugins.iter().enumerate() {
+        match build {
+            WrapperBuild::Plugin { au: true, .. } => {
+                // CLAP/VST3 read product descriptors from the Rust plugin factory.
+                // AUv2 cannot, so only AUv2 builds need per-product output and
+                // four-character AudioComponent identity values from xtask.
+                command
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_OUTPUT_NAME={}",
+                        plugin.plugin_name
+                    ))
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_TYPE={}",
+                        plugin.auv2_type
+                    ))
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_SUBTYPE={}",
+                        plugin.auv2_subtype
+                    ));
+            }
+            WrapperBuild::Standalone => {
+                // Each standalone app embeds the product ID it should host at
+                // compile time; passing all standalone metadata keeps CMake from
+                // choosing an implicit primary product.
+                command
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_OUTPUT_NAME={}",
+                        plugin.plugin_name
+                    ))
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_PLUGIN_ID={}",
+                        plugin.plugin_id
+                    ))
+                    .arg(format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_STANDALONE_NAME={}",
+                        plugin.standalone_name
+                    ));
+            }
+            WrapperBuild::Plugin { au: false, .. } => {}
+        }
+    }
 }
 
 pub(crate) fn install(
@@ -391,8 +428,9 @@ pub(crate) fn install(
     install_plugin_targets(ctx, profile, scope, &targets)
 }
 
-pub(crate) fn launch(ctx: &Context, profile: BuildProfile) -> Result<()> {
-    let artifact = ctx.standalone_artifact(profile);
+pub(crate) fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> Result<()> {
+    let plugin = standalone_plugin_to_launch(ctx, plugin_id)?;
+    let artifact = ctx.standalone_artifact_for(profile, plugin);
     if !artifact.exists() {
         let release = if profile == BuildProfile::Release {
             " --release"
@@ -415,6 +453,34 @@ pub(crate) fn launch(ctx: &Context, profile: BuildProfile) -> Result<()> {
     Ok(())
 }
 
+fn standalone_plugin_to_launch<'a>(
+    ctx: &'a Context,
+    plugin_id: Option<&str>,
+) -> Result<&'a crate::metadata::PluginProductMetadata> {
+    if let Some(plugin_id) = plugin_id {
+        return ctx
+            .metadata
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .ok_or_else(|| format!("plugin ID not found in WRAC metadata: {plugin_id}").into());
+    }
+    match ctx.metadata.plugins.as_slice() {
+        [plugin] => Ok(plugin),
+        // Avoid silently launching the first product from a package whose
+        // metadata intentionally exposes more than one standalone artifact.
+        plugins => Err(format!(
+            "multiple plugin products found: {}. Use --plugin-id <PLUGIN_ID>.",
+            plugins
+                .iter()
+                .map(|plugin| plugin.plugin_id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into()),
+    }
+}
+
 fn install_plugin_targets(
     ctx: &Context,
     profile: BuildProfile,
@@ -431,10 +497,12 @@ fn install_plugin_targets(
                 &ctx.vst3_bundle(profile),
                 &install_dir(ctx, scope, PluginFormat::Vst3)?,
             )?,
-            PluginTarget::Au => install_artifact(
-                &ctx.au_bundle(profile),
-                &install_dir(ctx, scope, PluginFormat::Au)?,
-            )?,
+            PluginTarget::Au => {
+                let install_dir = install_dir(ctx, scope, PluginFormat::Au)?;
+                for artifact in ctx.au_bundles(profile) {
+                    install_artifact(&artifact, &install_dir)?;
+                }
+            }
         }
     }
     Ok(())
@@ -561,18 +629,22 @@ fn installed_artifacts(
         PluginTarget::Vst3 => PluginFormat::Vst3,
         PluginTarget::Au => PluginFormat::Au,
     };
-    let bundle_name = match target {
-        PluginTarget::Clap => ctx.metadata.clap_bundle_name(),
-        PluginTarget::Vst3 => ctx.metadata.vst3_bundle_name(),
-        PluginTarget::Au => ctx.metadata.au_bundle_name(),
+    let bundle_names = match target {
+        PluginTarget::Clap => vec![ctx.metadata.clap_bundle_name()],
+        PluginTarget::Vst3 => vec![ctx.metadata.vst3_bundle_name()],
+        PluginTarget::Au => ctx
+            .metadata
+            .plugins
+            .iter()
+            .map(|plugin| ctx.metadata.au_bundle_name(plugin))
+            .collect(),
     };
-    uninstall_scopes(scope)
-        .iter()
-        .copied()
-        .map(|install_scope| {
-            install_dir(ctx, install_scope, format).map(|dir| dir.join(&bundle_name))
-        })
-        .collect::<Result<Vec<_>>>()
+    let mut artifacts = Vec::new();
+    for install_scope in uninstall_scopes(scope) {
+        let dir = install_dir(ctx, *install_scope, format)?;
+        artifacts.extend(bundle_names.iter().map(|bundle_name| dir.join(bundle_name)));
+    }
+    Ok(artifacts)
 }
 
 fn uninstall_scopes(scope: UninstallScope) -> &'static [InstallScope] {
@@ -628,14 +700,15 @@ fn validate_targets(
     }
 
     if targets.contains(&ValidateTarget::Au) {
-        let au = ctx.au_bundle(profile);
-        ensure_exists(&au, "AU artifact")?;
         ensure_no_system_au_conflict(ctx)?;
 
         // auval resolves its target via AudioComponentRegistrar rather than a direct path,
         // so the freshly built AU must be installed user-locally before running validation.
         let install_dir = install_dir(ctx, InstallScope::User, PluginFormat::Au)?;
-        install_artifact(&au, &install_dir)?;
+        for artifact in ctx.au_bundles(profile) {
+            ensure_exists(&artifact, "AU artifact")?;
+            install_artifact(&artifact, &install_dir)?;
+        }
 
         // The registrar caches component metadata, so it must be restarted to expose the newly placed AU.
         // If killall fails, auval may still detect the component, so treat this as best-effort.
@@ -728,14 +801,16 @@ fn clap_validator_executable(platform: Platform, validator_dir: &Path) -> PathBu
 }
 
 fn ensure_no_system_au_conflict(ctx: &Context) -> Result<()> {
-    let system_au =
-        Path::new("/Library/Audio/Plug-Ins/Components").join(ctx.metadata.au_bundle_name());
-    if system_au.exists() {
-        return Err(format!(
-            "system-wide AU already exists at {}. auval may validate that copy instead of the freshly built user-local AU. Remove the system-wide component and run validation again.",
-            system_au.display()
-        )
-        .into());
+    for plugin in &ctx.metadata.plugins {
+        let system_au = Path::new("/Library/Audio/Plug-Ins/Components")
+            .join(ctx.metadata.au_bundle_name(plugin));
+        if system_au.exists() {
+            return Err(format!(
+                "system-wide AU already exists at {}. auval may validate that copy instead of the freshly built user-local AU. Remove the system-wide component and run validation again.",
+                system_au.display()
+            )
+            .into());
+        }
     }
     Ok(())
 }
@@ -842,9 +917,15 @@ fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
         match target {
             Target::Clap => println!("CLAP: {}", ctx.clap_bundle(profile).display()),
             Target::Vst3 => println!("VST3: {}", ctx.vst3_bundle(profile).display()),
-            Target::Au => println!("AU: {}", ctx.au_bundle(profile).display()),
+            Target::Au => {
+                for artifact in ctx.au_bundles(profile) {
+                    println!("AU: {}", artifact.display());
+                }
+            }
             Target::Standalone => {
-                println!("Standalone: {}", ctx.standalone_artifact(profile).display())
+                for artifact in ctx.standalone_artifacts(profile) {
+                    println!("Standalone: {}", artifact.display());
+                }
             }
         }
     }
@@ -852,7 +933,7 @@ fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
 
 fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     let plugin_name = &metadata.bundle_name;
-    let plugin_id = &metadata.primary_plugin().plugin_id;
+    let plugin_id = &metadata.bundle_identity_plugin().plugin_id;
     let version = &metadata.version;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -897,13 +978,18 @@ fn codesign(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn codesign_nested_macos_bundle(ctx: &Context, bundle: &Path) -> Result<()> {
-    let nested_clap = bundle
-        .join("Contents")
-        .join("PlugIns")
-        .join(ctx.metadata.clap_bundle_name());
-    if nested_clap.exists() {
-        codesign(&nested_clap)?;
+fn codesign_nested_macos_bundle(bundle: &Path) -> Result<()> {
+    let plugins_dir = bundle.join("Contents").join("PlugIns");
+    if plugins_dir.exists() {
+        for entry in fs::read_dir(&plugins_dir)? {
+            let path = entry?.path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "clap")
+            {
+                codesign(&path)?;
+            }
+        }
     }
     codesign(bundle)?;
     Ok(())

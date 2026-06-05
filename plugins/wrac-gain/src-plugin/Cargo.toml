@@ -17,8 +17,6 @@ company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
 # User-visible bundle name.
 bundle_name = "WRAC Gain"
-# User-visible standalone app name.
-standalone_name = "WRAC Gain Standalone"
 
 [package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "WRAC Gain is a minimal one-knob starter example. Products that support Fender Studio Pro should add a second real visible control instead of shipping this exception."
@@ -28,6 +26,8 @@ reason = "WRAC Gain is a minimal one-knob starter example. Products that support
 plugin_id = "com.your-company.wrac-gain"
 # User-visible plugin name shown by hosts and the template GUI.
 plugin_name = "WRAC Gain"
+# User-visible standalone app name.
+standalone_name = "WRAC Gain Standalone"
 # AUv2 component type. Audio effects usually use "aufx"; instruments usually use "aumu".
 auv2_type = "aufx"
 # AUv2 subtype. Pick a unique 4-byte ASCII code for each plugin from the same vendor.

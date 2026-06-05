@@ -59,11 +59,11 @@ Edit `[package.metadata.wrac]` first.
 company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
 bundle_name = "My Plugin"
-standalone_name = "My Plugin Standalone"
 
 [[package.metadata.wrac.plugins]]
 plugin_id = "com.your-company.my-plugin"
 plugin_name = "My Plugin"
+standalone_name = "My Plugin Standalone"
 auv2_type = "aufx"
 auv2_subtype = "MyPl"
 ```

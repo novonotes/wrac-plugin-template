@@ -69,7 +69,11 @@ pub fn run(config: XtaskConfig) -> Result<()> {
             let package = selected_package(&config, args.package.as_deref())?;
             let ctx = Context::new(&config, &package)?;
             build(&ctx, args_for_launch_build(&args))?;
-            launch(&ctx, BuildProfile::from_release(args.release))?;
+            launch(
+                &ctx,
+                BuildProfile::from_release(args.release),
+                args.plugin_id.as_deref(),
+            )?;
         }
         Commands::Clean(args) => {
             for package in selected_packages(&config, args.package.as_deref(), args.all)? {
