@@ -269,14 +269,6 @@ fn template_placeholder_violations(
         &metadata.bundle_name,
         "WRAC Gain",
     );
-    check_template_placeholder(
-        &mut violations,
-        &subject,
-        location,
-        "package.metadata.wrac.standalone_name",
-        &metadata.standalone_name,
-        "WRAC Gain",
-    );
     for plugin in &metadata.plugins {
         check_template_placeholder(
             &mut violations,
@@ -292,6 +284,14 @@ fn template_placeholder_violations(
             location,
             "package.metadata.wrac.plugins.plugin_name",
             &plugin.plugin_name,
+            "WRAC Gain",
+        );
+        check_template_placeholder(
+            &mut violations,
+            &subject,
+            location,
+            "package.metadata.wrac.plugins.standalone_name",
+            &plugin.standalone_name,
             "WRAC Gain",
         );
         check_template_placeholder(
@@ -493,10 +493,10 @@ mod tests {
             company_name: "Example".to_string(),
             auv2_manufacturer_code: "ExCo".to_string(),
             bundle_name: "Test Plugin".to_string(),
-            standalone_name: "Test Plugin Standalone".to_string(),
             plugins: vec![PluginProductMetadata {
                 plugin_id: "com.example.test".to_string(),
                 plugin_name: "Test Plugin".to_string(),
+                standalone_name: "Test Plugin Standalone".to_string(),
                 auv2_type: "aufx".to_string(),
                 auv2_subtype: "TstP".to_string(),
             }],

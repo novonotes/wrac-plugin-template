@@ -14,7 +14,6 @@ pub(crate) struct PluginMetadata {
     pub(crate) company_name: String,
     pub(crate) auv2_manufacturer_code: String,
     pub(crate) bundle_name: String,
-    pub(crate) standalone_name: String,
     pub(crate) plugins: Vec<PluginProductMetadata>,
     pub(crate) validation: ValidationMetadata,
 }
@@ -34,6 +33,7 @@ pub(crate) struct DisabledValidationRule {
 pub(crate) struct PluginProductMetadata {
     pub(crate) plugin_id: String,
     pub(crate) plugin_name: String,
+    pub(crate) standalone_name: String,
     pub(crate) auv2_type: String,
     pub(crate) auv2_subtype: String,
 }
@@ -55,7 +55,6 @@ impl PluginMetadata {
             company_name: wrac.company_name,
             auv2_manufacturer_code: wrac.auv2_manufacturer_code,
             bundle_name: wrac.bundle_name,
-            standalone_name: wrac.standalone_name,
             plugins: wrac.plugins,
             validation: wrac.validation.unwrap_or_default(),
         };
@@ -71,15 +70,13 @@ impl PluginMetadata {
         format!("{}.vst3", self.bundle_name)
     }
 
-    pub(crate) fn au_bundle_name(&self) -> String {
-        format!("{}.component", self.bundle_name)
+    pub(crate) fn au_bundle_name(&self, plugin: &PluginProductMetadata) -> String {
+        format!("{}.component", plugin.plugin_name)
     }
 
     pub(crate) fn primary_plugin(&self) -> &PluginProductMetadata {
         // WRAC bundles may expose multiple plugin products from one binary, but wrapper
-        // fallbacks and standalone launch still need one stable identity. The first
-        // metadata entry is that primary product; validation and generated Rust metadata
-        // still cover every entry in `plugins`.
+        // bundle-level metadata still needs one stable identity.
         self.plugins
             .first()
             .expect("validated metadata must contain at least one plugin")
@@ -90,15 +87,12 @@ impl PluginMetadata {
         validate_required("package.version", &self.version)?;
         validate_required("package.metadata.wrac.company_name", &self.company_name)?;
         validate_required("package.metadata.wrac.bundle_name", &self.bundle_name)?;
-        validate_required(
-            "package.metadata.wrac.standalone_name",
-            &self.standalone_name,
-        )?;
         if self.plugins.is_empty() {
             return Err("package.metadata.wrac.plugins must contain at least one plugin".into());
         }
         validate_four_ascii("auv2_manufacturer_code", &self.auv2_manufacturer_code)?;
         let mut plugin_ids = HashSet::new();
+        let mut standalone_names = HashSet::new();
         let mut auv2_ids = HashSet::new();
         for plugin in &self.plugins {
             validate_required("package.metadata.wrac.plugins.plugin_id", &plugin.plugin_id)?;
@@ -106,12 +100,23 @@ impl PluginMetadata {
                 "package.metadata.wrac.plugins.plugin_name",
                 &plugin.plugin_name,
             )?;
+            validate_required(
+                "package.metadata.wrac.plugins.standalone_name",
+                &plugin.standalone_name,
+            )?;
             validate_four_ascii("auv2_type", &plugin.auv2_type)?;
             validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
             if !plugin_ids.insert(plugin.plugin_id.as_str()) {
                 return Err(format!(
                     "duplicate package.metadata.wrac.plugins plugin_id: {}",
                     plugin.plugin_id
+                )
+                .into());
+            }
+            if !standalone_names.insert(plugin.standalone_name.as_str()) {
+                return Err(format!(
+                    "duplicate package.metadata.wrac.plugins standalone_name: {}",
+                    plugin.standalone_name
                 )
                 .into());
             }
@@ -173,7 +178,6 @@ struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
     bundle_name: String,
-    standalone_name: String,
     #[serde(default)]
     plugins: Vec<PluginProductMetadata>,
     validation: Option<ValidationMetadata>,

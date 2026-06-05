@@ -26,23 +26,29 @@ project(clap_wrapper_builder)
 #     CLAP_WRAPPER_BUILDER_BUNDLE_VERSION   Version written into bundles.
 #                                           Default "1.0.0".
 #     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
-#                                           copied here under fixed names
-#                                           (<name>.vst3/.component/.app/.exe).
+#                                           copied here under fixed names.
 #                                           Leave empty to skip staging.
+#
+#   Products
+#     CLAP_WRAPPER_BUILDER_PRODUCT_COUNT    Number of plugin products exposed by
+#                                           the wrapped static library. Default 1.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_OUTPUT_NAME
+#                                           Product name used for AUv2 output.
+#                                           Product 0 defaults to OUTPUT_NAME.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_PLUGIN_ID
+#                                           CLAP plugin ID used by standalone.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_STANDALONE_NAME
+#                                           Standalone app output name.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_TYPE
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_SUBTYPE
+#                                           Product AUv2 type/subtype codes.
 #
 #   Format toggles
 #     CLAP_WRAPPER_BUILDER_BUILD_VST3        Default ON.
 #     CLAP_WRAPPER_BUILDER_BUILD_AUV2        Default ON on macOS, OFF elsewhere.
 #     CLAP_WRAPPER_BUILDER_BUILD_AAX         Default OFF. Requires the Avid AAX
 #                                            SDK; only meaningful on macOS/Win.
-#     CLAP_WRAPPER_BUILDER_BUILD_STANDALONE  Default OFF. When ON,
-#                                            STANDALONE_PLUGIN_ID is required.
-#
-#   Standalone (only when BUILD_STANDALONE=ON)
-#     CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID    Required. Plugin ID the
-#                                                  standalone host loads.
-#     CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME  Optional. Defaults to
-#                                                  "<name> Standalone".
+#     CLAP_WRAPPER_BUILDER_BUILD_STANDALONE  Default OFF.
 #
 # clap-wrapper is vendored as a git subtree. The clap, vst3sdk, and
 # AudioUnitSDK dependency SDKs live alongside this file as git submodules.
@@ -76,6 +82,7 @@ set(CLAP_WRAPPER_BUILDER_TARGET_NAME "" CACHE STRING "Internal CMake target name
 set(CLAP_WRAPPER_BUILDER_OUTPUT_NAME "" CACHE STRING "Output plugin display/bundle name")
 set(CLAP_WRAPPER_BUILDER_STAGE_DIR "" CACHE PATH "Directory where built artifacts are staged")
 set(CLAP_WRAPPER_BUILDER_BUNDLE_VERSION "1.0.0" CACHE STRING "Version written into wrapped plugin bundles")
+set(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT "1" CACHE STRING "Number of plugin products exposed by the wrapped library")
 option(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE "Build standalone app target in clap_wrapper_builder" OFF)
 option(CLAP_WRAPPER_BUILDER_BUILD_VST3 "Build VST3 target in clap_wrapper_builder" ON)
 if(APPLE)
@@ -88,8 +95,6 @@ if(APPLE OR WIN32)
 else()
     option(CLAP_WRAPPER_BUILDER_BUILD_AAX "Build AAX target in clap_wrapper_builder" OFF)
 endif()
-set(CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME "" CACHE STRING "Output name for standalone app")
-set(CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID "" CACHE STRING "Plugin ID used by standalone app")
 
 # Validate required parameters
 if(NOT CLAP_WRAPPER_BUILDER_TARGET_LIB)
@@ -118,6 +123,11 @@ message(STATUS "  Plugin Name: ${PLUGIN_NAME}")
 message(STATUS "  Safe Plugin Name: ${PLUGIN_NAME_SAFE}")
 message(STATUS "  Stage Dir: ${CLAP_WRAPPER_BUILDER_STAGE_DIR}")
 message(STATUS "  Build AAX: ${CLAP_WRAPPER_BUILDER_BUILD_AAX}")
+message(STATUS "  Product Count: ${CLAP_WRAPPER_BUILDER_PRODUCT_COUNT}")
+if(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT LESS 1)
+    message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_COUNT must be at least 1")
+endif()
+math(EXPR PRODUCT_LAST_INDEX "${CLAP_WRAPPER_BUILDER_PRODUCT_COUNT} - 1")
 
 # Add the clap-wrapper subproject
 add_subdirectory(clap-wrapper)
@@ -127,6 +137,31 @@ add_subdirectory(clap-wrapper)
 if(APPLE AND TARGET clap-wrapper-compile-options)
   target_compile_options(clap-wrapper-compile-options INTERFACE -Wno-shorten-64-to-32)
 endif()
+
+function(clap_wrapper_builder_product_value INDEX FIELD OUT_VAR)
+    set(var_name "CLAP_WRAPPER_BUILDER_PRODUCT_${INDEX}_${FIELD}")
+    if(DEFINED ${var_name} AND NOT "${${var_name}}" STREQUAL "")
+        set(${OUT_VAR} "${${var_name}}" PARENT_SCOPE)
+    else()
+        set(${OUT_VAR} "" PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(clap_wrapper_builder_product_output_name INDEX OUT_VAR)
+    clap_wrapper_builder_product_value(${INDEX} "OUTPUT_NAME" value)
+    if(value)
+        set(${OUT_VAR} "${value}" PARENT_SCOPE)
+    elseif(INDEX EQUAL 0)
+        set(${OUT_VAR} "${PLUGIN_NAME}" PARENT_SCOPE)
+    else()
+        message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${INDEX}_OUTPUT_NAME must be specified")
+    endif()
+endfunction()
+
+function(clap_wrapper_builder_product_target_name INDEX OUTPUT_NAME OUT_VAR)
+    string(MAKE_C_IDENTIFIER "${OUTPUT_NAME}" product_name_safe)
+    set(${OUT_VAR} "${PLUGIN_NAME_SAFE}_product_${INDEX}_${product_name_safe}" PARENT_SCOPE)
+endfunction()
 
 # Create the static library target
 # Set up the external static library as an imported library
@@ -178,13 +213,11 @@ extern \"C\" {
 #endif
 ")
 
-# Configure plugin formats to build
+# Configure bundle plugin formats to build. AUv2 is product-specific and is
+# generated in the product loop below.
 set(PLUGIN_FORMATS "CLAP")
 if(CLAP_WRAPPER_BUILDER_BUILD_VST3)
     list(APPEND PLUGIN_FORMATS "VST3")
-endif()
-if(APPLE AND CLAP_WRAPPER_BUILDER_BUILD_AUV2)
-    list(APPEND PLUGIN_FORMATS "AUV2")
 endif()
 if(CLAP_WRAPPER_BUILDER_BUILD_AAX)
     list(APPEND PLUGIN_FORMATS "AAX")
@@ -194,7 +227,8 @@ endif()
 set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
 set(BUNDLE_VERSION "${CLAP_WRAPPER_BUILDER_BUNDLE_VERSION}")
 
-# Create multi-format plugins using make_clapfirst_plugins
+# Create bundle-level plugins using make_clapfirst_plugins. CLAP and VST3 can
+# expose every product in one bundle through the CLAP factory descriptors.
 set(CLAPFIRST_COMMON_ARGS
     TARGET_NAME ${PLUGIN_NAME_SAFE}
     IMPL_TARGET ${PLUGIN_NAME_SAFE}_impl
@@ -209,32 +243,70 @@ set(CLAPFIRST_COMMON_ARGS
     WINDOWS_FOLDER_VST3 TRUE
 )
 
+set(STANDALONE_TARGETS)
 if(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE)
-    if(NOT CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID)
-        message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID must be specified when CLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
-    endif()
-
-    if(NOT CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME)
-        set(CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME "${PLUGIN_NAME} Standalone")
-    endif()
-
     message(STATUS "  Standalone Enabled: ON")
-    message(STATUS "  Standalone Output Name: ${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}")
-    message(STATUS "  Standalone Plugin ID: ${CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID}")
+    set(STANDALONE_CONFIGURATIONS)
+    foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
+        clap_wrapper_builder_product_output_name(${PRODUCT_INDEX} PRODUCT_OUTPUT_NAME)
+        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "PLUGIN_ID" PRODUCT_PLUGIN_ID)
+        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "STANDALONE_NAME" PRODUCT_STANDALONE_NAME)
+        if(NOT PRODUCT_PLUGIN_ID)
+            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_PLUGIN_ID must be specified when CLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
+        endif()
+        if(NOT PRODUCT_STANDALONE_NAME)
+            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_STANDALONE_NAME must be specified when CLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
+        endif()
+        set(STANDALONE_POSTFIX "product_${PRODUCT_INDEX}_standalone")
+        set(STANDALONE_TARGET "${PLUGIN_NAME_SAFE}_${STANDALONE_POSTFIX}")
+        list(APPEND STANDALONE_TARGETS "${STANDALONE_TARGET}")
+        list(APPEND STANDALONE_CONFIGURATIONS "${STANDALONE_POSTFIX}" "${PRODUCT_STANDALONE_NAME}" "${PRODUCT_PLUGIN_ID}")
+        message(STATUS "  Standalone Product: ${PRODUCT_STANDALONE_NAME} -> ${PRODUCT_PLUGIN_ID}")
+    endforeach()
 
     make_clapfirst_plugins(
         ${CLAPFIRST_COMMON_ARGS}
-        STANDALONE_CONFIGURATIONS standalone "${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}" "${CLAP_WRAPPER_BUILDER_STANDALONE_PLUGIN_ID}"
+        STANDALONE_CONFIGURATIONS ${STANDALONE_CONFIGURATIONS}
     )
 else()
     make_clapfirst_plugins(${CLAPFIRST_COMMON_ARGS})
 endif()
 
+set(AUV2_PRODUCT_TARGETS)
+if(APPLE AND CLAP_WRAPPER_BUILDER_BUILD_AUV2)
+    foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
+        clap_wrapper_builder_product_output_name(${PRODUCT_INDEX} PRODUCT_OUTPUT_NAME)
+        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "AUV2_TYPE" PRODUCT_AUV2_TYPE)
+        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "AUV2_SUBTYPE" PRODUCT_AUV2_SUBTYPE)
+        if(NOT PRODUCT_AUV2_TYPE)
+            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_AUV2_TYPE must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
+        endif()
+        if(NOT PRODUCT_AUV2_SUBTYPE)
+            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_AUV2_SUBTYPE must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
+        endif()
+        clap_wrapper_builder_product_target_name(${PRODUCT_INDEX} "${PRODUCT_OUTPUT_NAME}" PRODUCT_TARGET_NAME)
+        set(AUV2_TARGET "${PRODUCT_TARGET_NAME}_auv2")
+        add_library(${AUV2_TARGET} MODULE)
+        target_sources(${AUV2_TARGET} PRIVATE ${ENTRY_SOURCE_FILE})
+        target_link_libraries(${AUV2_TARGET} PRIVATE ${PLUGIN_NAME_SAFE}_impl)
+        target_add_auv2_wrapper(
+            TARGET ${AUV2_TARGET}
+            OUTPUT_NAME "${PRODUCT_OUTPUT_NAME}"
+            BUNDLE_IDENTIFIER "${BUNDLE_ID}.${PRODUCT_TARGET_NAME}.auv2"
+            BUNDLE_VERSION "${BUNDLE_VERSION}"
+            MANUFACTURER_NAME "${CLAP_WRAPPER_AUV2_MANUFACTURER_NAME}"
+            MANUFACTURER_CODE "${CLAP_WRAPPER_AUV2_MANUFACTURER_CODE}"
+            SUBTYPE_CODE "${PRODUCT_AUV2_SUBTYPE}"
+            INSTRUMENT_TYPE "${PRODUCT_AUV2_TYPE}"
+            PREFER_CMAKE_AUV2_CONFIGURATION TRUE
+        )
+        list(APPEND AUV2_PRODUCT_TARGETS "${AUV2_TARGET}")
+    endforeach()
+endif()
+
 if(APPLE)
     set(CLAP_BUNDLE_ID "${BUNDLE_ID}.clap")
     set(VST3_BUNDLE_ID "${BUNDLE_ID}.vst3")
-    set(AUV2_BUNDLE_ID "${BUNDLE_ID}.auv2")
-    set(STANDALONE_BUNDLE_ID "${BUNDLE_ID}.standalone")
     set(STANDALONE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/StandaloneInfo.plist.in")
 
     if(TARGET ${PLUGIN_NAME_SAFE}_clap)
@@ -251,30 +323,34 @@ if(APPLE)
         )
     endif()
 
-    if(TARGET ${PLUGIN_NAME_SAFE}_auv2)
-        set_target_properties(${PLUGIN_NAME_SAFE}_auv2 PROPERTIES
-            MACOSX_BUNDLE_GUI_IDENTIFIER "${AUV2_BUNDLE_ID}"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AUV2_BUNDLE_ID}"
+    foreach(AUV2_TARGET IN LISTS AUV2_PRODUCT_TARGETS)
+        string(REPLACE "_" "-" AUV2_TARGET_BUNDLE_ID "${AUV2_TARGET}")
+        set_target_properties(${AUV2_TARGET} PROPERTIES
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${BUNDLE_ID}.${AUV2_TARGET_BUNDLE_ID}.auv2"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${BUNDLE_ID}.${AUV2_TARGET_BUNDLE_ID}.auv2"
         )
-    endif()
+    endforeach()
 
-    if(TARGET ${PLUGIN_NAME_SAFE}_standalone)
+    foreach(STANDALONE_TARGET IN LISTS STANDALONE_TARGETS)
+        string(REPLACE "_" "-" STANDALONE_TARGET_BUNDLE_ID "${STANDALONE_TARGET}")
         # The standalone app has its own Info.plist template, so set the bundle version
         # properties explicitly instead of relying on Xcode's default 1.0/1 values.
-        set_target_properties(${PLUGIN_NAME_SAFE}_standalone PROPERTIES
-            MACOSX_BUNDLE_GUI_IDENTIFIER "${STANDALONE_BUNDLE_ID}"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${STANDALONE_BUNDLE_ID}"
+        set_target_properties(${STANDALONE_TARGET} PROPERTIES
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${BUNDLE_ID}.${STANDALONE_TARGET_BUNDLE_ID}.standalone"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${BUNDLE_ID}.${STANDALONE_TARGET_BUNDLE_ID}.standalone"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "${BUNDLE_VERSION}"
             MACOSX_BUNDLE_BUNDLE_VERSION "${BUNDLE_VERSION}"
             MACOSX_BUNDLE_INFO_PLIST "${STANDALONE_INFO_PLIST}"
         )
-    endif()
+    endforeach()
 endif()
 
 # The standalone exe links the impl lib directly rather than through the
 # wrapper, so it needs runtimeobject.lib stated again on its own link line.
-if(MSVC AND TARGET ${PLUGIN_NAME_SAFE}_standalone)
-    target_link_libraries(${PLUGIN_NAME_SAFE}_standalone PRIVATE runtimeobject.lib)
+if(MSVC)
+    foreach(STANDALONE_TARGET IN LISTS STANDALONE_TARGETS)
+        target_link_libraries(${STANDALONE_TARGET} PRIVATE runtimeobject.lib)
+    endforeach()
 endif()
 
 # Only the CLAP target compiles the generated entry shim, which includes
@@ -311,35 +387,37 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
         endif()
     endif()
 
-    if(APPLE AND TARGET ${PLUGIN_NAME_SAFE}_auv2)
-        set(AUV2_GENERATED_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${PLUGIN_NAME_SAFE}_auv2-build-helper-output/auv2_Info.plist")
+    foreach(AUV2_TARGET IN LISTS AUV2_PRODUCT_TARGETS)
+        get_target_property(AUV2_OUTPUT_NAME ${AUV2_TARGET} LIBRARY_OUTPUT_NAME)
+        set(AUV2_GENERATED_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${AUV2_TARGET}-build-helper-output/auv2_Info.plist")
         # clap-wrapper's AUv2 helper generates the AudioComponents metadata that
         # auval needs; copy it back before staging/signing the component bundle.
-        add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_auv2 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${AUV2_GENERATED_PLIST}" "$<TARGET_BUNDLE_DIR:${PLUGIN_NAME_SAFE}_auv2>/Contents/Info.plist"
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.component"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${PLUGIN_NAME_SAFE}_auv2>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.component"
+        add_custom_command(TARGET ${AUV2_TARGET} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${AUV2_GENERATED_PLIST}" "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>/Contents/Info.plist"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
             VERBATIM
         )
-    endif()
+    endforeach()
 
-    if(TARGET ${PLUGIN_NAME_SAFE}_standalone)
+    foreach(STANDALONE_TARGET IN LISTS STANDALONE_TARGETS)
+        get_target_property(STANDALONE_OUTPUT_NAME ${STANDALONE_TARGET} OUTPUT_NAME)
         if(APPLE)
-            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_standalone POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}.app"
-                COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${PLUGIN_NAME_SAFE}_standalone>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}.app"
+            add_custom_command(TARGET ${STANDALONE_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${STANDALONE_OUTPUT_NAME}.app"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${STANDALONE_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${STANDALONE_OUTPUT_NAME}.app"
                 VERBATIM
             )
         elseif(WIN32)
-            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_standalone POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${PLUGIN_NAME_SAFE}_standalone>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}.exe"
+            add_custom_command(TARGET ${STANDALONE_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${STANDALONE_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${STANDALONE_OUTPUT_NAME}.exe"
                 VERBATIM
             )
         else()
-            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_standalone POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${PLUGIN_NAME_SAFE}_standalone>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${CLAP_WRAPPER_BUILDER_STANDALONE_OUTPUT_NAME}"
+            add_custom_command(TARGET ${STANDALONE_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${STANDALONE_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${STANDALONE_OUTPUT_NAME}"
                 VERBATIM
             )
         endif()
-    endif()
+    endforeach()
 endif()

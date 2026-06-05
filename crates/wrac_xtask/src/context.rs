@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;
 
-use crate::metadata::PluginMetadata;
+use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::{Result, XtaskConfig};
@@ -104,16 +104,40 @@ impl Context {
             .join(self.metadata.vst3_bundle_name())
     }
 
-    pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile)
-            .join(self.metadata.au_bundle_name())
+    pub(crate) fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| self.au_bundle(profile, plugin))
+            .collect()
     }
 
-    pub(crate) fn standalone_artifact(&self, profile: BuildProfile) -> PathBuf {
+    pub(crate) fn au_bundle(
+        &self,
+        profile: BuildProfile,
+        plugin: &PluginProductMetadata,
+    ) -> PathBuf {
+        self.plugins_dir(profile)
+            .join(self.metadata.au_bundle_name(plugin))
+    }
+
+    pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| self.standalone_artifact_for(profile, plugin))
+            .collect()
+    }
+
+    pub(crate) fn standalone_artifact_for(
+        &self,
+        profile: BuildProfile,
+        plugin: &PluginProductMetadata,
+    ) -> PathBuf {
         let filename = match self.platform {
-            Platform::Macos => format!("{}.app", self.metadata.standalone_name),
-            Platform::Windows => format!("{}.exe", self.metadata.standalone_name),
-            Platform::Linux => self.metadata.standalone_name.clone(),
+            Platform::Macos => format!("{}.app", plugin.standalone_name),
+            Platform::Windows => format!("{}.exe", plugin.standalone_name),
+            Platform::Linux => plugin.standalone_name.clone(),
         };
         self.standalone_dir(profile).join(filename)
     }
