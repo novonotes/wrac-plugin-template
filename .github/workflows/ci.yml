@@ -259,6 +259,7 @@ jobs:
             exit 1
           fi
           sdk_root="${sdk_root%/Interfaces/AAX.h}"
+          sdk_root="$(cd "$sdk_root" && pwd -P)"
           echo "AAX_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
 
       - name: Cargo fetch

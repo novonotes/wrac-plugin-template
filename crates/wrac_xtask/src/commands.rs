@@ -1261,9 +1261,16 @@ fn ensure_aax_sdk_input(ctx: &Context) -> Result<()> {
     ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")
 }
 
-fn aax_sdk_root(_ctx: &Context) -> Result<PathBuf> {
+fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
     if let Some(root) = env::var_os("AAX_SDK_ROOT").map(PathBuf::from) {
-        return Ok(root);
+        // clap-wrapper evaluates AAX_SDK_ROOT inside its CMake project, so a relative
+        // path would be resolved against clap_wrapper_builder rather than this repo.
+        // Normalize here so CI and local shells can both use repo-relative paths.
+        return Ok(if root.is_absolute() {
+            root
+        } else {
+            ctx.root.join(root)
+        });
     }
 
     // Local Avid downloads are commonly unpacked under Downloads. Environment
