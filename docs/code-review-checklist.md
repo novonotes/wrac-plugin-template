@@ -1,6 +1,6 @@
 # WRAC Template Code Review Checklist
 
-> 日本語版: [product-code-review-checklist-ja.md](product-code-review-checklist-ja.md)
+> 日本語版: [code-review-checklist-ja.md](code-review-checklist-ja.md)
 
 Use this checklist for code review of products built from this template. It
 only lists template-specific risks that reviewers can easily miss and that the

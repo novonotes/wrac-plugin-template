@@ -2,90 +2,90 @@
 
 > English version: [production-readiness-checks.md](production-readiness-checks.md)
 
-`cargo xtask validate` は、指定された plugin format をビルドし、WRAC production-readiness checks を実行したあと、clap-validator、Steinberg VST3 validator、auval などの外部 format validator を実行します。WRAC check に違反がある場合は error として扱い、コマンドは non-zero exit code を返します。
+`cargo xtask validate` は、指定されたプラグイン形式をビルドし、WRAC production-readiness checks を実行したあと、clap-validator、Steinberg VST3 validator、auval などの外部バリデーターを実行します。WRAC のチェックに違反がある場合はエラーとして扱い、コマンドは non-zero exit code を返します。
 
-WRAC production-readiness checks は、商用 plugin のための NovoNotes 独自の release policy check です。format specification そのものを検証する validator ではありません。この check set は小さく保ってください。実際に起きていない問題に対する check は追加しないでください。production-readiness check として妥当なのは、すでに観測された release、QA、host compatibility、support 上の実問題を防ぐものだけです。
+WRAC production-readiness checks は、商用プラグインのための NovoNotes 独自のリリースポリシーチェックです。プラグイン形式の仕様そのものを検証するバリデーターではありません。このチェックは小さく保ってください。実際に起きていない問題に対するチェックは追加しないでください。production-readiness check として妥当なのは、すでに観測されたリリース、QA、ホスト互換性、サポート上の実問題を防ぐものだけです。
 
-コマンドは各 check を `pass`、`fail`、`disabled`、`skipped` としてログ出力します。CI log から、どの release policy check が評価されたかを確認できます。
+コマンドは各チェックを `pass`、`fail`、`disabled`、`skipped` としてログ出力します。CI ログから、どのリリースポリシーチェックが評価されたかを確認できます。
 
-## Check の disable
+## チェックの無効化
 
-check は plugin crate の manifest で rule ID ごとに disable できます。disable する rule には、空ではない `reason` が必須です。
+チェックはプラグイン crate の manifest で rule ID ごとに無効化できます。無効化するルールには、空ではない `reason` が必須です。
 
 ```toml
 [package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "This product does not support Fender Studio Pro generic editor workflows."
 ```
 
-未知の rule ID と空の reason は error です。
+未知の rule ID と空の reason はエラーです。
 
-check を disable するのは、意図的な product decision がある場合だけにしてください。plugin がその check の release policy を満たすべき場合は、disable ではなく plugin を修正してください。
+チェックを無効化するのは、意図的な製品判断がある場合だけにしてください。プラグインがそのチェックのリリースポリシーを満たすべき場合は、無効化ではなくプラグインを修正してください。
 
-## Check の追加
+## チェックの追加
 
-新しい check の追加は、単なる code change ではなく release policy の変更です。PR を作る前に、author は以下を完了してください。
+新しいチェックの追加は、単なるコード変更ではなくリリースポリシーの変更です。PR を作る前に、author は以下を完了してください。
 
-- **妥当性:** その check が、実際に起きた問題を扱っていることを確認する。仮説上の risk に対する check は追加しない。
-- **重複回避:** 他の validator がすでに検出する check と重複させない。観測済みの問題が再現するにもかかわらず `cargo xtask validate` が通ってしまう場合だけ、新しい check を追加する。
-- **Document:** この document の Check List に expectation、reason、error condition、fix を追加する。
-- **Unit Test:** `pass`、`fail`、`disabled`、`skipped`、edge case を test する。
+- **妥当性:** そのチェックが、実際に起きた問題を扱っていることを確認する。仮説上のリスクに対するチェックは追加しない。
+- **重複回避:** 他のバリデーターがすでに検出するチェックと重複させない。観測済みの問題が再現するにもかかわらず `cargo xtask validate` が通ってしまう場合だけ、新しいチェックを追加する。
+- **ドキュメント:** このドキュメントの Check List に、期待される状態、理由、エラー条件、修正方法を追加する。
+- **Unit Test:** `pass`、`fail`、`disabled`、`skipped`、エッジケースをテストする。
 - **Manual Validate 必須:** unit test だけでは不十分です。必ず以下を実施する。
-  - 実際の template plugin を意図的に壊し、`cargo xtask validate` が期待した rule ID と message で fail することを確認する。
-  - plugin を元に戻し、コマンドがその check を `pass`、`disabled`、または `skipped` としてログ出力することを確認する。
+  - 実際のテンプレートプラグインを意図的に壊し、`cargo xtask validate` が期待した rule ID と message で fail することを確認する。
+  - プラグインを元に戻し、コマンドがそのチェックを `pass`、`disabled`、または `skipped` としてログ出力することを確認する。
 
 ## Check List
 
 ### `fender-studio-pro-generic-editor-single-knob`
 
-**Expectation:** Fender Studio Pro generic editor workflow を support する production plugin は、visible な non-bypass parameter を 0 個、または 2 個以上 expose する。
+**期待される状態:** Fender Studio Pro の generic editor workflow をサポートする production plugin は、visible な non-bypass parameter を 0 個、または 2 個以上公開する。
 
-**Reason:** Fender Studio Pro 8.0.3 の generic editor は、この shape では knob を表示できません。この rule では bypass parameter は knob 数に含めません。
+**理由:** Fender Studio Pro 8.0.3 の generic editor は、このパラメーター構成では knob を表示できません。このルールでは bypass parameter は knob 数に含めません。
 
-**Error condition:** CLAP または VST3 validation が requested のとき、plugin が visible な non-bypass parameter をちょうど 1 個 expose している。
+**エラー条件:** CLAP または VST3 validation が要求されたとき、プラグインが visible な non-bypass parameter をちょうど 1 個公開している。
 
-**Fix:** visible な non-bypass parameter を 0 個または 2 個以上にする。product が Fender Studio Pro generic editor workflow を意図的に support しない場合は、reason を書いて rule を disable する。
+**修正方法:** visible な non-bypass parameter を 0 個または 2 個以上にする。製品が Fender Studio Pro generic editor workflow を意図的にサポートしない場合は、reason を書いてルールを無効化する。
 
 ### `luna-vst3-param-id-must-match-index`
 
-**Expectation:** VST3-compatible plugin は、public parameter ID を parameter list の index と一致させる。
+**期待される状態:** VST3-compatible plugin は、public parameter ID を parameter list の index と一致させる。
 
-**Reason:** LUNA 2.0.3.4381 では、VST3 parameter ID が parameter list index と異なる場合、VST3 automation write が失敗することがあります。
+**理由:** LUNA 2.0.3.4381 では、VST3 parameter ID が parameter list index と異なる場合、VST3 automation write が失敗することがあります。
 
-**Error condition:** VST3 validation が requested のとき、public parameter ID が parameter list index と異なる。
+**エラー条件:** VST3 validation が要求されたとき、public parameter ID が parameter list index と異なる。
 
-**Fix:** parameter を並べ替えるか public parameter ID を調整し、各 public parameter ID が index と一致するようにする。
+**修正方法:** パラメーターを並べ替えるか public parameter ID を調整し、各 public parameter ID が index と一致するようにする。
 
 ### `bypass-param-shape`
 
-**Expectation:** plugin は bypass parameter を最大 1 個 expose し、その parameter が boolean の host bypass control として振る舞う。
+**期待される状態:** プラグインは bypass parameter を最大 1 個だけ公開し、そのパラメーターが boolean の host bypass control として振る舞う。
 
-**Reason:** host bypass UI、bypass automation、generic editor、control surface は、bypass が boolean shape の parameter として 1 つ expose されているときに最も予測しやすく動作します。
+**理由:** host bypass UI、bypass automation、generic editor、control surface は、bypass が boolean shape のパラメーターとして 1 つ公開されているときに最も予測しやすく動作します。
 
-**Error conditions:**
+**エラー条件:**
 
-- bypass parameter が複数 expose されている。
+- bypass parameter が複数公開されている。
 - bypass parameter が stepped enum ではない。
-- bypass parameter range が `0..1` ではない。
-- bypass parameter default が `0` または `1` ではない。
+- bypass parameter の range が `0..1` ではない。
+- bypass parameter の default が `0` または `1` ではない。
 
-**Fix:** bypass、stepped、enum flag を持ち、range `0..1`、default `0` または `1` の bypass parameter を 1 つ expose する。
+**修正方法:** bypass、stepped、enum flag を持ち、range `0..1`、default `0` または `1` の bypass parameter を 1 つ公開する。
 
 ### `plugin-requires-bypass`
 
-**Expectation:** production plugin は valid な bypass parameter を 1 つ expose する。
+**期待される状態:** production plugin は valid な bypass parameter を 1 つ公開する。
 
-**Reason:** host bypass UI、bypass automation、generic editor、control surface は、host-visible な bypass control が plugin から提供されることを期待する場合があります。valid な bypass parameter は実装コストが低く、plugin category を問わず host-specific compatibility risk を下げます。
+**理由:** host bypass UI、bypass automation、generic editor、control surface は、host-visible な bypass control がプラグインから提供されることを期待する場合があります。valid な bypass parameter は実装コストが低く、プラグインのカテゴリーを問わずホスト固有の互換性リスクを下げます。
 
-**Error condition:** plugin が bypass parameter を expose していない。
+**エラー条件:** プラグインが bypass parameter を公開していない。
 
-**Fix:** bypass parameter を 1 つ追加する。product として host bypass を意図的に提供しない場合は、reason を書いて rule を disable する。
+**修正方法:** bypass parameter を 1 つ追加する。製品として host bypass を意図的に提供しない場合は、reason を書いてルールを無効化する。
 
 ### `template-placeholders-renamed`
 
-**Expectation:** template 由来の仮の名前、ID、URL を product 固有の値に置き換える。
+**期待される状態:** テンプレート由来の仮の名前、ID、URL を製品固有の値に置き換える。
 
-**Reason:** これは、product metadata に template identity が残った setup failure が実際に観測されたための check です。仮の company name、plugin ID、plugin name、AU code、repository URL が残ると、host の scan cache、plugin menu、AU registration、log、support diagnostics に誤った product identity が出ます。この rule は template repository 自体では skipped されます。
+**理由:** これは、製品 metadata にテンプレートの識別情報が残るセットアップ失敗が実際に観測されたためのチェックです。仮の company name、plugin ID、plugin name、AU code、repository URL が残ると、ホストの scan cache、plugin menu、AU registration、log、support diagnostics に誤った製品識別情報が出ます。このルールはテンプレートリポジトリ自体では skipped されます。
 
-**Error condition:** manifest metadata に `Your Company`、`com.your-company`、`WRAC Gain`、`wrac_gain_plugin`、`WtGn`、template repository URL などの template placeholder が残っている。
+**エラー条件:** manifest metadata に `Your Company`、`com.your-company`、`WRAC Gain`、`wrac_gain_plugin`、`WtGn`、テンプレートリポジトリ URL などの placeholder が残っている。
 
-**Fix:** template 由来の metadata を product 固有の metadata に置き換える。template/example repository として意図的に残す場合は、reason を書いて rule を disable する。
+**修正方法:** テンプレート由来の metadata を製品固有の metadata に置き換える。テンプレートまたは example repository として意図的に残す場合は、reason を書いてルールを無効化する。
