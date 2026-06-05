@@ -59,10 +59,19 @@ VST3 / AU、開発用 standalone app、または VST3 / AU の検証を行う場
 company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
 bundle_name = "My Plugin"
+bundle_identifier = "com.your-company.my-plugin"
+homepage_url = "https://example.com/my-plugin"
+manual_url = "https://example.com/my-plugin/manual"
+support_url = "https://example.com/support"
+description = "My plugin description"
+copyright = "Copyright 2026 Your Company"
 
 [[package.metadata.wrac.plugins]]
 plugin_id = "com.your-company.my-plugin"
 plugin_name = "My Plugin"
+clap_features = ["audio-effect", "utility", "stereo"]
+vst3_subcategories = "Fx|Tools"
+vst3_component_id = "ffff664c-b963-53e6-87cc-2a7ceb29674b"
 standalone_name = "My Plugin Standalone"
 auv2_type = "aufx"
 auv2_subtype = "MyPl"
@@ -70,6 +79,9 @@ auv2_subtype = "MyPl"
 
 > **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
 > AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
+> `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
+> `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
+> `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
 
 ### 3. 残りの識別子を一括置換
 

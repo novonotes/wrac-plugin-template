@@ -110,6 +110,16 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
             four_ascii_array_literal(&plugin.auv2_subtype)
         ));
         rust.push_str("        }),\n");
+        rust.push_str("        vst3: Some(Vst3Descriptor {\n");
+        rust.push_str(&format!(
+            "            subcategories: {:?},\n",
+            plugin.vst3_subcategories
+        ));
+        rust.push_str(&format!(
+            "            component_id: {},\n",
+            uuid_array_literal(&plugin.vst3_component_id)?
+        ));
+        rust.push_str("        }),\n");
         rust.push_str("    },\n");
     }
     rust.push_str("];\n");
@@ -210,6 +220,8 @@ struct WracPluginMetadata {
     plugin_id: String,
     plugin_name: String,
     clap_features: Vec<String>,
+    vst3_subcategories: String,
+    vst3_component_id: String,
     standalone_name: String,
     auv2_type: String,
     auv2_subtype: String,
@@ -255,6 +267,11 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         for feature in &plugin.clap_features {
             plugin_feature_literal(feature)?;
         }
+        validate_required(
+            "package.metadata.wrac.plugins.vst3_subcategories",
+            &plugin.vst3_subcategories,
+        )?;
+        uuid_array_literal(&plugin.vst3_component_id)?;
         validate_required(
             "package.metadata.wrac.plugins.standalone_name",
             &plugin.standalone_name,
@@ -327,6 +344,27 @@ fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
             format!("package.metadata.wrac.{key} must be exactly 4 ASCII bytes"),
         ))
     }
+}
+
+fn uuid_array_literal(value: &str) -> io::Result<String> {
+    let hex = value.replace('-', "");
+    if hex.len() != 32 || !hex.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("package.metadata.wrac.plugins.vst3_component_id must be a UUID: {value}"),
+        ));
+    }
+    let mut bytes = [0_u8; 16];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&hex[start..start + 2], 16).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("package.metadata.wrac.plugins.vst3_component_id must be a UUID: {error}"),
+            )
+        })?;
+    }
+    Ok(format!("{bytes:?}"))
 }
 
 fn validate_unique<'a>(key: &str, value: &'a str, seen: &mut HashSet<&'a str>) -> io::Result<()> {

@@ -40,6 +40,8 @@ pub(crate) struct PluginProductMetadata {
     pub(crate) plugin_id: String,
     pub(crate) plugin_name: String,
     pub(crate) clap_features: Vec<String>,
+    pub(crate) vst3_subcategories: String,
+    pub(crate) vst3_component_id: String,
     pub(crate) standalone_name: String,
     pub(crate) auv2_type: String,
     pub(crate) auv2_subtype: String,
@@ -132,6 +134,14 @@ impl PluginMetadata {
                 validate_clap_feature(feature)?;
             }
             validate_required(
+                "package.metadata.wrac.plugins.vst3_subcategories",
+                &plugin.vst3_subcategories,
+            )?;
+            validate_uuid(
+                "package.metadata.wrac.plugins.vst3_component_id",
+                &plugin.vst3_component_id,
+            )?;
+            validate_required(
                 "package.metadata.wrac.plugins.standalone_name",
                 &plugin.standalone_name,
             )?;
@@ -198,6 +208,15 @@ fn validate_four_ascii(key: &str, value: &str) -> Result<()> {
         Ok(())
     } else {
         Err(format!("package.metadata.wrac.{key} must be exactly 4 ASCII bytes").into())
+    }
+}
+
+fn validate_uuid(label: &str, value: &str) -> Result<()> {
+    let hex = value.replace('-', "");
+    if hex.len() == 32 && hex.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        Ok(())
+    } else {
+        Err(format!("{label} must be a UUID").into())
     }
 }
 

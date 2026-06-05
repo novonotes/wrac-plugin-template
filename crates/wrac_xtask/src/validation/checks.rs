@@ -350,6 +350,22 @@ fn template_placeholder_violations(
             &plugin.auv2_subtype,
             "WtGn",
         );
+        check_template_placeholder(
+            &mut violations,
+            &subject,
+            location,
+            "package.metadata.wrac.plugins.vst3_component_id",
+            &plugin.vst3_component_id,
+            "822011ca-37ec-5cef-92d7-ec7e67207195",
+        );
+        check_template_placeholder(
+            &mut violations,
+            &subject,
+            location,
+            "package.metadata.wrac.plugins.vst3_component_id",
+            &plugin.vst3_component_id,
+            "ffff664c-b963-53e6-87cc-2a7ceb29674b",
+        );
     }
     violations
 }
@@ -555,6 +571,8 @@ mod tests {
                     "utility".to_string(),
                     "stereo".to_string(),
                 ],
+                vst3_subcategories: "Fx|Tools".to_string(),
+                vst3_component_id: "5c65bb45-6f84-527b-915a-a51a30ea5854".to_string(),
                 standalone_name: "Test Plugin Standalone".to_string(),
                 auv2_type: "aufx".to_string(),
                 auv2_subtype: "TstP".to_string(),

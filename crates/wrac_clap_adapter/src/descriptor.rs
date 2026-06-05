@@ -20,6 +20,8 @@ use clap_sys::plugin_features::{
 };
 use clap_sys::version::CLAP_VERSION;
 
+use crate::factory::ClapPluginInfoAsVst3;
+
 #[derive(Debug, Clone, Copy)]
 pub struct PluginDescriptor {
     pub id: &'static str,
@@ -32,6 +34,7 @@ pub struct PluginDescriptor {
     pub description: &'static str,
     pub features: &'static [PluginFeature],
     pub auv2: Option<Auv2Descriptor>,
+    pub vst3: Option<Vst3Descriptor>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,6 +134,14 @@ pub struct Auv2Descriptor {
     pub plugin_subtype: [u8; 4],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Vst3Descriptor {
+    /// VST3 PClassInfo2 subCategories string, such as `Fx|Tools`.
+    pub subcategories: &'static str,
+    /// Stable VST3 class ID. Changing this after release breaks host project recall.
+    pub component_id: [u8; 16],
+}
+
 // `clap_plugin_descriptor` holds only C string pointers, so the owners of the CString
 // and feature pointer arrays are placed in the same storage to keep their lifetimes
 // aligned with the descriptor pointer.
@@ -147,6 +158,11 @@ pub(crate) struct ClapDescriptorStorage {
     _feature_ptrs: Vec<*const c_char>,
     auv2_manufacturer_code: Option<CString>,
     auv2_manufacturer_name: Option<CString>,
+    // `vst3_info` exposes raw pointers to these owners through clap-wrapper's
+    // factory extension; keep them in the same storage as the descriptor.
+    _vst3_subcategories: Option<CString>,
+    _vst3_component_id: Option<Box<[u8; 16]>>,
+    vst3_info: Option<ClapPluginInfoAsVst3>,
     clap_descriptor: clap_plugin_descriptor,
 }
 
@@ -178,6 +194,18 @@ impl ClapDescriptorStorage {
             .auv2
             .map(|auv2| CString::new(auv2.manufacturer_code).expect("four char code"));
         let auv2_manufacturer_name = descriptor.auv2.map(|auv2| cstring(auv2.manufacturer_name));
+        let vst3_subcategories = descriptor.vst3.map(|vst3| cstring(vst3.subcategories));
+        let vst3_component_id = descriptor.vst3.map(|vst3| Box::new(vst3.component_id));
+        let vst3_info = descriptor.vst3.map(|_| ClapPluginInfoAsVst3 {
+            vendor: vendor.as_ptr(),
+            component_id: vst3_component_id
+                .as_deref()
+                .map_or(ptr::null(), |value| value as *const [u8; 16]),
+            features: vst3_subcategories
+                .as_ref()
+                .map(|value| value.as_ptr())
+                .unwrap_or(ptr::null()),
+        });
 
         let clap_descriptor = clap_plugin_descriptor {
             clap_version: CLAP_VERSION,
@@ -205,12 +233,23 @@ impl ClapDescriptorStorage {
             _feature_ptrs: feature_ptrs,
             auv2_manufacturer_code,
             auv2_manufacturer_name,
+            _vst3_subcategories: vst3_subcategories,
+            _vst3_component_id: vst3_component_id,
+            vst3_info,
             clap_descriptor,
         }
     }
 
     pub(crate) fn clap_descriptor(&self) -> *const clap_plugin_descriptor {
         &self.clap_descriptor
+    }
+
+    pub(crate) fn vendor_ptr(&self) -> *const c_char {
+        self.clap_descriptor.vendor
+    }
+
+    pub(crate) fn url_ptr(&self) -> *const c_char {
+        self.clap_descriptor.url
     }
 
     pub(crate) fn auv2_manufacturer_code_ptr(&self) -> Option<*const c_char> {
@@ -223,6 +262,12 @@ impl ClapDescriptorStorage {
         self.auv2_manufacturer_name
             .as_ref()
             .map(|value| value.as_ptr())
+    }
+
+    pub(crate) fn vst3_info_ptr(&self) -> Option<*const ClapPluginInfoAsVst3> {
+        self.vst3_info
+            .as_ref()
+            .map(|value| value as *const ClapPluginInfoAsVst3)
     }
 
     pub(crate) fn descriptor(&self) -> PluginDescriptor {

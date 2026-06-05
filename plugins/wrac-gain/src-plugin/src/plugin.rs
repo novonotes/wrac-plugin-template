@@ -29,7 +29,7 @@ use wrac_clap_adapter::{
     ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
     PluginConfigurableAudioPortsExtension, PluginCore, PluginCoreContext, PluginDescriptor,
     PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension, PluginParamsExtension,
-    PluginResult, PluginStateExtension, Processor,
+    PluginResult, PluginStateExtension, Processor, Vst3Descriptor,
 };
 use wrac_wxp_gui::WxpGuiController;
 
