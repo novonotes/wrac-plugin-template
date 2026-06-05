@@ -93,6 +93,9 @@ cargo xtask validate
 cargo xtask install
 ```
 
+`cargo xtask validate` は外部フォーマット validator の前に WRAC の host compatibility rule を実行します。
+rule 一覧と disable 形式は [Validation Rules](docs/validation.md) を参照してください。
+
 Standalone app をビルドして起動できます:
 
 ```bash
