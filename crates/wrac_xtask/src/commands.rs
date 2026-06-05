@@ -989,13 +989,28 @@ fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
     // validator without committing Avid binaries to the template repository.
     remove_if_exists(&extracted_root)?;
     fs::create_dir_all(&extracted_root)?;
-    run(Command::new("tar")
-        .arg("-xf")
-        .arg(&archive)
-        .arg("--strip-components=1")
-        .arg("-C")
-        .arg(&extracted_root)
-        .current_dir(&ctx.root))?;
+    if archive
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+    {
+        // Windows validator downloads are zip archives. GitHub-hosted Windows runners
+        // provide 7-Zip, and using it here avoids relying on tar implementations that
+        // only support tar streams.
+        run(Command::new("7z")
+            .arg("x")
+            .arg(&archive)
+            .arg(format!("-o{}", extracted_root.display()))
+            .arg("-y")
+            .current_dir(&ctx.root))?;
+    } else {
+        run(Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("--strip-components=1")
+            .arg("-C")
+            .arg(&extracted_root)
+            .current_dir(&ctx.root))?;
+    }
     Ok(extracted_root)
 }
 
@@ -1022,6 +1037,13 @@ fn aax_validator_dsh_archive() -> Result<PathBuf> {
 fn aax_validator_dsh_executable(root: &Path, platform: Platform) -> Result<PathBuf> {
     let executable = executable_name("dsh", platform);
     for candidate in [
+        // Zip extraction keeps the archive's top-level DigiShell directory. Include the
+        // nested Windows paths so CI can consume Avid's downloaded archive directly.
+        root.join("DigiShell")
+            .join("AAXValidatorResources")
+            .join("Tools")
+            .join(&executable),
+        root.join("DigiShell").join(&executable),
         // Windows validator archives place the runnable validator dish and helper
         // executables under AAXValidatorResources/Tools. Prefer that directory so DSH's
         // relative resource lookup matches the layout shipped by Avid.

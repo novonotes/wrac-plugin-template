@@ -248,7 +248,11 @@ jobs:
         run: |
           rm -rf target/tools/aax-sdk
           mkdir -p target/tools/aax-sdk
-          tar -xf "$AAX_SDK_ARCHIVE" -C target/tools/aax-sdk
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z x "$AAX_SDK_ARCHIVE" -otarget/tools/aax-sdk -y
+          else
+            tar -xf "$AAX_SDK_ARCHIVE" -C target/tools/aax-sdk
+          fi
           sdk_root="$(find target/tools/aax-sdk -maxdepth 3 -type f -path '*/Interfaces/AAX.h' -print -quit)"
           if [[ -z "$sdk_root" ]]; then
             echo "::error::AAX SDK archive did not contain Interfaces/AAX.h."
