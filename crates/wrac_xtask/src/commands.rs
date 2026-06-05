@@ -1037,16 +1037,19 @@ fn aax_validator_dsh_archive() -> Result<PathBuf> {
 fn aax_validator_dsh_executable(root: &Path, platform: Platform) -> Result<PathBuf> {
     let executable = executable_name("dsh", platform);
     for candidate in [
+        // Avid's Windows validator ReadMe starts DigiShell from the package root.
+        // The Tools copy can launch but may not consume scripted stdin reliably on
+        // hosted CI, so prefer the root executable for Windows zip archives.
+        root.join("DigiShell").join(&executable),
         // Zip extraction keeps the archive's top-level DigiShell directory. Include the
         // nested Windows paths so CI can consume Avid's downloaded archive directly.
         root.join("DigiShell")
             .join("AAXValidatorResources")
             .join("Tools")
             .join(&executable),
-        root.join("DigiShell").join(&executable),
         // Windows validator archives place the runnable validator dish and helper
-        // executables under AAXValidatorResources/Tools. Prefer that directory so DSH's
-        // relative resource lookup matches the layout shipped by Avid.
+        // executables under AAXValidatorResources/Tools. Keep it as a fallback for
+        // extracted roots supplied by users.
         root.join("AAXValidatorResources")
             .join("Tools")
             .join(&executable),
