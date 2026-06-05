@@ -104,16 +104,39 @@ impl Context {
             .join(self.metadata.vst3_bundle_name())
     }
 
-    pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
-        self.plugins_dir(profile)
-            .join(self.metadata.au_bundle_name())
+    pub(crate) fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| {
+                self.plugins_dir(profile)
+                    .join(self.metadata.product_au_bundle_name(plugin))
+            })
+            .collect()
     }
 
     pub(crate) fn standalone_artifact(&self, profile: BuildProfile) -> PathBuf {
+        self.product_standalone_artifact(profile, self.metadata.primary_plugin())
+    }
+
+    pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
+        self.metadata
+            .plugins
+            .iter()
+            .map(|plugin| self.product_standalone_artifact(profile, plugin))
+            .collect()
+    }
+
+    fn product_standalone_artifact(
+        &self,
+        profile: BuildProfile,
+        plugin: &crate::metadata::PluginProductMetadata,
+    ) -> PathBuf {
+        let standalone_name = self.metadata.product_standalone_name(plugin);
         let filename = match self.platform {
-            Platform::Macos => format!("{}.app", self.metadata.standalone_name),
-            Platform::Windows => format!("{}.exe", self.metadata.standalone_name),
-            Platform::Linux => self.metadata.standalone_name.clone(),
+            Platform::Macos => format!("{standalone_name}.app"),
+            Platform::Windows => format!("{standalone_name}.exe"),
+            Platform::Linux => standalone_name,
         };
         self.standalone_dir(profile).join(filename)
     }

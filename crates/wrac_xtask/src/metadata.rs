@@ -71,8 +71,24 @@ impl PluginMetadata {
         format!("{}.vst3", self.bundle_name)
     }
 
-    pub(crate) fn au_bundle_name(&self) -> String {
-        format!("{}.component", self.bundle_name)
+    pub(crate) fn product_au_bundle_name(&self, plugin: &PluginProductMetadata) -> String {
+        format!("{}.component", self.product_output_name(plugin))
+    }
+
+    pub(crate) fn product_standalone_name(&self, plugin: &PluginProductMetadata) -> String {
+        if self.plugins.len() == 1 {
+            self.standalone_name.clone()
+        } else {
+            format!("{} Standalone", plugin.plugin_name)
+        }
+    }
+
+    pub(crate) fn product_output_name(&self, plugin: &PluginProductMetadata) -> String {
+        if self.plugins.len() == 1 {
+            self.bundle_name.clone()
+        } else {
+            plugin.plugin_name.clone()
+        }
     }
 
     pub(crate) fn primary_plugin(&self) -> &PluginProductMetadata {
