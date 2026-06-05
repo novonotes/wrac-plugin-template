@@ -88,7 +88,8 @@ Examples:
 
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
-  validate builds the selected plugin formats before running validators.
+  validate builds the selected plugin formats, runs WRAC host-compatibility rules, then runs external validators.
+  WRAC rule violations are errors. See docs/validation.md for rule IDs and disable metadata.
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
