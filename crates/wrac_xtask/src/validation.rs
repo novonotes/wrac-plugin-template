@@ -10,7 +10,6 @@ use clap_sys::ext::params::{
 };
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::host::clap_host;
-use clap_sys::plugin_features::CLAP_PLUGIN_FEATURE_AUDIO_EFFECT;
 use clap_sys::version::CLAP_VERSION;
 use libloading::Library;
 
@@ -23,13 +22,13 @@ use crate::{Result, targets::ValidateTarget as Target};
 const RULE_FENDER_SINGLE_KNOB: &str = "fender-studio-pro-generic-editor-single-knob";
 const RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX: &str = "luna-vst3-param-id-must-match-index";
 const RULE_BYPASS_PARAM_SHAPE: &str = "bypass-param-shape";
-const RULE_EFFECT_PLUGIN_WITHOUT_BYPASS: &str = "effect-plugin-without-bypass";
+const RULE_PLUGIN_REQUIRES_BYPASS: &str = "plugin-requires-bypass";
 
 const KNOWN_RULES: &[&str] = &[
     RULE_FENDER_SINGLE_KNOB,
     RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX,
     RULE_BYPASS_PARAM_SHAPE,
-    RULE_EFFECT_PLUGIN_WITHOUT_BYPASS,
+    RULE_PLUGIN_REQUIRES_BYPASS,
 ];
 
 pub(crate) fn validate_wrac_rules(
@@ -49,11 +48,11 @@ pub(crate) fn validate_wrac_rules(
     );
 
     if violations.is_empty() {
-        println!("WRAC validation rules: passed");
+        println!("WRAC production-readiness checks: passed");
         return Ok(());
     }
 
-    let mut message = String::from("WRAC validation failed:\n");
+    let mut message = String::from("WRAC production-readiness checks failed:\n");
     for violation in violations {
         let _ = writeln!(
             message,
@@ -70,9 +69,10 @@ pub(crate) fn validate_wrac_rules(
 fn validate_disabled_rules(validation: &ValidationMetadata) -> Result<()> {
     for rule_id in validation.disabled_rules.keys() {
         if !KNOWN_RULES.contains(&rule_id.as_str()) {
-            return Err(
-                format!("unknown WRAC validation rule in disabled_rules: {rule_id}").into(),
-            );
+            return Err(format!(
+                "unknown WRAC production-readiness rule in disabled_rules: {rule_id}"
+            )
+            .into());
         }
     }
     Ok(())
@@ -173,22 +173,16 @@ fn evaluate_rules(
     }
 
     if schema
-        .features
+        .params
         .iter()
-        .any(|feature| feature == CLAP_PLUGIN_FEATURE_AUDIO_EFFECT.to_string_lossy().as_ref())
-        && !schema.params.is_empty()
-        && schema
-            .params
-            .iter()
-            .all(|param| !param.flags.contains(CLAP_PARAM_IS_BYPASS))
+        .all(|param| !param.flags.contains(CLAP_PARAM_IS_BYPASS))
     {
         push_violation(
             &mut violations,
             validation,
             location,
-            RULE_EFFECT_PLUGIN_WITHOUT_BYPASS,
-            "Audio effect plugins with parameters should expose a host bypass parameter."
-                .to_string(),
+            RULE_PLUGIN_REQUIRES_BYPASS,
+            "Production plugins should expose a host bypass parameter.".to_string(),
             "Add one bypass parameter, or disable this rule with a documented reason.",
         );
     }
@@ -229,7 +223,6 @@ struct RuleViolation {
 
 #[derive(Debug)]
 struct PluginSchema {
-    features: Vec<String>,
     params: Vec<ParameterSchema>,
 }
 
@@ -272,7 +265,6 @@ unsafe fn read_clap_schema(
     }
 
     let descriptor = unsafe { first_plugin_descriptor(factory) }?;
-    let features = read_features(descriptor.features);
     let plugin_id = unsafe { CStr::from_ptr(descriptor.id) };
     let create_plugin =
         unsafe { (*factory).create_plugin }.ok_or("CLAP factory has no create_plugin callback")?;
@@ -294,14 +286,14 @@ unsafe fn read_clap_schema(
     }
 
     let params = unsafe { read_params(plugin) }?;
-    Ok(PluginSchema { features, params })
+    Ok(PluginSchema { params })
 }
 
 fn validator_clap_host() -> clap_host {
     clap_host {
         clap_version: CLAP_VERSION,
         host_data: ptr::null_mut(),
-        name: c"WRAC xtask validator".as_ptr(),
+        name: c"WRAC xtask checks".as_ptr(),
         vendor: c"WRAC".as_ptr(),
         url: c"https://github.com/novonotes/wrac-plugin-template".as_ptr(),
         version: c"0".as_ptr(),
@@ -340,27 +332,6 @@ unsafe fn first_plugin_descriptor(
         return Err("CLAP factory returned a null descriptor".into());
     }
     Ok(unsafe { &*descriptor })
-}
-
-fn read_features(features: *const *const std::ffi::c_char) -> Vec<String> {
-    if features.is_null() {
-        return Vec::new();
-    }
-    let mut result = Vec::new();
-    let mut index = 0usize;
-    loop {
-        let feature = unsafe { *features.add(index) };
-        if feature.is_null() {
-            break;
-        }
-        result.push(
-            unsafe { CStr::from_ptr(feature) }
-                .to_string_lossy()
-                .into_owned(),
-        );
-        index += 1;
-    }
-    result
 }
 
 unsafe fn read_params(
@@ -465,10 +436,7 @@ mod tests {
     use super::*;
 
     fn schema(params: Vec<ParameterSchema>) -> PluginSchema {
-        PluginSchema {
-            features: vec!["audio-effect".to_string()],
-            params,
-        }
+        PluginSchema { params }
     }
 
     fn param(id: u32, flags: u32) -> ParameterSchema {
@@ -573,9 +541,9 @@ mod tests {
     }
 
     #[test]
-    fn audio_effect_with_params_requires_bypass() {
+    fn plugin_requires_bypass() {
         let violations = evaluate_rules(
-            &schema(vec![param(0, 0), param(1, 0)]),
+            &schema(Vec::new()),
             &[ValidateTarget::Clap],
             &no_disabled_rules(),
             Path::new("Cargo.toml"),
@@ -583,7 +551,7 @@ mod tests {
         assert!(
             violations
                 .iter()
-                .any(|violation| violation.rule_id == RULE_EFFECT_PLUGIN_WITHOUT_BYPASS)
+                .any(|violation| violation.rule_id == RULE_PLUGIN_REQUIRES_BYPASS)
         );
     }
 }
