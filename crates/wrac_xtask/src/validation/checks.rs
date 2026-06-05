@@ -408,7 +408,7 @@ pub(crate) fn evaluate_source_checks(
     let mut results = Vec::new();
 
     // Only deterministic source checks live in the validate gate. Review-heavy source
-    // concerns stay in styleguide.md so this command remains a low-noise release gate.
+    // concerns stay in the code review checklist so this remains a low-noise release gate.
     push_check_result_for_subject(
         &mut results,
         validation,

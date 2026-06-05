@@ -11,9 +11,9 @@ This guide explains how to create a new wxp plugin starting from `wrac-plugin-te
 - Rust (latest stable)
 - Node.js (npm)
 
-### Building VST3 / AU / Standalone as well
+### Building VST3 / AU or the development standalone app
 
-To generate VST3 / AU / Standalone using clap-wrapper, the following are additionally required.
+To generate VST3 / AU using clap-wrapper, or to build the development standalone app, the following are additionally required.
 
 **macOS:**
 - Xcode or Xcode Command Line Tools
@@ -47,7 +47,7 @@ git submodule update --init --recursive
 ```
 
 Submodules are not needed if you are only building CLAP.
-The SDK submodules used by clap-wrapper are required when building VST3 / AU / Standalone, or when validating VST3 / AU.
+The SDK submodules used by clap-wrapper are required when building VST3 / AU, building the development standalone app, or validating VST3 / AU.
 
 ### 2. Configure Plugin Identity
 
@@ -140,8 +140,10 @@ The GUI supports hot reload — try editing the HTML files.
 
 ### 6. Debug
 
-Attaching a debugger to a DAW can be difficult, so we recommend debugging as a standalone application first.
+Attaching a debugger to a DAW can be difficult, so we recommend debugging with the development standalone app first.
 In VS Code, select the "Debug gain plugin standalone" configuration and run it.
+
+The standalone app is a lightweight development host, not a release plugin format or shipping artifact.
 
 > **Note:** Audio feedback is present in standalone mode. **Use headphones.**
 

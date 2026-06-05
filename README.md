@@ -32,16 +32,16 @@ It is also structured so it can be used as a template.
 
 - CLAP plugin implementation in Rust using [clap-sys](https://github.com/micahrj/clap-sys)
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
-- VST3 / AU / Standalone builds via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
+- VST3 / AU plugin builds and a development standalone app via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
 
 ## Quick Start
 
 Want to try the bundled WRAC Gain plugin before building your own? Follow the minimal steps below.
 With just Rust and Node.js you should be able to build CLAP.
-For the prerequisites to build VST3 / AU / Standalone, see the [Setup doc](docs/setup.md#prerequisites).
+For the prerequisites to build VST3 / AU or the development standalone app, see the [Setup doc](docs/setup.md#prerequisites).
 
 ```sh
-# Clone the template. Add --recursive if you plan to build VST3 / AU / Standalone.
+# Clone the template. Add --recursive if you plan to build VST3 / AU or the development standalone app.
 git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
@@ -75,21 +75,21 @@ Yes. This repository is licensed under the MIT License, which permits commercial
 
 ### What about AAX and AUv3 support?
 
-AAX and AUv3 support are ongoing. `clap-wrapper` already has AAX support on its `next` branch, and NovoNotes is using it for internal macOS AAX builds. AUv3 support also has open `clap-wrapper` pull requests, but NovoNotes has not verified it yet. This template still exposes only CLAP / VST3 / AU / Standalone as supported `xtask` targets.
+AAX and AUv3 support are ongoing. `clap-wrapper` already has AAX support on its `next` branch, and NovoNotes is using it for internal macOS AAX builds. AUv3 support also has open `clap-wrapper` pull requests, but NovoNotes has not verified it yet. This template currently supports CLAP / VST3 / AU as plugin formats, plus a development-only standalone app target.
 
 ## Build
 
 Common commands:
 
 ```bash
-# Debug build for all formats
+# Debug build for all plugin formats and the development standalone app
 cargo xtask build
-# Release build for all formats
+# Release build for all plugin formats and the development standalone app
 cargo xtask build --release
 # Debug build for VST3 only
 cargo xtask build --target=vst3
-# Release build for AU and Standalone
-cargo xtask build --target=au,standalone --release
+# Release build for AU
+cargo xtask build --target=au --release
 # Build and validate plugins
 cargo xtask validate
 # Build and install plugins
@@ -98,23 +98,25 @@ cargo xtask install
 
 `cargo xtask validate` runs WRAC production-readiness checks before external format validators.
 For the check list and disable format, see [Production-Readiness Checks](docs/production-readiness-checks.md).
-For source-level product implementation review, see [styleguide.md](styleguide.md).
+For source-level product implementation review, see [code-review-checklist.md](code-review-checklist.md).
 
-Build and launch the standalone app:
+Build and launch the development standalone app:
 
 ```bash
 cargo xtask launch
 ```
 
-Supported formats:
+The standalone app is a lightweight development and smoke-test host. It is not a release plugin format or a shipping artifact.
+
+Supported plugin formats:
 
 | OS | Supported formats |
 |----|---------------------------|
-| macOS | CLAP / VST3 / AU / Standalone |
-| Windows | CLAP / VST3 / Standalone |
-| Linux | CLAP / VST3 / Standalone |
+| macOS | CLAP / VST3 / AU |
+| Windows | CLAP / VST3 |
+| Linux | CLAP / VST3 |
 
-The `--target` option accepts `clap`, `vst3`, `au`, and `standalone` as comma-separated values.
+For build/debug commands, the `--target` option also accepts `standalone` as a development-only target.
 
 For detailed usage:
 
