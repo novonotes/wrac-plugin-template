@@ -3,12 +3,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 use clap_sys::entry::clap_plugin_entry;
-use clap_sys::ext::audio_ports::{
-    CLAP_EXT_AUDIO_PORTS, CLAP_PORT_MONO, CLAP_PORT_STEREO, clap_audio_port_info,
-    clap_plugin_audio_ports,
-};
 use clap_sys::ext::gui::CLAP_EXT_GUI;
-use clap_sys::ext::note_ports::{CLAP_EXT_NOTE_PORTS, clap_note_port_info, clap_plugin_note_ports};
 use clap_sys::ext::params::{CLAP_EXT_PARAMS, clap_param_info, clap_plugin_params};
 use clap_sys::ext::state::CLAP_EXT_STATE;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
@@ -27,31 +22,9 @@ pub(crate) struct PluginSchema {
     pub(crate) plugin_name: String,
     pub(crate) plugin_vendor: String,
     pub(crate) plugin_version: String,
-    pub(crate) plugin_features: Vec<String>,
     pub(crate) has_gui: bool,
     pub(crate) has_state: bool,
-    pub(crate) audio_inputs: Vec<AudioPortSchema>,
-    pub(crate) audio_outputs: Vec<AudioPortSchema>,
-    pub(crate) note_inputs: Vec<NotePortSchema>,
-    pub(crate) note_outputs: Vec<NotePortSchema>,
     pub(crate) params: Vec<ParameterSchema>,
-}
-
-#[derive(Debug)]
-pub(crate) struct AudioPortSchema {
-    pub(crate) id: u32,
-    pub(crate) name: String,
-    pub(crate) flags: u32,
-    pub(crate) channel_count: u32,
-    pub(crate) port_type: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct NotePortSchema {
-    pub(crate) id: u32,
-    pub(crate) name: String,
-    pub(crate) supported_dialects: u32,
-    pub(crate) preferred_dialect: u32,
 }
 
 #[derive(Debug)]
@@ -175,7 +148,6 @@ unsafe fn read_plugin_schema(
     let plugin_name = unsafe { descriptor_string(descriptor.name) };
     let plugin_vendor = unsafe { descriptor_string(descriptor.vendor) };
     let plugin_version = unsafe { descriptor_string(descriptor.version) };
-    let plugin_features = unsafe { descriptor_features(descriptor.features) };
     let host = validator_clap_host();
     let plugin = unsafe { create_plugin(factory, &host, plugin_id.as_ptr()) };
     if plugin.is_null() {
@@ -197,27 +169,18 @@ unsafe fn read_plugin_schema(
         }
     }
 
-    // Read extension presence and static port schemas from the created plugin instance.
-    // This catches adapter/wrapper drift that source-side manifest checks cannot see.
+    // Read only the host-visible schema used by the current release-policy checks.
+    // Broader CLAP capability validation is left to external format validators.
     let has_gui = unsafe { has_extension(plugin, CLAP_EXT_GUI.as_ptr()) }?;
     let has_state = unsafe { has_extension(plugin, CLAP_EXT_STATE.as_ptr()) }?;
-    let audio_inputs = unsafe { read_audio_ports(plugin, true) }?;
-    let audio_outputs = unsafe { read_audio_ports(plugin, false) }?;
-    let note_inputs = unsafe { read_note_ports(plugin, true) }?;
-    let note_outputs = unsafe { read_note_ports(plugin, false) }?;
     let params = unsafe { read_params(plugin) }?;
     Ok(PluginSchema {
         plugin_id: plugin_id.to_string_lossy().into_owned(),
         plugin_name,
         plugin_vendor,
         plugin_version,
-        plugin_features,
         has_gui,
         has_state,
-        audio_inputs,
-        audio_outputs,
-        note_inputs,
-        note_outputs,
         params,
     })
 }
@@ -229,27 +192,6 @@ unsafe fn descriptor_string(value: *const c_char) -> String {
         unsafe { CStr::from_ptr(value) }
             .to_string_lossy()
             .into_owned()
-    }
-}
-
-unsafe fn descriptor_features(features: *const *const c_char) -> Vec<String> {
-    let mut result = Vec::new();
-    if features.is_null() {
-        return result;
-    }
-
-    let mut offset = 0;
-    loop {
-        let feature = unsafe { *features.add(offset) };
-        if feature.is_null() {
-            return result;
-        }
-        result.push(
-            unsafe { CStr::from_ptr(feature) }
-                .to_string_lossy()
-                .into_owned(),
-        );
-        offset += 1;
     }
 }
 
@@ -305,99 +247,6 @@ unsafe fn read_params(
         });
     }
     Ok(result)
-}
-
-unsafe fn read_audio_ports(
-    plugin: *const clap_sys::plugin::clap_plugin,
-    is_input: bool,
-) -> Result<Vec<AudioPortSchema>> {
-    let ports = unsafe {
-        plugin_extension(plugin, CLAP_EXT_AUDIO_PORTS.as_ptr())? as *const clap_plugin_audio_ports
-    };
-    if ports.is_null() {
-        return Ok(Vec::new());
-    }
-
-    let count =
-        unsafe { (*ports).count }.ok_or("CLAP audio-ports extension has no count callback")?;
-    let get = unsafe { (*ports).get }.ok_or("CLAP audio-ports extension has no get callback")?;
-    let mut result = Vec::new();
-    for index in 0..unsafe { count(plugin, is_input) } {
-        let mut info = clap_audio_port_info {
-            id: 0,
-            name: [0; clap_sys::string_sizes::CLAP_NAME_SIZE],
-            flags: 0,
-            channel_count: 0,
-            port_type: ptr::null(),
-            in_place_pair: 0,
-        };
-        if !unsafe { get(plugin, index, is_input, &mut info) } {
-            return Err(format!(
-                "CLAP audio_ports.get failed for index {index} is_input={is_input}"
-            )
-            .into());
-        }
-        result.push(AudioPortSchema {
-            id: info.id,
-            name: c_char_array_to_string(&info.name),
-            flags: info.flags,
-            channel_count: info.channel_count,
-            port_type: audio_port_type_to_string(info.port_type),
-        });
-    }
-    Ok(result)
-}
-
-unsafe fn read_note_ports(
-    plugin: *const clap_sys::plugin::clap_plugin,
-    is_input: bool,
-) -> Result<Vec<NotePortSchema>> {
-    let ports = unsafe {
-        plugin_extension(plugin, CLAP_EXT_NOTE_PORTS.as_ptr())? as *const clap_plugin_note_ports
-    };
-    if ports.is_null() {
-        return Ok(Vec::new());
-    }
-
-    let count =
-        unsafe { (*ports).count }.ok_or("CLAP note-ports extension has no count callback")?;
-    let get = unsafe { (*ports).get }.ok_or("CLAP note-ports extension has no get callback")?;
-    let mut result = Vec::new();
-    for index in 0..unsafe { count(plugin, is_input) } {
-        let mut info = clap_note_port_info {
-            id: 0,
-            supported_dialects: 0,
-            preferred_dialect: 0,
-            name: [0; clap_sys::string_sizes::CLAP_NAME_SIZE],
-        };
-        if !unsafe { get(plugin, index, is_input, &mut info) } {
-            return Err(format!(
-                "CLAP note_ports.get failed for index {index} is_input={is_input}"
-            )
-            .into());
-        }
-        result.push(NotePortSchema {
-            id: info.id,
-            name: c_char_array_to_string(&info.name),
-            supported_dialects: info.supported_dialects,
-            preferred_dialect: info.preferred_dialect,
-        });
-    }
-    Ok(result)
-}
-
-fn audio_port_type_to_string(value: *const c_char) -> String {
-    if value.is_null() {
-        String::new()
-    } else if std::ptr::eq(value, CLAP_PORT_MONO.as_ptr()) {
-        "mono".to_string()
-    } else if std::ptr::eq(value, CLAP_PORT_STEREO.as_ptr()) {
-        "stereo".to_string()
-    } else {
-        unsafe { CStr::from_ptr(value) }
-            .to_string_lossy()
-            .into_owned()
-    }
 }
 
 fn c_char_array_to_string(buffer: &[std::ffi::c_char]) -> String {

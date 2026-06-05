@@ -23,12 +23,7 @@ pub(crate) fn validate_wrac_rules(
         metadata: &ctx.metadata,
         validation: &ctx.metadata.validation,
         location: &ctx.plugin_manifest(),
-        platform: ctx.platform,
         targets,
-        clap_bundle: &clap,
-        vst3_bundle: &ctx.vst3_bundle(profile),
-        au_bundle: &ctx.au_bundle(profile),
-        standalone_artifact: &ctx.standalone_artifact(profile),
     });
     results.extend(checks::evaluate_source_checks(
         &schemas,
@@ -36,7 +31,6 @@ pub(crate) fn validate_wrac_rules(
         &ctx.metadata.validation,
         &ctx.plugin_manifest(),
         &ctx.root,
-        &ctx.plugin_root,
         &ctx.gui_dir(),
     ));
     results.extend(
