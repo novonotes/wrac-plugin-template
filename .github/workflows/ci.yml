@@ -169,29 +169,25 @@ jobs:
       CARGO_HTTP_MULTIPLEXING: false
       AAX_SDK_ARCHIVE_URL: ${{ vars.AAX_SDK_ARCHIVE_URL || secrets.AAX_SDK_ARCHIVE_URL }}
       AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL || secrets.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL }}
-      AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL || secrets.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL }}
     needs:
       - rust-format
 
     # AAX uses private Avid downloads, so this job is intentionally kept out of
     # fork pull-request CI. Maintainers can run it with workflow_dispatch before
     # merging, and protected-branch pushes validate the same contract after merge.
+    # The Windows DSH package launches on GitHub-hosted runners but does not consume
+    # scripted stdin, so CI validates AAX on macOS where the validator is automatable.
     strategy:
       fail-fast: false
       matrix:
         os:
           - macos-latest
-          - windows-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Add msbuild to PATH
-        if: runner.os == 'Windows'
-        uses: microsoft/setup-msbuild@v2
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -212,17 +208,12 @@ jobs:
 
       - name: Require AAX archive URLs
         run: |
-          validator_url="$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            validator_url="$AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL"
-          fi
-
           if [[ -z "$AAX_SDK_ARCHIVE_URL" ]]; then
             echo "::error::AAX_SDK_ARCHIVE_URL is required for AAX validation."
             exit 1
           fi
-          if [[ -z "$validator_url" ]]; then
-            echo "::error::AAX validator archive URL is required for $RUNNER_OS."
+          if [[ -z "$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL" ]]; then
+            echo "::error::AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL is required for AAX validation."
             exit 1
           fi
 
@@ -230,15 +221,10 @@ jobs:
         run: |
           mkdir -p target/tools/aax-ci
 
-          validator_url="$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL"
           validator_archive="target/tools/aax-ci/aax-validator-dsh.tar.gz"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            validator_url="$AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL"
-            validator_archive="target/tools/aax-ci/aax-validator-dsh.zip"
-          fi
 
           curl --fail --location --retry 3 --output target/tools/aax-ci/aax-sdk.zip "$AAX_SDK_ARCHIVE_URL"
-          curl --fail --location --retry 3 --output "$validator_archive" "$validator_url"
+          curl --fail --location --retry 3 --output "$validator_archive" "$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL"
 
           {
             echo "AAX_SDK_ARCHIVE=target/tools/aax-ci/aax-sdk.zip"
@@ -249,11 +235,7 @@ jobs:
         run: |
           rm -rf target/tools/aax-sdk
           mkdir -p target/tools/aax-sdk
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            7z x "$AAX_SDK_ARCHIVE" -otarget/tools/aax-sdk -y
-          else
-            tar -xf "$AAX_SDK_ARCHIVE" -C target/tools/aax-sdk
-          fi
+          tar -xf "$AAX_SDK_ARCHIVE" -C target/tools/aax-sdk
           sdk_root="$(find target/tools/aax-sdk -maxdepth 3 -type f -path '*/Interfaces/AAX.h' -print -quit)"
           if [[ -z "$sdk_root" ]]; then
             echo "::error::AAX SDK archive did not contain Interfaces/AAX.h."
