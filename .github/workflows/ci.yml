@@ -94,19 +94,19 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            validate-targets: clap,vst3
+            validate-targets: clap,vst3,standalone
             verify: |
               test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
               test -x "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone"
           - os: windows-latest
-            validate-targets: clap,vst3
+            validate-targets: clap,vst3,standalone
             verify: |
               test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
               test -f "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone.exe"
           - os: macos-latest
-            validate-targets: clap,vst3,au
+            validate-targets: clap,vst3,au,standalone
             verify: |
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"

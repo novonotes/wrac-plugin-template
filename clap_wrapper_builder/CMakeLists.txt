@@ -259,9 +259,13 @@ if(APPLE)
     endif()
 
     if(TARGET ${PLUGIN_NAME_SAFE}_standalone)
+        # The standalone app has its own Info.plist template, so set the bundle version
+        # properties explicitly instead of relying on Xcode's default 1.0/1 values.
         set_target_properties(${PLUGIN_NAME_SAFE}_standalone PROPERTIES
             MACOSX_BUNDLE_GUI_IDENTIFIER "${STANDALONE_BUNDLE_ID}"
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${STANDALONE_BUNDLE_ID}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${BUNDLE_VERSION}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${BUNDLE_VERSION}"
             MACOSX_BUNDLE_INFO_PLIST "${STANDALONE_INFO_PLIST}"
         )
     endif()

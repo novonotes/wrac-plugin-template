@@ -603,7 +603,7 @@ fn validate_targets(
     targets: &[ValidateTarget],
 ) -> Result<()> {
     if targets.is_empty() {
-        println!("No CLAP/VST3/AU targets to validate.");
+        println!("No validation targets selected.");
         return Ok(());
     }
 
@@ -653,6 +653,11 @@ fn validate_targets(
                 ])
                 .current_dir(&ctx.root))?;
         }
+    }
+
+    if targets.contains(&ValidateTarget::Standalone) {
+        ensure_exists(&ctx.standalone_artifact(profile), "standalone artifact")?;
+        println!("Standalone validation: WRAC production-readiness checks only.");
     }
 
     Ok(())

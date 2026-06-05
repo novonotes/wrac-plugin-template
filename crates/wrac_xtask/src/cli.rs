@@ -72,12 +72,12 @@ Notes:
 
 const VALIDATE_AFTER_HELP: &str = "\
 Targets:
-  clap, vst3, au
+  clap, vst3, au, standalone
 
 Default targets by platform:
-  macOS:   clap, vst3, au
-  Windows: clap, vst3
-  Linux:   clap, vst3
+  macOS:   clap, vst3, au, standalone
+  Windows: clap, vst3, standalone
+  Linux:   clap, vst3, standalone
 
 Examples:
   cargo xtask validate
@@ -85,6 +85,7 @@ Examples:
   cargo xtask validate --all --release
   cargo xtask validate --all --target=clap
   cargo xtask validate -p wrac_gain_plugin --target=vst3
+  cargo xtask validate -p wrac_gain_plugin --target=standalone
 
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
@@ -93,6 +94,7 @@ Notes:
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
+  Standalone validation runs WRAC production-readiness checks only.
   AU validation fails if the same AU bundle exists under /Library/Audio/Plug-Ins/Components.";
 
 const LAUNCH_AFTER_HELP: &str = "\
@@ -134,7 +136,7 @@ pub(crate) enum Commands {
     )]
     Uninstall(UninstallArgs),
     #[command(
-        about = "Build and validate CLAP/VST3/AU artifacts.",
+        about = "Build and validate CLAP/VST3/AU/standalone artifacts.",
         after_help = VALIDATE_AFTER_HELP
     )]
     Validate(ValidateArgs),
@@ -285,7 +287,7 @@ pub(crate) struct ValidateArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to validate, comma-separated.",
-        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, and au. Defaults to every validation target supported by the current OS."
+        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, au, and standalone. Defaults to every validation target supported by the current OS."
     )]
     pub(crate) target: Vec<ValidateTarget>,
 }
