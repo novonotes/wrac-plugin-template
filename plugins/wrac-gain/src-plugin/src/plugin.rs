@@ -37,12 +37,6 @@ use crate::audio::WracGainAudioProcessor;
 use crate::gui::create_gui_integration;
 use crate::state::{ProjectStateStore, SharedState};
 
-const PLUGIN_FEATURES: &[PluginFeature] = &[
-    PluginFeature::AudioEffect,
-    PluginFeature::Utility,
-    PluginFeature::Stereo,
-];
-
 // Generated from [package.metadata.wrac] in src-plugin/Cargo.toml. The manifest is
 // the single source of truth for product identity across descriptors, GUI metadata,
 // wrapper arguments, AUv2 registration, WebView data dirs, and logs.

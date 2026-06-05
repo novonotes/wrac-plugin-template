@@ -265,6 +265,54 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
+        "package.metadata.wrac.auv2_manufacturer_code",
+        &metadata.auv2_manufacturer_code,
+        "YrCo",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
+        "package.metadata.wrac.bundle_identifier",
+        &metadata.bundle_identifier,
+        "com.your-company",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
+        "package.metadata.wrac.homepage_url",
+        &metadata.homepage_url,
+        "example.com",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
+        "package.metadata.wrac.manual_url",
+        &metadata.manual_url,
+        "example.com",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
+        "package.metadata.wrac.support_url",
+        &metadata.support_url,
+        "example.com",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
+        "package.metadata.wrac.copyright",
+        &metadata.copyright,
+        "Your Company",
+    );
+    check_template_placeholder(
+        &mut violations,
+        &subject,
+        location,
         "package.metadata.wrac.bundle_name",
         &metadata.bundle_name,
         "WRAC Gain",
@@ -493,9 +541,20 @@ mod tests {
             company_name: "Example".to_string(),
             auv2_manufacturer_code: "ExCo".to_string(),
             bundle_name: "Test Plugin".to_string(),
+            bundle_identifier: "com.example.test-plugin".to_string(),
+            homepage_url: "https://example.com/test-plugin".to_string(),
+            manual_url: "https://example.com/test-plugin/manual".to_string(),
+            support_url: "https://example.com/support".to_string(),
+            description: "Test plugin".to_string(),
+            copyright: "Copyright 2026 Example".to_string(),
             plugins: vec![PluginProductMetadata {
                 plugin_id: "com.example.test".to_string(),
                 plugin_name: "Test Plugin".to_string(),
+                clap_features: vec![
+                    "audio-effect".to_string(),
+                    "utility".to_string(),
+                    "stereo".to_string(),
+                ],
                 standalone_name: "Test Plugin Standalone".to_string(),
                 auv2_type: "aufx".to_string(),
                 auv2_subtype: "TstP".to_string(),

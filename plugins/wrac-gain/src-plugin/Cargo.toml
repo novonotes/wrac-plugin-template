@@ -8,15 +8,25 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 build = "build.rs"
 
-# WRAC metadata is the single source of truth for descriptors, GUI metadata,
-# bundle names, wrapper arguments, AUv2 registration, WebView data dirs, and logs.
+# WRAC metadata is the single source of truth for host-visible descriptors,
+# GUI About metadata, bundle names, wrapper arguments, AUv2 registration,
+# WebView data dirs, and logs. Set these explicitly before shipping; changing
+# public IDs or FourCC values after release can break host project recall.
 [package.metadata.wrac]
 # User-visible vendor name shown by hosts and the template GUI.
 company_name = "Your Company"
-# AUv2 manufacturer code. Use the same 4-byte ASCII code across your plugin catalog.
+# AUv2 manufacturer code. Use the same 4-byte ASCII code across your AUv2 plugin catalog.
 auv2_manufacturer_code = "YrCo"
-# User-visible bundle name.
+# Shared CLAP/VST3 bundle name. Product-specific AU bundles use plugin_name below.
 bundle_name = "WRAC Gain"
+# Reverse-DNS bundle identifier used by macOS bundles. Keep it stable.
+bundle_identifier = "com.your-company.wrac-gain"
+# Commercial metadata shown by hosts and About views where supported.
+homepage_url = "https://example.com/wrac-gain"
+manual_url = "https://example.com/wrac-gain/manual"
+support_url = "https://example.com/support"
+description = "Simple gain plugin"
+copyright = "Copyright 2026 Your Company"
 
 [package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "WRAC Gain is a minimal one-knob starter example. Products that support Fender Studio Pro should add a second real visible control instead of shipping this exception."
@@ -26,6 +36,8 @@ reason = "WRAC Gain is a minimal one-knob starter example. Products that support
 plugin_id = "com.your-company.wrac-gain"
 # User-visible plugin name shown by hosts and the template GUI.
 plugin_name = "WRAC Gain"
+# CLAP feature identifiers used in the generated CLAP descriptor.
+clap_features = ["audio-effect", "utility", "stereo"]
 # User-visible standalone app name.
 standalone_name = "WRAC Gain Standalone"
 # AUv2 component type. Audio effects usually use "aufx"; instruments usually use "aumu".

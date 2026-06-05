@@ -14,6 +14,12 @@ pub(crate) struct PluginMetadata {
     pub(crate) company_name: String,
     pub(crate) auv2_manufacturer_code: String,
     pub(crate) bundle_name: String,
+    pub(crate) bundle_identifier: String,
+    pub(crate) homepage_url: String,
+    pub(crate) manual_url: String,
+    pub(crate) support_url: String,
+    pub(crate) description: String,
+    pub(crate) copyright: String,
     pub(crate) plugins: Vec<PluginProductMetadata>,
     pub(crate) validation: ValidationMetadata,
 }
@@ -33,6 +39,7 @@ pub(crate) struct DisabledValidationRule {
 pub(crate) struct PluginProductMetadata {
     pub(crate) plugin_id: String,
     pub(crate) plugin_name: String,
+    pub(crate) clap_features: Vec<String>,
     pub(crate) standalone_name: String,
     pub(crate) auv2_type: String,
     pub(crate) auv2_subtype: String,
@@ -55,6 +62,12 @@ impl PluginMetadata {
             company_name: wrac.company_name,
             auv2_manufacturer_code: wrac.auv2_manufacturer_code,
             bundle_name: wrac.bundle_name,
+            bundle_identifier: wrac.bundle_identifier,
+            homepage_url: wrac.homepage_url,
+            manual_url: wrac.manual_url,
+            support_url: wrac.support_url,
+            description: wrac.description,
+            copyright: wrac.copyright,
             plugins: wrac.plugins,
             validation: wrac.validation.unwrap_or_default(),
         };
@@ -88,11 +101,20 @@ impl PluginMetadata {
         validate_required("package.name", &self.package_name)?;
         validate_required("package.version", &self.version)?;
         validate_required("package.metadata.wrac.company_name", &self.company_name)?;
+        validate_four_ascii("auv2_manufacturer_code", &self.auv2_manufacturer_code)?;
         validate_required("package.metadata.wrac.bundle_name", &self.bundle_name)?;
+        validate_required(
+            "package.metadata.wrac.bundle_identifier",
+            &self.bundle_identifier,
+        )?;
+        validate_required("package.metadata.wrac.homepage_url", &self.homepage_url)?;
+        validate_required("package.metadata.wrac.manual_url", &self.manual_url)?;
+        validate_required("package.metadata.wrac.support_url", &self.support_url)?;
+        validate_required("package.metadata.wrac.description", &self.description)?;
+        validate_required("package.metadata.wrac.copyright", &self.copyright)?;
         if self.plugins.is_empty() {
             return Err("package.metadata.wrac.plugins must contain at least one plugin".into());
         }
-        validate_four_ascii("auv2_manufacturer_code", &self.auv2_manufacturer_code)?;
         let mut plugin_ids = HashSet::new();
         let mut standalone_names = HashSet::new();
         let mut auv2_ids = HashSet::new();
@@ -102,6 +124,13 @@ impl PluginMetadata {
                 "package.metadata.wrac.plugins.plugin_name",
                 &plugin.plugin_name,
             )?;
+            if plugin.clap_features.is_empty() {
+                return Err("package.metadata.wrac.plugins.clap_features must not be empty".into());
+            }
+            for feature in &plugin.clap_features {
+                validate_required("package.metadata.wrac.plugins.clap_features", feature)?;
+                validate_clap_feature(feature)?;
+            }
             validate_required(
                 "package.metadata.wrac.plugins.standalone_name",
                 &plugin.standalone_name,
@@ -137,6 +166,22 @@ impl PluginMetadata {
             )?;
         }
         Ok(())
+    }
+}
+
+fn validate_clap_feature(feature: &str) -> Result<()> {
+    match feature {
+        "audio-effect" | "analyzer" | "ambisonic" | "chorus" | "compressor" | "de-esser"
+        | "delay" | "instrument" | "note-effect" | "note-detector" | "drum" | "drum-machine"
+        | "equalizer" | "expander" | "filter" | "flanger" | "frequency-shifter" | "gate"
+        | "glitch" | "granular" | "distortion" | "limiter" | "mastering" | "mixing" | "mono"
+        | "multi-effects" | "phaser" | "phase-vocoder" | "pitch-correction" | "pitch-shifter"
+        | "restoration" | "reverb" | "sampler" | "stereo" | "surround" | "synthesizer"
+        | "transient-shaper" | "tremolo" | "utility" => Ok(()),
+        _ => Err(format!(
+            "unsupported package.metadata.wrac.plugins.clap_features value: {feature}"
+        )
+        .into()),
     }
 }
 
@@ -180,6 +225,12 @@ struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
     bundle_name: String,
+    bundle_identifier: String,
+    homepage_url: String,
+    manual_url: String,
+    support_url: String,
+    description: String,
+    copyright: String,
     #[serde(default)]
     plugins: Vec<PluginProductMetadata>,
     validation: Option<ValidationMetadata>,
