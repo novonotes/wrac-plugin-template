@@ -27,7 +27,7 @@ pub use api::{
     PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus,
     Processor, State,
 };
-pub use descriptor::{Auv2Descriptor, PluginDescriptor, PluginFeature};
+pub use descriptor::{Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor};
 pub use entry::{EntryContext, PluginEntry, PluginFactory};
 pub use events::{
     InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent, NoteExpressionEvent,

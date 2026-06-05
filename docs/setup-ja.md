@@ -52,24 +52,13 @@ VST3 / AU、開発用 standalone app、または VST3 / AU の検証を行う場
 ### 2. プラグインの識別情報を設定する
 
 プラグインの識別情報は、プラグインパッケージの manifest に集約しています。初期状態では `plugins/wrac-gain/src-plugin/Cargo.toml` です。
-まず `[package.metadata.wrac]` を編集してください。
-
-```toml
-[package.metadata.wrac]
-company_name = "Your Company"
-auv2_manufacturer_code = "YrCo"
-bundle_name = "My Plugin"
-
-[[package.metadata.wrac.plugins]]
-plugin_id = "com.your-company.my-plugin"
-plugin_name = "My Plugin"
-standalone_name = "My Plugin Standalone"
-auv2_type = "aufx"
-auv2_subtype = "MyPl"
-```
+この guide に別の manifest sample を複製するのではなく、そこにあるコメント付きの `[package.metadata.wrac]` と `[[package.metadata.wrac.plugins]]` を直接編集してください。
 
 > **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
 > AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
+> `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
+> `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
+> `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
 
 ### 3. 残りの識別子を一括置換
 

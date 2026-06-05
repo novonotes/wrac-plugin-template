@@ -71,18 +71,33 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
         "pub(crate) const AUV2_MANUFACTURER_CODE: [u8; 4] = {};\n",
         four_ascii_array_literal(&metadata.auv2_manufacturer_code)
     ));
+    // CLAP hosts read feature strings during discovery. Generate them from the
+    // manifest so the production-readiness checks and runtime descriptor cannot
+    // drift after a product rename or capability change.
+    for (index, plugin) in metadata.plugins.iter().enumerate() {
+        rust.push_str(&format!(
+            "const PLUGIN_{index}_FEATURES: &[PluginFeature] = &{};\n",
+            plugin_feature_array_literal(&plugin.clap_features)?
+        ));
+    }
     rust.push_str("pub(crate) const PLUGIN_DESCRIPTORS: &[PluginDescriptor] = &[\n");
-    for plugin in &metadata.plugins {
+    for (index, plugin) in metadata.plugins.iter().enumerate() {
         rust.push_str("    PluginDescriptor {\n");
         rust.push_str(&format!("        id: {:?},\n", plugin.plugin_id));
         rust.push_str(&format!("        name: {:?},\n", plugin.plugin_name));
         rust.push_str("        vendor: COMPANY_NAME,\n");
-        rust.push_str("        url: \"\",\n");
-        rust.push_str("        manual_url: \"\",\n");
-        rust.push_str("        support_url: \"\",\n");
+        rust.push_str(&format!("        url: {:?},\n", metadata.homepage_url));
+        rust.push_str(&format!("        manual_url: {:?},\n", metadata.manual_url));
+        rust.push_str(&format!(
+            "        support_url: {:?},\n",
+            metadata.support_url
+        ));
         rust.push_str("        version: env!(\"CARGO_PKG_VERSION\"),\n");
-        rust.push_str("        description: \"Simple gain plugin\",\n");
-        rust.push_str("        features: PLUGIN_FEATURES,\n");
+        rust.push_str(&format!(
+            "        description: {:?},\n",
+            metadata.description
+        ));
+        rust.push_str(&format!("        features: PLUGIN_{index}_FEATURES,\n"));
         rust.push_str("        auv2: Some(Auv2Descriptor {\n");
         rust.push_str("            manufacturer_code: AUV2_MANUFACTURER_CODE,\n");
         rust.push_str("            manufacturer_name: COMPANY_NAME,\n");
@@ -95,6 +110,16 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
             four_ascii_array_literal(&plugin.auv2_subtype)
         ));
         rust.push_str("        }),\n");
+        rust.push_str("        vst3: Some(Vst3Descriptor {\n");
+        rust.push_str(&format!(
+            "            subcategories: {:?},\n",
+            plugin.vst3_subcategories
+        ));
+        rust.push_str(&format!(
+            "            component_id: {},\n",
+            uuid_array_literal(&plugin.vst3_component_id)?
+        ));
+        rust.push_str("        }),\n");
         rust.push_str("    },\n");
     }
     rust.push_str("];\n");
@@ -104,6 +129,62 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
 fn four_ascii_array_literal(value: &str) -> String {
     let bytes = value.as_bytes();
     format!("[{}, {}, {}, {}]", bytes[0], bytes[1], bytes[2], bytes[3])
+}
+
+fn plugin_feature_array_literal(features: &[String]) -> io::Result<String> {
+    let mut items = Vec::new();
+    for feature in features {
+        items.push(plugin_feature_literal(feature)?);
+    }
+    Ok(format!("[{}]", items.join(", ")))
+}
+
+fn plugin_feature_literal(feature: &str) -> io::Result<&'static str> {
+    match feature {
+        "audio-effect" => Ok("PluginFeature::AudioEffect"),
+        "analyzer" => Ok("PluginFeature::Analyzer"),
+        "ambisonic" => Ok("PluginFeature::Ambisonic"),
+        "chorus" => Ok("PluginFeature::Chorus"),
+        "compressor" => Ok("PluginFeature::Compressor"),
+        "de-esser" => Ok("PluginFeature::DeEsser"),
+        "delay" => Ok("PluginFeature::Delay"),
+        "instrument" => Ok("PluginFeature::Instrument"),
+        "note-effect" => Ok("PluginFeature::NoteEffect"),
+        "note-detector" => Ok("PluginFeature::NoteDetector"),
+        "drum" => Ok("PluginFeature::Drum"),
+        "drum-machine" => Ok("PluginFeature::DrumMachine"),
+        "equalizer" => Ok("PluginFeature::Equalizer"),
+        "expander" => Ok("PluginFeature::Expander"),
+        "filter" => Ok("PluginFeature::Filter"),
+        "flanger" => Ok("PluginFeature::Flanger"),
+        "frequency-shifter" => Ok("PluginFeature::FrequencyShifter"),
+        "gate" => Ok("PluginFeature::Gate"),
+        "glitch" => Ok("PluginFeature::Glitch"),
+        "granular" => Ok("PluginFeature::Granular"),
+        "distortion" => Ok("PluginFeature::Distortion"),
+        "limiter" => Ok("PluginFeature::Limiter"),
+        "mastering" => Ok("PluginFeature::Mastering"),
+        "mixing" => Ok("PluginFeature::Mixing"),
+        "mono" => Ok("PluginFeature::Mono"),
+        "multi-effects" => Ok("PluginFeature::MultiEffects"),
+        "phaser" => Ok("PluginFeature::Phaser"),
+        "phase-vocoder" => Ok("PluginFeature::PhaseVocoder"),
+        "pitch-correction" => Ok("PluginFeature::PitchCorrection"),
+        "pitch-shifter" => Ok("PluginFeature::PitchShifter"),
+        "restoration" => Ok("PluginFeature::Restoration"),
+        "reverb" => Ok("PluginFeature::Reverb"),
+        "sampler" => Ok("PluginFeature::Sampler"),
+        "stereo" => Ok("PluginFeature::Stereo"),
+        "surround" => Ok("PluginFeature::Surround"),
+        "synthesizer" => Ok("PluginFeature::Synthesizer"),
+        "transient-shaper" => Ok("PluginFeature::TransientShaper"),
+        "tremolo" => Ok("PluginFeature::Tremolo"),
+        "utility" => Ok("PluginFeature::Utility"),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported package.metadata.wrac.plugins.clap_features value: {feature}"),
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +206,12 @@ struct PackageMetadata {
 struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
+    bundle_identifier: String,
+    homepage_url: String,
+    manual_url: String,
+    support_url: String,
+    description: String,
+    copyright: String,
     plugins: Vec<WracPluginMetadata>,
 }
 
@@ -132,6 +219,9 @@ struct WracMetadata {
 struct WracPluginMetadata {
     plugin_id: String,
     plugin_name: String,
+    clap_features: Vec<String>,
+    vst3_subcategories: String,
+    vst3_component_id: String,
     standalone_name: String,
     auv2_type: String,
     auv2_subtype: String,
@@ -147,7 +237,17 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         .ok_or_else(missing_wrac_metadata)?
         .wrac
         .ok_or_else(missing_wrac_metadata)?;
+    validate_required("package.metadata.wrac.company_name", &metadata.company_name)?;
     validate_four_ascii("auv2_manufacturer_code", &metadata.auv2_manufacturer_code)?;
+    validate_required(
+        "package.metadata.wrac.bundle_identifier",
+        &metadata.bundle_identifier,
+    )?;
+    validate_required("package.metadata.wrac.homepage_url", &metadata.homepage_url)?;
+    validate_required("package.metadata.wrac.manual_url", &metadata.manual_url)?;
+    validate_required("package.metadata.wrac.support_url", &metadata.support_url)?;
+    validate_required("package.metadata.wrac.description", &metadata.description)?;
+    validate_required("package.metadata.wrac.copyright", &metadata.copyright)?;
     if metadata.plugins.is_empty() {
         return Err(missing_metadata("plugins"));
     }
@@ -160,6 +260,18 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
             "package.metadata.wrac.plugins.plugin_name",
             &plugin.plugin_name,
         )?;
+        validate_non_empty_list(
+            "package.metadata.wrac.plugins.clap_features",
+            &plugin.clap_features,
+        )?;
+        for feature in &plugin.clap_features {
+            plugin_feature_literal(feature)?;
+        }
+        validate_required(
+            "package.metadata.wrac.plugins.vst3_subcategories",
+            &plugin.vst3_subcategories,
+        )?;
+        uuid_array_literal(&plugin.vst3_component_id)?;
         validate_required(
             "package.metadata.wrac.plugins.standalone_name",
             &plugin.standalone_name,
@@ -183,6 +295,19 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         }
     }
     Ok(metadata)
+}
+
+fn validate_non_empty_list(key: &str, values: &[String]) -> io::Result<()> {
+    if values.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{key} must not be empty"),
+        ));
+    }
+    for value in values {
+        validate_required(key, value)?;
+    }
+    Ok(())
 }
 
 fn missing_metadata(key: &str) -> io::Error {
@@ -219,6 +344,27 @@ fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
             format!("package.metadata.wrac.{key} must be exactly 4 ASCII bytes"),
         ))
     }
+}
+
+fn uuid_array_literal(value: &str) -> io::Result<String> {
+    let hex = value.replace('-', "");
+    if hex.len() != 32 || !hex.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("package.metadata.wrac.plugins.vst3_component_id must be a UUID: {value}"),
+        ));
+    }
+    let mut bytes = [0_u8; 16];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&hex[start..start + 2], 16).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("package.metadata.wrac.plugins.vst3_component_id must be a UUID: {error}"),
+            )
+        })?;
+    }
+    Ok(format!("{bytes:?}"))
 }
 
 fn validate_unique<'a>(key: &str, value: &'a str, seen: &mut HashSet<&'a str>) -> io::Result<()> {

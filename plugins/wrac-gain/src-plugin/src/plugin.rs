@@ -29,19 +29,13 @@ use wrac_clap_adapter::{
     ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
     PluginConfigurableAudioPortsExtension, PluginCore, PluginCoreContext, PluginDescriptor,
     PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension, PluginParamsExtension,
-    PluginResult, PluginStateExtension, Processor,
+    PluginResult, PluginStateExtension, Processor, Vst3Descriptor,
 };
 use wrac_wxp_gui::WxpGuiController;
 
 use crate::audio::WracGainAudioProcessor;
 use crate::gui::create_gui_integration;
 use crate::state::{ProjectStateStore, SharedState};
-
-const PLUGIN_FEATURES: &[PluginFeature] = &[
-    PluginFeature::AudioEffect,
-    PluginFeature::Utility,
-    PluginFeature::Stereo,
-];
 
 // Generated from [package.metadata.wrac] in src-plugin/Cargo.toml. The manifest is
 // the single source of truth for product identity across descriptors, GUI metadata,

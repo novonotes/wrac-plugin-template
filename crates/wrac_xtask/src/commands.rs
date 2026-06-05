@@ -933,8 +933,12 @@ fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
 
 fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     let plugin_name = &metadata.bundle_name;
-    let plugin_id = &metadata.bundle_identity_plugin().plugin_id;
+    // A CLAP bundle has one CFBundleIdentifier even when the factory exposes
+    // multiple products. Keep macOS bundle identity separate from product IDs so
+    // adding another product does not silently change the installed bundle.
+    let bundle_identifier = &metadata.bundle_identifier;
     let version = &metadata.version;
+    let copyright = &metadata.copyright;
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -945,7 +949,7 @@ fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     <key>CFBundleIconFile</key>
     <string></string>
     <key>CFBundleIdentifier</key>
-    <string>{plugin_id}</string>
+    <string>{bundle_identifier}</string>
     <key>CFBundleName</key>
     <string>{plugin_name}</string>
     <key>CFBundleDisplayName</key>
@@ -959,7 +963,7 @@ fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     <key>CFBundleVersion</key>
     <string>{version}</string>
     <key>NSHumanReadableCopyright</key>
-    <string></string>
+    <string>{copyright}</string>
     <key>NSHighResolutionCapable</key>
     <true/>
   </dict>

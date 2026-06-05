@@ -50,8 +50,9 @@ use crate::entry::{
     increment_entry_init_count, reset_entry_init_count,
 };
 use crate::factory::{
-    Auv2FactoryState, ClapPluginFactoryAsAuv2, ClapPluginInfoAsAuv2, auv2_factory_ptr,
-    auv2_factory_state, clap_factory_state, factory_ptr,
+    Auv2FactoryState, ClapPluginFactoryAsAuv2, ClapPluginFactoryAsVst3, ClapPluginInfoAsAuv2,
+    ClapPluginInfoAsVst3, Vst3FactoryState, auv2_factory_ptr, auv2_factory_state,
+    clap_factory_state, factory_ptr, vst3_factory_ptr, vst3_factory_state,
 };
 use crate::host_gui::HostGuiResizeRequest;
 use crate::host_state::HostStateDirtyNotification;
@@ -67,6 +68,9 @@ use crate::{
 // separate AU manufacturer/subtype, it can collide with the generic wrapper identity
 // and cause auval to validate a different, older plugin instead.
 const CLAP_PLUGIN_FACTORY_INFO_AUV2: &CStr = c"clap.plugin-factory-info-as-auv2.draft0";
+// clap-wrapper can infer VST3 metadata from CLAP descriptors, but commercial products
+// need stable VST3 class IDs and explicit host browser categories across wrapper updates.
+const CLAP_PLUGIN_FACTORY_INFO_VST3: &CStr = c"clap.plugin-factory-info-as-vst3/0";
 
 /// Synchronization boundary between a CLAP instance and the Rust core.
 ///
@@ -415,9 +419,33 @@ pub(crate) unsafe extern "C" fn entry_get_factory(
                 .any(|descriptor| descriptor.descriptor().auv2.is_some())
         {
             auv2_factory_ptr(storage)
+        } else if factory_id == CLAP_PLUGIN_FACTORY_INFO_VST3
+            && storage
+                .descriptors
+                .iter()
+                .any(|descriptor| descriptor.descriptor().vst3.is_some())
+        {
+            vst3_factory_ptr(storage)
         } else {
             ptr::null()
         }
+    })
+}
+
+pub(crate) unsafe extern "C" fn vst3_get_info(
+    factory: *const ClapPluginFactoryAsVst3,
+    index: u32,
+) -> *const ClapPluginInfoAsVst3 {
+    ffi_ptr(|| {
+        let Some(Vst3FactoryState { registration, .. }) = vst3_factory_state(factory) else {
+            log::warn!("vst3.get_info: invalid factory pointer");
+            return ptr::null();
+        };
+        let Some(descriptor) = registration.storage().descriptors.get(index as usize) else {
+            log::warn!("vst3.get_info: descriptor not found index={index}");
+            return ptr::null();
+        };
+        descriptor.vst3_info_ptr().unwrap_or(ptr::null())
     })
 }
 
