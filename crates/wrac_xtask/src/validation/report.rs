@@ -27,6 +27,8 @@ pub(crate) fn print_check_results(results: &[CheckResult]) {
 }
 
 pub(crate) fn failed_violations(results: &[CheckResult]) -> Vec<&RuleViolation> {
+    // Reporting and process failure are intentionally separate: CI should display the full
+    // check matrix, while the command's non-zero exit is determined only by failed checks.
     results
         .iter()
         .flat_map(|result| match &result.status {

@@ -14,6 +14,8 @@ pub(crate) fn validate_wrac_rules(
 ) -> Result<()> {
     checks::validate_disabled_rules(&ctx.metadata.validation)?;
 
+    // Run these checks before external validators so release-policy failures are visible even
+    // when a format validator would also reject the artifact later.
     let clap = ctx.clap_bundle(profile);
     let schema = unsafe { clap_schema::read_clap_schema(ctx, profile, &clap)? };
     let results = checks::evaluate_checks(
@@ -23,6 +25,8 @@ pub(crate) fn validate_wrac_rules(
         &ctx.plugin_manifest(),
     );
 
+    // Print the full matrix first. CI logs need to show checks that passed, were disabled,
+    // or were skipped; the final error only contains checks that failed.
     report::print_check_results(&results);
     let violations = report::failed_violations(&results);
     if violations.is_empty() {

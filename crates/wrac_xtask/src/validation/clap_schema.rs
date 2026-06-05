@@ -34,6 +34,8 @@ pub(crate) unsafe fn read_clap_schema(
     profile: BuildProfile,
     clap_bundle: &Path,
 ) -> Result<PluginSchema> {
+    // The checks need the host-visible schema, so query the built CLAP through its public
+    // entry points instead of trusting source-side metadata that wrappers or adapters may alter.
     let library_path = clap_library_path(ctx, profile);
     let plugin_path = CString::new(clap_bundle.to_string_lossy().as_bytes())?;
     let library = unsafe { Library::new(&library_path) }?;
@@ -101,6 +103,8 @@ unsafe extern "C" fn validator_host_get_extension(
     _host: *const clap_host,
     _extension_id: *const c_char,
 ) -> *const c_void {
+    // Schema checks only need plugin-provided extensions. Returning no host extensions keeps
+    // this mini-host small and avoids accidentally depending on runtime host behavior.
     ptr::null()
 }
 

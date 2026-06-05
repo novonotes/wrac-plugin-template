@@ -57,6 +57,8 @@ pub(crate) fn evaluate_checks(
 
     let mut results = Vec::new();
 
+    // Keep target-inapplicable checks in the report as `skipped`. Without this, CI logs
+    // cannot distinguish "not relevant for this target" from "the check was never registered".
     if targets
         .iter()
         .any(|target| matches!(target, Target::Clap | Target::Vst3))
@@ -189,6 +191,8 @@ fn push_check_result(
     rule_id: &'static str,
     status: CheckStatus,
 ) {
+    // Disabled checks are still reported so reviewers can see that a release-policy check
+    // exists and was intentionally bypassed with a reason.
     if let Some(disabled) = validation.disabled_rules.get(rule_id) {
         results.push(CheckResult {
             rule_id,
