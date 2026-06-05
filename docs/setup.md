@@ -52,30 +52,7 @@ The SDK submodules used by clap-wrapper are required when building VST3 / AU, bu
 ### 2. Configure Plugin Identity
 
 Plugin identity is centralized in the plugin package manifest, initially `plugins/wrac-gain/src-plugin/Cargo.toml`.
-Edit `[package.metadata.wrac]` first.
-
-```toml
-[package.metadata.wrac]
-company_name = "Your Company"
-auv2_manufacturer_code = "YrCo"
-bundle_name = "My Plugin"
-bundle_identifier = "com.your-company.my-plugin"
-homepage_url = "https://example.com/my-plugin"
-manual_url = "https://example.com/my-plugin/manual"
-support_url = "https://example.com/support"
-description = "My plugin description"
-copyright = "Copyright 2026 Your Company"
-
-[[package.metadata.wrac.plugins]]
-plugin_id = "com.your-company.my-plugin"
-plugin_name = "My Plugin"
-clap_features = ["audio-effect", "utility", "stereo"]
-vst3_subcategories = "Fx|Tools"
-vst3_component_id = "ffff664c-b963-53e6-87cc-2a7ceb29674b"
-standalone_name = "My Plugin Standalone"
-auv2_type = "aufx"
-auv2_subtype = "MyPl"
-```
+Edit the commented `[package.metadata.wrac]` and `[[package.metadata.wrac.plugins]]` sections there instead of copying a separate manifest sample from this guide.
 
 > **Important:** The plugin ID must be globally unique. It cannot be changed once published.
 > AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
