@@ -1,63 +1,59 @@
 # Production-Readiness Checks
 
-`cargo xtask validate` builds the requested plugin formats, runs WRAC production-readiness checks, and then runs external format validators such as clap-validator, Steinberg's VST3 validator, and auval. WRAC check violations are errors and return a non-zero exit code.
+> 日本語版: [production-readiness-checks-ja.md](production-readiness-checks-ja.md)
 
-WRAC production-readiness checks are opinionated NovoNotes release-policy checks for commercial plugins, not format-spec validators. Keep this check set small. Do not add rules for problems that have not actually happened. A production-readiness rule is appropriate only when it prevents a real release, QA, host-compatibility, or support problem that has already been observed.
+Production-readiness checks are WRAC-specific checks run by `cargo xtask validate`. Violations are errors and return a non-zero exit code.
 
-The command logs every check as `pass`, `fail`, `disabled`, or `skipped` so CI logs show which release-policy checks were evaluated.
+These checks are opinionated NovoNotes release-policy checks for commercial plugins, not format-spec validators. Keep the rule list small. Add new rules only for observed host-compatibility or support problems, and only when preventing recurrence is difficult through other means.
 
-## Disabling Checks
+## Disabling Rules
 
-Checks can be disabled by rule ID in the plugin crate manifest. Every disabled rule must include a non-empty `reason`.
+Rules can be disabled by rule ID in the plugin crate manifest. Every disabled rule must include a non-empty `reason`.
 
 ```toml
 [package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "This product does not support Fender Studio Pro generic editor workflows."
 ```
 
-Unknown rule IDs and empty reasons are errors.
+## Adding Rules
 
-Disable checks only for intentional product decisions. If the plugin is expected to satisfy the release policy behind a check, fix the plugin instead.
+When adding a rule, complete the following:
 
-## Adding Checks
-
-New checks are release-policy changes, not just code changes. Before opening a PR, the author must complete the following:
-
-- **Justification:** Confirm that the check covers a problem that has actually happened. Do not add checks for hypothetical risks.
-- **Avoid duplication:** Do not duplicate checks that are already covered by other validators. Add a new check only when the observed problem reproduces but `cargo xtask validate` still passes.
+- **Justification:** Confirm that the rule covers a problem that has actually happened. Do not add rules for hypothetical risks.
+- **Avoid duplication:** Do not duplicate problems that are already detected by other validators. Add a new rule only when the observed problem reproduces and `cargo xtask validate` still passes.
 - **Document:** Add the expectation, reason, error condition, and fix to this document's Check List.
-- **Unit Test:** Cover `pass`, `fail`, `disabled`, `skipped`, and edge cases.
 - **Manually Validate (Mandatory):** Unit tests alone are insufficient. You must:
   - Intentionally break a real template plugin and verify `cargo xtask validate` fails with the expected rule ID and message.
-  - Restore the plugin and confirm the command now logs the check as `pass`, `disabled`, or `skipped`.
+  - Disable the rule and verify validation passes. If it does not pass, another validator is likely detecting the same issue, so do not add the rule.
+  - Restore the plugin, enable the rule, and verify the check passes.
 
 ## Check List
 
 ### `fender-studio-pro-generic-editor-single-knob`
 
-**Expectation:** Production plugins that support Fender Studio Pro generic editor workflows expose either no visible non-bypass parameters or at least two visible non-bypass parameters.
+**Expectation:** Products that support the Fender Studio Pro generic editor expose either zero non-bypass parameters or at least two non-bypass parameters.
 
-**Reason:** Fender Studio Pro 8.0.3 generic editors fail to render knobs for this shape. Bypass parameters do not count as knobs for this rule.
+**Reason:** Fender Studio Pro 8.0.3 generic editors render no knobs when the parameter shape results in exactly one knob. Users experience this as a plugin bug, so products should avoid it. Bypass parameters are not shown as knobs, so they do not count for this rule.
 
-**Error condition:** When CLAP or VST3 validation is requested, the plugin exposes exactly one visible, non-bypass parameter.
+**Error condition:** When CLAP or VST3 validation is requested, the plugin exposes exactly one non-bypass parameter.
 
-**Fix:** Expose zero or at least two visible non-bypass parameters, or disable the rule with a documented reason when the product intentionally does not support Fender Studio Pro generic editor workflows.
+**Fix:** Expose either zero non-bypass parameters or at least two non-bypass parameters.
 
 ### `luna-vst3-param-id-must-match-index`
 
-**Expectation:** VST3-compatible plugins keep public parameter IDs equal to their parameter-list indices.
+**Expectation:** Products that support LUNA VST3 keep parameter IDs equal to their parameter-list indices.
 
 **Reason:** LUNA 2.0.3.4381 VST3 automation writes can fail when a VST3 parameter ID differs from its parameter-list index.
 
-**Error condition:** When VST3 validation is requested, a public parameter ID differs from its parameter-list index.
+**Error condition:** When validation includes the VST3 target, a public parameter ID differs from its parameter-list index.
 
-**Fix:** Reorder parameters or adjust public parameter IDs so each public parameter ID matches its index.
+**Fix:** Before release, reorder parameters or adjust parameter IDs so each parameter ID matches its index. After release, do not change parameter IDs; disabling this rule is recommended instead.
 
 ### `bypass-param-shape`
 
 **Expectation:** Plugins expose at most one bypass parameter, and that parameter behaves as a boolean host bypass control.
 
-**Reason:** Host bypass UI, bypass automation, generic editors, and control surfaces are most predictable when bypass is exposed as one boolean-shaped parameter.
+**Reason:** Host applications may provide dedicated UI for bypass parameters. To make that UI behave as users expect, the bypass parameter should satisfy this parameter shape.
 
 **Error conditions:**
 
@@ -70,20 +66,20 @@ New checks are release-policy changes, not just code changes. Before opening a P
 
 ### `plugin-requires-bypass`
 
-**Expectation:** Production plugins expose one valid bypass parameter.
+**Expectation:** Plugins expose one bypass parameter.
 
-**Reason:** Host bypass UI, bypass automation, generic editors, and control surfaces commonly expect plugins to provide a host-visible bypass control. A valid bypass parameter has low implementation cost and reduces host-specific compatibility risk across plugin categories.
+**Reason:** Bypass parameters have low implementation cost and reduce host-specific compatibility risk across plugin categories.
 
 **Error condition:** The plugin does not expose a bypass parameter.
 
-**Fix:** Add one bypass parameter, or disable the rule with a documented reason when the product intentionally does not provide host bypass.
+**Fix:** Add one bypass parameter. If the product intentionally does not provide bypass, disable the rule with a documented reason.
 
 ### `template-placeholders-renamed`
 
 **Expectation:** Template placeholder names, IDs, and URLs are replaced with product-specific values.
 
-**Reason:** This covers an observed setup failure where template identity remained in product metadata. Placeholder company names, plugin IDs, plugin names, AU codes, and repository URLs can leak into host scan caches, plugin menus, AU registration, logs, and support diagnostics. This rule is skipped in the template repository itself.
+**Reason:** Template-derived values must be replaced manually when creating a product, so they are easy to miss.
 
-**Error condition:** Manifest metadata still contains template placeholders such as `Your Company`, `com.your-company`, `WRAC Gain`, `wrac_gain_plugin`, `WtGn`, or the template repository URL.
+**Error condition:** Manifest metadata still contains template placeholders such as `Your Company`, `com.your-company`, `WRAC Gain`, `wrac_gain_plugin`, `WtGn`, or the template repository URL. This rule is skipped in the template repository itself.
 
 **Fix:** Replace template metadata with product-specific metadata, or disable the rule with a documented reason when the repository is intentionally a template or example.
