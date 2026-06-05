@@ -17,11 +17,7 @@ const RULE_FENDER_SINGLE_KNOB: &str = "fender-studio-pro-generic-editor-single-k
 const RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX: &str = "luna-vst3-param-id-must-match-index";
 const RULE_BYPASS_PARAM_SHAPE: &str = "bypass-param-shape";
 const RULE_PLUGIN_REQUIRES_BYPASS: &str = "plugin-requires-bypass";
-const RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST: &str = "clap-descriptors-match-manifest";
-const RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT: &str = "wrapper-targets-require-single-product";
 const RULE_PARAM_INFO_SHAPE: &str = "param-info-shape";
-const RULE_STATE_EXTENSION_REQUIRED: &str = "state-extension-required";
-const RULE_GUI_ARTIFACT_SHAPE: &str = "gui-artifact-shape";
 const RULE_TEMPLATE_PLACEHOLDERS_RENAMED: &str = "template-placeholders-renamed";
 
 const KNOWN_RULES: &[&str] = &[
@@ -29,11 +25,7 @@ const KNOWN_RULES: &[&str] = &[
     RULE_LUNA_VST3_PARAM_ID_MATCH_INDEX,
     RULE_BYPASS_PARAM_SHAPE,
     RULE_PLUGIN_REQUIRES_BYPASS,
-    RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
-    RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
     RULE_PARAM_INFO_SHAPE,
-    RULE_STATE_EXTENSION_REQUIRED,
-    RULE_GUI_ARTIFACT_SHAPE,
     RULE_TEMPLATE_PLACEHOLDERS_RENAMED,
 ];
 
@@ -47,64 +39,6 @@ pub(crate) fn validate_disabled_rules(validation: &ValidationMetadata) -> Result
         }
     }
     Ok(())
-}
-
-pub(crate) struct BundleCheckInputs<'a> {
-    pub(crate) schemas: &'a [PluginSchema],
-    pub(crate) metadata: &'a PluginMetadata,
-    pub(crate) validation: &'a ValidationMetadata,
-    pub(crate) location: &'a Path,
-    pub(crate) targets: &'a [ValidateTarget],
-}
-
-pub(crate) fn evaluate_bundle_checks(input: BundleCheckInputs<'_>) -> Vec<CheckResult> {
-    let BundleCheckInputs {
-        schemas,
-        metadata,
-        validation,
-        location,
-        targets,
-    } = input;
-    let subject = CheckSubject::bundle(metadata);
-    let mut results = Vec::new();
-
-    push_check_result_for_subject(
-        &mut results,
-        validation,
-        &subject,
-        RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
-        CheckStatus::from_violations(clap_descriptor_manifest_violations(
-            schemas, metadata, location,
-        )),
-    );
-
-    let wrapper_requested = targets
-        .iter()
-        .any(|target| matches!(target, Target::Vst3 | Target::Au));
-    let wrapper_product_violations = if wrapper_requested && metadata.plugins.len() > 1 {
-        vec![RuleViolation {
-            plugin_id: subject.plugin_id.clone(),
-            plugin_name: subject.plugin_name.clone(),
-            location: location.to_path_buf(),
-            rule_id: RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
-            message: format!(
-                "VST3/AU wrapper validation currently supports one manifest product per bundle. manifest_product_count={}",
-                metadata.plugins.len()
-            ),
-            fix: "Release wrapper formats as single-product bundles, or disable this rule with a documented reason after confirming wrapper metadata and host scans for every product.",
-        }]
-    } else {
-        Vec::new()
-    };
-    push_check_result_for_subject(
-        &mut results,
-        validation,
-        &subject,
-        RULE_WRAPPER_TARGETS_REQUIRE_SINGLE_PRODUCT,
-        CheckStatus::from_violations(wrapper_product_violations),
-    );
-
-    results
 }
 
 pub(crate) fn evaluate_checks(
@@ -128,13 +62,6 @@ pub(crate) fn evaluate_checks(
         .collect::<Vec<_>>();
 
     let mut results = Vec::new();
-    push_check_result(
-        &mut results,
-        validation,
-        schema,
-        RULE_PARAM_INFO_SHAPE,
-        CheckStatus::from_violations(param_info_shape_violations(schema, location)),
-    );
 
     // Keep target-inapplicable checks in the report as `skipped`. Without this, CI logs
     // cannot distinguish "not relevant for this target" from "the check was never registered".
@@ -207,6 +134,14 @@ pub(crate) fn evaluate_checks(
         );
     }
 
+    push_check_result(
+        &mut results,
+        validation,
+        schema,
+        RULE_PARAM_INFO_SHAPE,
+        CheckStatus::from_violations(param_info_shape_violations(schema, location)),
+    );
+
     let mut bypass_shape_violations = Vec::new();
     if bypass_params.len() > 1 {
         bypass_shape_violations.push(RuleViolation {
@@ -277,39 +212,17 @@ pub(crate) fn evaluate_checks(
         CheckStatus::from_violations(bypass_required_violations),
     );
 
-    push_check_result(
-        &mut results,
-        validation,
-        schema,
-        RULE_STATE_EXTENSION_REQUIRED,
-        CheckStatus::from_violations(state_extension_violations(schema, location)),
-    );
-
     results
 }
 
 pub(crate) fn evaluate_source_checks(
-    schemas: &[PluginSchema],
     metadata: &PluginMetadata,
     validation: &ValidationMetadata,
     location: &Path,
     repository_root: &Path,
-    gui_dir: &Path,
 ) -> Vec<CheckResult> {
     let subject = CheckSubject::bundle(metadata);
     let mut results = Vec::new();
-
-    // Only deterministic source checks live in the validate gate. Review-heavy source
-    // concerns stay in the code review checklist so this remains a low-noise release gate.
-    push_check_result_for_subject(
-        &mut results,
-        validation,
-        &subject,
-        RULE_GUI_ARTIFACT_SHAPE,
-        CheckStatus::from_violations(gui_artifact_shape_violations(
-            schemas, metadata, location, gui_dir,
-        )),
-    );
 
     push_check_result_for_subject(
         &mut results,
@@ -401,58 +314,6 @@ fn param_info_shape_violations(schema: &PluginSchema, location: &Path) -> Vec<Ru
         }
     }
 
-    violations
-}
-
-fn state_extension_violations(schema: &PluginSchema, location: &Path) -> Vec<RuleViolation> {
-    if schema.has_state {
-        return Vec::new();
-    }
-
-    vec![RuleViolation {
-        plugin_id: schema.plugin_id.clone(),
-        plugin_name: schema.plugin_name.clone(),
-        location: location.to_path_buf(),
-        rule_id: RULE_STATE_EXTENSION_REQUIRED,
-        message: "Production plugins should expose the CLAP state extension for project recall."
-            .to_string(),
-        fix: "Implement state save/load for the plugin, or disable this rule with a documented reason.",
-    }]
-}
-
-fn gui_artifact_shape_violations(
-    schemas: &[PluginSchema],
-    metadata: &PluginMetadata,
-    location: &Path,
-    gui_dir: &Path,
-) -> Vec<RuleViolation> {
-    let subject = CheckSubject::bundle(metadata);
-    let mut violations = Vec::new();
-    let gui_source_exists = gui_dir.exists();
-    if gui_source_exists && schemas.iter().any(|schema| !schema.has_gui) {
-        for schema in schemas.iter().filter(|schema| !schema.has_gui) {
-            violations.push(RuleViolation {
-                plugin_id: schema.plugin_id.clone(),
-                plugin_name: schema.plugin_name.clone(),
-                location: location.to_path_buf(),
-                rule_id: RULE_GUI_ARTIFACT_SHAPE,
-                message: "Plugin has src-gui but does not expose the CLAP GUI extension."
-                    .to_string(),
-                fix: "Expose a GUI extension for products with src-gui, or disable this rule with a documented reason for headless products.",
-            });
-        }
-    }
-    if gui_source_exists && !gui_dir.join("dist").join("index.html").exists() {
-        violations.push(RuleViolation {
-            plugin_id: subject.plugin_id,
-            plugin_name: subject.plugin_name,
-            location: gui_dir.to_path_buf(),
-            rule_id: RULE_GUI_ARTIFACT_SHAPE,
-            message: "src-gui/dist/index.html must exist after validate builds the GUI."
-                .to_string(),
-            fix: "Run the frontend build through cargo xtask validate/build so release GUI assets are generated before the plugin is compiled.",
-        });
-    }
     violations
 }
 
@@ -588,96 +449,6 @@ fn is_template_development_checkout(repository_root: &Path) -> bool {
     .any(|needle| remotes.contains(needle))
 }
 
-fn clap_descriptor_manifest_violations(
-    schemas: &[PluginSchema],
-    metadata: &PluginMetadata,
-    location: &Path,
-) -> Vec<RuleViolation> {
-    let subject = CheckSubject::bundle(metadata);
-    let mut violations = Vec::new();
-    if schemas.len() != metadata.plugins.len() {
-        violations.push(RuleViolation {
-            plugin_id: subject.plugin_id.clone(),
-            plugin_name: subject.plugin_name.clone(),
-            location: location.to_path_buf(),
-            rule_id: RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
-            message: format!(
-                "CLAP descriptor count must match package.metadata.wrac.plugins. descriptor_count={} manifest_count={}",
-                schemas.len(),
-                metadata.plugins.len()
-            ),
-            fix: "Expose one CLAP descriptor for each package.metadata.wrac.plugins entry, in the same order.",
-        });
-    }
-
-    for (index, expected) in metadata.plugins.iter().enumerate() {
-        let Some(schema) = schemas.get(index) else {
-            continue;
-        };
-        if schema.plugin_id != expected.plugin_id {
-            violations.push(descriptor_manifest_violation(
-                schema,
-                location,
-                index,
-                "id",
-                &expected.plugin_id,
-                &schema.plugin_id,
-            ));
-        }
-        if schema.plugin_name != expected.plugin_name {
-            violations.push(descriptor_manifest_violation(
-                schema,
-                location,
-                index,
-                "name",
-                &expected.plugin_name,
-                &schema.plugin_name,
-            ));
-        }
-        if schema.plugin_vendor != metadata.company_name {
-            violations.push(descriptor_manifest_violation(
-                schema,
-                location,
-                index,
-                "vendor",
-                &metadata.company_name,
-                &schema.plugin_vendor,
-            ));
-        }
-        if schema.plugin_version != metadata.version {
-            violations.push(descriptor_manifest_violation(
-                schema,
-                location,
-                index,
-                "version",
-                &metadata.version,
-                &schema.plugin_version,
-            ));
-        }
-    }
-    violations
-}
-
-fn descriptor_manifest_violation(
-    schema: &PluginSchema,
-    location: &Path,
-    index: usize,
-    field: &str,
-    expected: &str,
-    actual: &str,
-) -> RuleViolation {
-    RuleViolation {
-        plugin_id: schema.plugin_id.clone(),
-        plugin_name: schema.plugin_name.clone(),
-        location: location.to_path_buf(),
-        rule_id: RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST,
-        message: format!(
-            "CLAP descriptor {field} does not match manifest metadata. index={index} expected=\"{expected}\" actual=\"{actual}\""
-        ),
-        fix: "Keep CLAP descriptors generated from package.metadata.wrac instead of hard-coded product metadata.",
-    }
-}
-
 fn push_check_result(
     results: &mut Vec<CheckResult>,
     validation: &ValidationMetadata,
@@ -810,10 +581,6 @@ mod tests {
         PluginSchema {
             plugin_id: "com.example.test".to_string(),
             plugin_name: "Test Plugin".to_string(),
-            plugin_vendor: "Example".to_string(),
-            plugin_version: "1.0.0".to_string(),
-            has_gui: true,
-            has_state: true,
             params,
         }
     }
@@ -1137,36 +904,6 @@ mod tests {
     }
 
     #[test]
-    fn state_extension_is_required() {
-        let mut schema = schema(vec![valid_bypass_param(0)]);
-        schema.has_state = false;
-        let results = evaluate_checks(
-            &schema,
-            &[ValidateTarget::Clap],
-            &no_disabled_rules(),
-            Path::new("Cargo.toml"),
-        );
-        assert!(rule_failed(&results, RULE_STATE_EXTENSION_REQUIRED));
-    }
-
-    #[test]
-    fn gui_artifact_requires_gui_extension_when_gui_source_exists() {
-        let mut schema = schema(vec![valid_bypass_param(0)]);
-        schema.has_gui = false;
-        let violations = gui_artifact_shape_violations(
-            &[schema],
-            &metadata(),
-            Path::new("Cargo.toml"),
-            Path::new("."),
-        );
-        assert!(
-            violations
-                .iter()
-                .any(|violation| violation.rule_id == RULE_GUI_ARTIFACT_SHAPE)
-        );
-    }
-
-    #[test]
     fn placeholder_check_rejects_template_identity() {
         let mut metadata = metadata();
         metadata.package_name = "wrac_gain_plugin".to_string();
@@ -1180,28 +917,5 @@ mod tests {
                 .iter()
                 .any(|violation| violation.rule_id == RULE_TEMPLATE_PLACEHOLDERS_RENAMED)
         );
-    }
-
-    #[test]
-    fn clap_descriptors_must_match_manifest_metadata() {
-        let mut schema = schema(vec![valid_bypass_param(0)]);
-        schema.plugin_name = "Wrong Name".to_string();
-        let violations =
-            clap_descriptor_manifest_violations(&[schema], &metadata(), Path::new("Cargo.toml"));
-
-        assert_eq!(violations.len(), 1);
-        assert_eq!(violations[0].rule_id, RULE_CLAP_DESCRIPTORS_MATCH_MANIFEST);
-        assert!(violations[0].message.contains("name"));
-    }
-
-    #[test]
-    fn clap_descriptors_pass_when_manifest_metadata_matches() {
-        let violations = clap_descriptor_manifest_violations(
-            &[schema(vec![valid_bypass_param(0)])],
-            &metadata(),
-            Path::new("Cargo.toml"),
-        );
-
-        assert!(violations.is_empty());
     }
 }

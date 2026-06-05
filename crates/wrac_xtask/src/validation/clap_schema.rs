@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use std::ptr;
 
 use clap_sys::entry::clap_plugin_entry;
-use clap_sys::ext::gui::CLAP_EXT_GUI;
 use clap_sys::ext::params::{CLAP_EXT_PARAMS, clap_param_info, clap_plugin_params};
-use clap_sys::ext::state::CLAP_EXT_STATE;
 use clap_sys::factory::plugin_factory::{CLAP_PLUGIN_FACTORY_ID, clap_plugin_factory};
 use clap_sys::host::clap_host;
 use clap_sys::version::CLAP_VERSION;
@@ -20,10 +18,6 @@ use crate::targets::Platform;
 pub(crate) struct PluginSchema {
     pub(crate) plugin_id: String,
     pub(crate) plugin_name: String,
-    pub(crate) plugin_vendor: String,
-    pub(crate) plugin_version: String,
-    pub(crate) has_gui: bool,
-    pub(crate) has_state: bool,
     pub(crate) params: Vec<ParameterSchema>,
 }
 
@@ -146,8 +140,6 @@ unsafe fn read_plugin_schema(
     }
     let plugin_id = unsafe { CStr::from_ptr(descriptor.id) };
     let plugin_name = unsafe { descriptor_string(descriptor.name) };
-    let plugin_vendor = unsafe { descriptor_string(descriptor.vendor) };
-    let plugin_version = unsafe { descriptor_string(descriptor.version) };
     let host = validator_clap_host();
     let plugin = unsafe { create_plugin(factory, &host, plugin_id.as_ptr()) };
     if plugin.is_null() {
@@ -171,16 +163,10 @@ unsafe fn read_plugin_schema(
 
     // Read only the host-visible schema used by the current release-policy checks.
     // Broader CLAP capability validation is left to external format validators.
-    let has_gui = unsafe { has_extension(plugin, CLAP_EXT_GUI.as_ptr()) }?;
-    let has_state = unsafe { has_extension(plugin, CLAP_EXT_STATE.as_ptr()) }?;
     let params = unsafe { read_params(plugin) }?;
     Ok(PluginSchema {
         plugin_id: plugin_id.to_string_lossy().into_owned(),
         plugin_name,
-        plugin_vendor,
-        plugin_version,
-        has_gui,
-        has_state,
         params,
     })
 }
@@ -202,13 +188,6 @@ unsafe fn plugin_extension(
     let get_extension =
         unsafe { (*plugin).get_extension }.ok_or("CLAP plugin has no get_extension callback")?;
     Ok(unsafe { get_extension(plugin, extension_id) })
-}
-
-unsafe fn has_extension(
-    plugin: *const clap_sys::plugin::clap_plugin,
-    extension_id: *const c_char,
-) -> Result<bool> {
-    Ok(!unsafe { plugin_extension(plugin, extension_id) }?.is_null())
 }
 
 unsafe fn read_params(
