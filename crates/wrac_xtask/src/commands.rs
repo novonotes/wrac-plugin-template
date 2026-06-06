@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -308,99 +309,137 @@ pub(crate) fn configure_wrapper(
     };
     fs::create_dir_all(&stage_dir)?;
 
-    let mut configure = Command::new("cmake");
+    let mut args = Vec::<OsString>::new();
+    push_cmake_arg(&mut args, "-S");
+    args.push(ctx.wrapper_dir.as_os_str().to_owned());
+    push_cmake_arg(&mut args, "-B");
+    args.push(build_dir.as_os_str().to_owned());
     // Build the wrapper directly from the Rust staticlib. Locating a pre-built CLAP bundle
     // instead would tie reproducibility to clean/install ordering and stale artifacts.
     // Pass the same stage path that xtask uses for downstream validation checks.
-    configure
-        .arg("-S")
-        .arg(&ctx.wrapper_dir)
-        .arg("-B")
-        .arg(&build_dir)
-        .arg(format!(
+    push_cmake_arg(
+        &mut args,
+        format!(
             "-DCLAP_WRAPPER_BUILDER_TARGET_LIB={}",
             static_library.display()
-        ))
-        .arg(format!(
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!(
             "-DCLAP_WRAPPER_BUILDER_OUTPUT_NAME={}",
             ctx.metadata.bundle_name
-        ))
-        .arg(format!(
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!(
             "-DCLAP_WRAPPER_BUILDER_TARGET_NAME={}_{}",
             ctx.metadata.package_name,
             build.purpose().replace('-', "_")
-        ))
-        .arg(format!(
-            "-DCLAP_WRAPPER_BUILDER_STAGE_DIR={}",
-            stage_dir.display()
-        ))
-        .arg(format!(
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!("-DCLAP_WRAPPER_BUILDER_STAGE_DIR={}", stage_dir.display()),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!(
             "-DCLAP_WRAPPER_BUILDER_BUNDLE_VERSION={}",
             ctx.metadata.version
-        ))
-        .arg(format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()))
-        .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF")
-        .arg("-DCLAP_WRAPPER_CXX_STANDARD=23");
-    add_wrapper_product_args(ctx, &mut configure, build);
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()),
+    );
+    push_cmake_arg(&mut args, "-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF");
+    push_cmake_arg(&mut args, "-DCLAP_WRAPPER_CXX_STANDARD=23");
+    add_wrapper_product_args(ctx, &mut args, build);
 
     match build {
         WrapperBuild::Plugins { vst3, au } => {
-            configure
-                .arg(format!(
-                    "-DCLAP_WRAPPER_BUILDER_BUILD_VST3={}",
-                    on_off(vst3)
-                ))
-                .arg(format!("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2={}", on_off(au)))
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
+            push_cmake_arg(
+                &mut args,
+                format!("-DCLAP_WRAPPER_BUILDER_BUILD_VST3={}", on_off(vst3)),
+            );
+            push_cmake_arg(
+                &mut args,
+                format!("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2={}", on_off(au)),
+            );
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
         }
         WrapperBuild::Aax => {
             // AAX target creation happens during CMake configure and requires
             // the Avid SDK root. Keeping this in wrap-aax-* avoids rewriting the
             // VST3/AU CMake cache when users switch between targets.
-            configure
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=ON")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF")
-                .arg(format!("-DAAX_SDK_ROOT={}", aax_sdk_root(ctx)?.display()));
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_AAX=ON");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
+            push_cmake_arg(
+                &mut args,
+                format!("-DAAX_SDK_ROOT={}", aax_sdk_root(ctx)?.display()),
+            );
         }
         WrapperBuild::Standalone => {
             // standalone requires additional app-side dependencies that plugin wrappers do not.
             // Delegate fetching to clap-wrapper's own download logic while keeping downloads
             // disabled for plugin wrapper builds.
-            configure
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
-                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
-                .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON");
+            push_cmake_arg(&mut args, "-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON");
         }
     }
 
     if ctx.platform == Platform::Macos {
         // AUv2 uses 4-character type/manufacturer/subtype codes as the host discovery key.
         // Drive them from the template's constants rather than inferring from the Rust descriptor.
-        configure
-            .arg(format!(
+        push_cmake_arg(
+            &mut args,
+            format!(
                 "-DAUDIOUNIT_SDK_ROOT={}",
                 ctx.wrapper_dir.join("AudioUnitSDK").display()
-            ))
-            .arg(format!(
+            ),
+        );
+        push_cmake_arg(
+            &mut args,
+            format!(
                 "-DCLAP_WRAPPER_AUV2_MANUFACTURER_NAME={}",
                 ctx.metadata.company_name
-            ))
-            .arg(format!(
+            ),
+        );
+        push_cmake_arg(
+            &mut args,
+            format!(
                 "-DCLAP_WRAPPER_AUV2_MANUFACTURER_CODE={}",
                 ctx.metadata.auv2_manufacturer_code
-            ));
+            ),
+        );
     }
 
     if let Some(generator) = ctx.platform.cmake_generator() {
-        configure.arg("-G").arg(generator);
+        push_cmake_arg(&mut args, "-G");
+        push_cmake_arg(&mut args, generator);
     }
 
+    if cmake_configure_is_current(&build_dir, &args)? {
+        println!(
+            "CMake configure is up to date for {} ({})",
+            build.purpose(),
+            profile.cmake_config()
+        );
+        return Ok(());
+    }
+
+    let mut configure = Command::new("cmake");
+    configure.args(&args);
     run(configure.current_dir(&ctx.root))?;
+    write_cmake_configure_stamp(&build_dir, &args)?;
     Ok(())
 }
 
@@ -553,48 +592,105 @@ fn cmake_identifier(value: &str) -> String {
     identifier
 }
 
-fn add_wrapper_product_args(ctx: &Context, command: &mut Command, build: WrapperBuild) {
-    command.arg(format!(
-        "-DCLAP_WRAPPER_BUILDER_PRODUCT_COUNT={}",
-        ctx.metadata.plugins.len()
-    ));
+fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
+    args.push(arg.into());
+}
+
+fn cmake_configure_stamp_path(build_dir: &Path) -> PathBuf {
+    build_dir.join(".wrac-configure-args")
+}
+
+fn cmake_configure_stamp(args: &[OsString]) -> String {
+    args.iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn cmake_configure_is_current(build_dir: &Path, args: &[OsString]) -> Result<bool> {
+    let cache = build_dir.join("CMakeCache.txt");
+    let stamp_path = cmake_configure_stamp_path(build_dir);
+    if !cache.exists() || !stamp_path.exists() {
+        return Ok(false);
+    }
+
+    // Running CMake configure on every xtask invocation rewrites generated
+    // wrapper entry files, which then forces Xcode/MSBuild to relink even when
+    // the selected CMake target is unchanged. The stamp tracks only xtask-owned
+    // configure inputs; CMake's ZERO_CHECK still handles changes inside the
+    // already-configured source tree during the build step.
+    Ok(fs::read_to_string(stamp_path)? == cmake_configure_stamp(args))
+}
+
+fn write_cmake_configure_stamp(build_dir: &Path, args: &[OsString]) -> Result<()> {
+    fs::write(
+        cmake_configure_stamp_path(build_dir),
+        cmake_configure_stamp(args),
+    )?;
+    Ok(())
+}
+
+fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: WrapperBuild) {
+    push_cmake_arg(
+        args,
+        format!(
+            "-DCLAP_WRAPPER_BUILDER_PRODUCT_COUNT={}",
+            ctx.metadata.plugins.len()
+        ),
+    );
     for (index, plugin) in ctx.metadata.plugins.iter().enumerate() {
         match build {
             WrapperBuild::Plugins { au: true, .. } => {
                 // CLAP/VST3/AAX read product descriptors from the Rust plugin factory.
                 // AUv2 cannot, so only AUv2 builds need per-product output and
                 // four-character AudioComponent identity values from xtask.
-                command
-                    .arg(format!(
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_OUTPUT_NAME={}",
                         plugin.plugin_name
-                    ))
-                    .arg(format!(
+                    ),
+                );
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_TYPE={}",
                         plugin.auv2_type
-                    ))
-                    .arg(format!(
+                    ),
+                );
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_SUBTYPE={}",
                         plugin.auv2_subtype
-                    ));
+                    ),
+                );
             }
             WrapperBuild::Standalone => {
                 // Each standalone app embeds the product ID it should host at
                 // compile time; passing all standalone metadata keeps CMake from
                 // choosing an implicit primary product.
-                command
-                    .arg(format!(
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_OUTPUT_NAME={}",
                         plugin.plugin_name
-                    ))
-                    .arg(format!(
+                    ),
+                );
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_PLUGIN_ID={}",
                         plugin.plugin_id
-                    ))
-                    .arg(format!(
+                    ),
+                );
+                push_cmake_arg(
+                    args,
+                    format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_STANDALONE_NAME={}",
                         plugin.standalone_name
-                    ));
+                    ),
+                );
             }
             WrapperBuild::Plugins { au: false, .. } | WrapperBuild::Aax => {}
         }

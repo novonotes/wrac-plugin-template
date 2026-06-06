@@ -459,13 +459,19 @@ fn build_graph(
     }
 
     if needs_vst3 || needs_au {
+        // Configure the private-SDK-free wrapper project with the full native
+        // plugin target set for this platform, then build only the DAG-selected
+        // CMake target below. This avoids flipping the same CMake cache between
+        // "VST3 only" and "AU only" when developers alternate commands.
+        let configure_vst3 = needs_vst3 || ctx.platform.supports_vst3();
+        let configure_au = needs_au || ctx.platform.supports_au();
         // Keep AAX out of this configure group. AAX requires a private SDK, and
         // VST3/AU-only builds must not fail just because AAX inputs are absent.
         let configure = graph.task(
             package_task_id(ctx, "configure-wrapper-plugins"),
             TaskKind::ConfigureWrapperPlugins {
-                vst3: needs_vst3,
-                au: needs_au,
+                vst3: configure_vst3,
+                au: configure_au,
             },
         );
         graph.depends_on(
