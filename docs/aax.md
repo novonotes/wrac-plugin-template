@@ -62,9 +62,10 @@ cargo xtask validate --target=aax
 ```
 
 The validator runs the selected AAX Validator tests by test ID and saves official
-JSON results under `target/wrac-plugins/<package>/wrac/validation/aax/`. macOS
-drives DSH directly; Windows uses Avid's bundled DTT runner because that is the
-package's documented automation layer for DigiShell.
+JSON results under `target/wrac-plugins/<package>/wrac/validation/aax/`.
+`xtask` uses Avid's bundled DTT runner on both macOS and Windows because DTT is
+the package's documented automation layer for DigiShell and behaves consistently
+in local shells and hosted CI.
 `xtask` fails when any selected test reports a non-pass `result_status`.
 
 The local validation target intentionally skips:

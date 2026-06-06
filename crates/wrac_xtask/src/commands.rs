@@ -1,6 +1,5 @@
 use std::env;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -24,9 +23,10 @@ use crate::util::{
 use crate::validation::validate_wrac_rules;
 
 const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
-// Keep the local AAX contract explicit instead of delegating to `runtests`.
-// DSH exposes collection filters but no stable "all except these test IDs" switch,
-// and this template intentionally does not cover HDX cycle-count or page-table XML validation.
+// Keep the local AAX contract explicit instead of delegating to the validator's
+// broad `runtests` collection. The template intentionally does not cover HDX
+// cycle-count or page-table XML validation, so the CI-facing contract is the
+// concrete set of native tests that should pass for the generated bundle.
 const AAX_VALIDATOR_REQUIRED_TESTS: &[&str] = &[
     "info.productids",
     "info.support.audiosuite",
@@ -51,7 +51,7 @@ const AAX_VALIDATOR_SKIPPED_TESTS: &[(&str, &str)] = &[
         "requires page-table XML resources, which this template does not generate",
     ),
 ];
-const AAX_VALIDATOR_DSH_TIMEOUT_SECS: u64 = 15 * 60;
+const AAX_VALIDATOR_TIMEOUT_SECS: u64 = 15 * 60;
 
 pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     let profile = BuildProfile::from_release(args.release);
@@ -398,8 +398,8 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
             if aax {
                 ensure_exists(&ctx.aax_bundle(profile), "AAX artifact")?;
                 if ctx.platform == Platform::Macos {
-                    // AAX developer validation loads the bundle directly via DSH, so keep
-                    // the local artifact ad-hoc signed before the validator sees it.
+                    // AAX developer validation loads the bundle directly, so keep the
+                    // local artifact ad-hoc signed before the validator sees it.
                     codesign_nested_macos_bundle(&ctx.aax_bundle(profile))?;
                 }
             }
@@ -820,7 +820,7 @@ fn validate_targets(
 fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
     let results_dir = ctx.wrac_dir().join("validation").join("aax");
     // A fresh directory prevents a previous pass result from masking a missing
-    // validator output if DSH exits early or changes a result reference.
+    // validator output if DTT exits early or changes a result reference.
     remove_if_exists(&results_dir)?;
     fs::create_dir_all(&results_dir)?;
     let aax = stage_aax_for_validator(&results_dir, aax)?;
@@ -835,77 +835,9 @@ fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
     }
     println!();
 
-    if ctx.platform == Platform::Windows {
-        run_aax_validator_dtt(ctx, &aax, &results_dir)?;
-    } else {
-        run_aax_validator_dsh(ctx, &aax, &results_dir)?;
-    }
+    run_aax_validator_dtt(ctx, &aax, &results_dir)?;
 
     assert_aax_validator_results(&results_dir)
-}
-
-fn run_aax_validator_dsh(ctx: &Context, aax: &Path, results_dir: &Path) -> Result<()> {
-    let dsh = ensure_aax_validator_dsh(ctx)?;
-    println!("========== Running command ==========");
-    println!("$ {}", dsh.display());
-
-    let mut child = Command::new(&dsh)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .current_dir(dsh.parent().unwrap_or(&ctx.root))
-        .spawn()?;
-    {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or("failed to open DSH stdin for AAX validation")?;
-        write_dsh_command(&mut stdin, "load_dish aaxval")?;
-        for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
-            let result_ref = format!("r{}", index + 1);
-            let result_path = aax_validator_result_path(results_dir, index, test_id);
-            // The aaxval dish has no documented per-test exclude list for `runtests`.
-            // Running explicit `runtest` commands keeps the CI contract stable as
-            // Avid updates collections, while still using DSH's own JSON result writer.
-            write_dsh_command(
-                &mut stdin,
-                format!(
-                    "runtest {{test: {test_id}, path: {}, stringformat: json, detail: min}}",
-                    dsh_string(aax)?
-                ),
-            )?;
-            write_dsh_command(
-                &mut stdin,
-                format!(
-                    "saveresult {{result_ref: {result_ref}, result_path: {}, stringformat: json}}",
-                    dsh_string(&result_path)?
-                ),
-            )?;
-        }
-        write_dsh_command(&mut stdin, "quit")?;
-    }
-
-    let output = wait_for_aax_validator_process(child, aax_validator_dsh_timeout()?)?;
-    let stdout_path = results_dir.join("dsh-stdout.log");
-    let stderr_path = results_dir.join("dsh-stderr.log");
-    fs::write(&stdout_path, &output.stdout)?;
-    fs::write(&stderr_path, &output.stderr)?;
-    println!("AAX validator DSH stdout: {}", stdout_path.display());
-    if !output.stderr.is_empty() {
-        println!("AAX validator DSH stderr: {}", stderr_path.display());
-    }
-
-    let status = output.status;
-    if !status.success() {
-        print_aax_validator_output(&output.stdout, &output.stderr);
-        return Err(format!(
-            "AAX validator/DSH failed with status {status}; see {}",
-            stdout_path.display()
-        )
-        .into());
-    }
-
-    Ok(())
 }
 
 fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Result<()> {
@@ -923,12 +855,11 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
                 .join(format!("{:02}-{}", index + 1, test_id.replace('.', "_")));
         fs::create_dir_all(&test_dir)?;
 
-        // Avid ships DTT as the automatable scripting layer for DigiShell. The
-        // Windows DSH process can launch in hosted CI while ignoring direct stdin,
-        // so Windows validation goes through DTT instead of treating DSH like a
-        // plain pipe-oriented CLI. The bundled ValidatorRunAllTests script discovers
-        // plug-ins via `findaaxplugins`, which returns the expected list shape when
-        // given a search directory rather than the `.aaxplugin` bundle path itself.
+        // Avid ships DTT as the automatable scripting layer for DigiShell, and it
+        // behaves consistently across macOS and Windows CI. The bundled
+        // ValidatorRunAllTests script discovers plug-ins via `findaaxplugins`, which
+        // returns the expected list shape when given a search directory rather than
+        // the `.aaxplugin` bundle path itself.
         let child = Command::new(&dtt)
             .arg("--script")
             .arg("ValidatorRunAllTests")
@@ -947,7 +878,7 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
             .stderr(Stdio::piped())
             .current_dir(dtt.parent().unwrap_or(&ctx.root))
             .spawn()?;
-        let output = wait_for_aax_validator_process(child, aax_validator_dsh_timeout()?)?;
+        let output = wait_for_aax_validator_process(child, aax_validator_timeout()?)?;
         let stdout_path = test_dir.join("dtt-stdout.log");
         let stderr_path = test_dir.join("dtt-stderr.log");
         fs::write(&stdout_path, &output.stdout)?;
@@ -1036,12 +967,6 @@ fn assert_aax_validator_results(results_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_dsh_command(stdin: &mut impl Write, command: impl AsRef<str>) -> Result<()> {
-    let command = command.as_ref();
-    writeln!(stdin, "{command}")?;
-    Ok(())
-}
-
 fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result<Output> {
     let started_at = Instant::now();
     loop {
@@ -1062,14 +987,14 @@ fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result
     }
 }
 
-fn aax_validator_dsh_timeout() -> Result<Duration> {
-    let seconds = match env::var("AAX_VALIDATOR_DSH_TIMEOUT_SECS") {
-        Ok(value) => value.parse::<u64>().map_err(|err| {
-            format!("failed to parse AAX_VALIDATOR_DSH_TIMEOUT_SECS={value}: {err}")
-        })?,
-        Err(env::VarError::NotPresent) => AAX_VALIDATOR_DSH_TIMEOUT_SECS,
+fn aax_validator_timeout() -> Result<Duration> {
+    let seconds = match env::var("AAX_VALIDATOR_TIMEOUT_SECS") {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|err| format!("failed to parse AAX_VALIDATOR_TIMEOUT_SECS={value}: {err}"))?,
+        Err(env::VarError::NotPresent) => AAX_VALIDATOR_TIMEOUT_SECS,
         Err(err) => {
-            return Err(format!("failed to read AAX_VALIDATOR_DSH_TIMEOUT_SECS: {err}").into());
+            return Err(format!("failed to read AAX_VALIDATOR_TIMEOUT_SECS: {err}").into());
         }
     };
     Ok(Duration::from_secs(seconds))
@@ -1138,24 +1063,14 @@ fn aax_validator_result_status(path: &Path) -> Result<String> {
         })
 }
 
-fn dsh_string(path: &Path) -> Result<String> {
-    let value = path.display().to_string();
-    if value.contains('"') {
-        return Err(format!("DSH paths cannot contain double quotes: {value}").into());
-    }
-    // DSH command input is not a shell, but quoted paths are still required for
-    // bundle names such as "WRAC Gain.aaxplugin".
-    Ok(format!("\"{value}\""))
-}
-
-fn ensure_aax_validator_dsh(ctx: &Context) -> Result<PathBuf> {
+fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
     let root = aax_validator_dsh_root(ctx)?;
-    let dsh = aax_validator_dsh_executable(&root, ctx.platform)?;
-    ensure_exists(&dsh, "AAX validator DSH")?;
+    let dtt = aax_validator_dtt_runner(&root, ctx.platform)?;
+    ensure_exists(&dtt, "AAX validator DTT runner")?;
     if ctx.platform == Platform::Macos {
-        // Avid validator archives downloaded through a browser may carry quarantine
-        // attributes. Clearing them here keeps first-run validation deterministic;
-        // failure is non-fatal because previously cleared archives work without it.
+        // Browser-downloaded Avid archives may carry quarantine attributes, and
+        // `run_test.command` is not guaranteed to preserve its executable bit after
+        // extraction. Normalize both here so first-run local validation behaves like CI.
         let _ = Command::new("xattr")
             .args(["-dr", "com.apple.quarantine"])
             .arg(&root)
@@ -1164,16 +1079,9 @@ fn ensure_aax_validator_dsh(ctx: &Context) -> Result<PathBuf> {
             .status();
         run(Command::new("chmod")
             .arg("+x")
-            .arg(&dsh)
+            .arg(&dtt)
             .current_dir(&ctx.root))?;
     }
-    Ok(dsh)
-}
-
-fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
-    let root = aax_validator_dsh_root(ctx)?;
-    let dtt = aax_validator_dtt_runner(&root, ctx.platform)?;
-    ensure_exists(&dtt, "AAX validator DTT runner")?;
     Ok(dtt)
 }
 
