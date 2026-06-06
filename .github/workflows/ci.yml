@@ -24,7 +24,6 @@ jobs:
   rust-format:
     name: Rust format
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_dispatch'
 
     steps:
       - name: Checkout repository
@@ -42,7 +41,6 @@ jobs:
   rust-test:
     name: Rust lint and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    if: github.event_name != 'workflow_dispatch'
     env:
       CARGO_HTTP_MULTIPLEXING: false
 
@@ -85,7 +83,6 @@ jobs:
   plugin-build:
     name: VST3/AU/CLAP Validator (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    if: github.event_name != 'workflow_dispatch'
     env:
       CARGO_HTTP_MULTIPLEXING: false
     needs:
