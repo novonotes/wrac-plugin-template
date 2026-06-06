@@ -1151,6 +1151,9 @@ fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
     let root = aax_validator_dsh_root(ctx)?;
     let dtt = aax_validator_dtt_runner(&root, ctx.platform)?;
     ensure_exists(&dtt, "AAX validator DTT runner")?;
+    if ctx.platform == Platform::Windows {
+        normalize_windows_aax_validator_dtt_config(&root)?;
+    }
     if ctx.platform == Platform::Macos {
         // Browser-downloaded Avid archives may carry quarantine attributes, and
         // `run_test.command` is not guaranteed to preserve its executable bit after
@@ -1167,6 +1170,53 @@ fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
             .current_dir(&ctx.root))?;
     }
     Ok(dtt)
+}
+
+fn normalize_windows_aax_validator_dtt_config(root: &Path) -> Result<()> {
+    for candidate in [
+        root.join("DigiShell")
+            .join("AAXValidatorResources")
+            .join("Main.valconfig"),
+        root.join("AAXValidatorResources").join("Main.valconfig"),
+    ] {
+        if candidate.exists() {
+            normalize_windows_aax_validator_main_config(&candidate)?;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_windows_aax_validator_main_config(path: &Path) -> Result<()> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read AAX validator config {}: {err}",
+            path.display()
+        )
+    })?;
+    // Avid's Windows 2024.6 validator package uses POSIX single quotes for the
+    // DTT process arguments in Main.valconfig. `cmd.exe` passes those quotes
+    // through literally, so DTT does not receive `bundle_path` and its helper
+    // scripts fall back to sample plug-in names such as `Trim.aaxplugin`. Patch
+    // only the extracted target/ copy and use the same escaped double-quote style
+    // already used by the validator's other Windows process definitions.
+    let normalized = content
+        .replace(
+            "elem: \"\\'bundle_path=$AAXVAL_PARAM_AAXPLUGIN$\\'\"",
+            "elem: \"\\\"bundle_path=$AAXVAL_PARAM_AAXPLUGIN$\\\"\"",
+        )
+        .replace(
+            "elem: \"\\'uniq_id=$AAXVAL_PARAM_UNIQ_ID$\\'\"",
+            "elem: \"\\\"uniq_id=$AAXVAL_PARAM_UNIQ_ID$\\\"\"",
+        );
+    if normalized != content {
+        fs::write(path, normalized).map_err(|err| {
+            format!(
+                "failed to write normalized AAX validator config {}: {err}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
