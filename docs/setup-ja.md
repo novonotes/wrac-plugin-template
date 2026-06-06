@@ -11,9 +11,9 @@
 - Rust（最新の stable）
 - Node.js（npm）
 
-### VST3 / AU、または開発用 standalone app もビルドする場合
+### VST3 / AU / AAX、または開発用 standalone app もビルドする場合
 
-clap-wrapper を使って VST3 / AU を生成する場合や、開発用 standalone app をビルドする場合は、追加で以下が必要です。
+clap-wrapper を使って VST3 / AU / AAX を生成する場合や、開発用 standalone app をビルドする場合は、追加で以下が必要です。
 
 **macOS:**
 - Xcode または Xcode Command Line Tools
@@ -48,6 +48,7 @@ git submodule update --init --recursive
 
 CLAP のみをビルドする場合、サブモジュールは不要です。
 VST3 / AU、開発用 standalone app、または VST3 / AU の検証を行う場合は、clap-wrapper が利用する SDK サブモジュールが必要です。
+AAX ビルドには、加えて private な AAX SDK が必要です。展開した SDK root directory を `AAX_SDK_ROOT` で指定してください。詳細は [AAX Build and Validation](aax-ja.md) を参照してください。
 
 ### 2. プラグインの識別情報を設定する
 
@@ -59,6 +60,8 @@ VST3 / AU、開発用 standalone app、または VST3 / AU の検証を行う場
 > `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
 > `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
 > `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
+> `aax_manufacturer_id`、`aax_product_id`、各 AAX stem config の `plugin_id` は、安定した 4 byte ASCII ID にしてください。
+> AAX stem config には、製品が実際に対応する channel layout だけを列挙してください。
 
 ### 3. 残りの識別子を一括置換
 
@@ -106,7 +109,9 @@ cargo xtask install
 workspace に複数の WRAC plugin package がある場合は、Cargo package 名を `-p/--package` で指定してください。
 `cargo xtask install` は、既定ではユーザー単位のパスにインストールします。
 system-wide の plugin folder だけをスキャンするホスト向けには、`cargo xtask install --scope=system` を使います。
-`--target` オプションで `clap`、`vst3`、`au` をカンマ区切りで指定できます。
+`--target` オプションで `clap`、`vst3`、`au`、`aax` をカンマ区切りで指定できます。
+AAX は既定の target set には含まれないため、`--target=aax` で明示的に指定してください。
+macOS / Windows では AAX は system-wide の Avid plugin folder にインストールされるため、`--scope=system` を使ってください。
 
 ### 5. 動作確認
 

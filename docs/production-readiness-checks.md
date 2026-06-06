@@ -80,6 +80,6 @@ When adding a rule, complete the following:
 
 **Reason:** Template-derived values must be replaced manually when creating a product, so they are easy to miss.
 
-**Error condition:** Manifest metadata still contains template placeholders such as `Your Company`, `YrCo`, `com.your-company`, `example.com`, `WRAC Gain`, `wrac_gain_plugin`, `WtGn`, the template VST3 component UUID, or the template repository URL. This rule is skipped in the template repository itself.
+**Error condition:** Manifest metadata still contains template placeholders such as `Your Company`, `YrCo`, `com.your-company`, `example.com`, `WRAC Gain`, `wrac_gain_plugin`, `WtGn`, `WtGM`, `WtGS`, the template VST3 component UUID, or the template repository URL. This rule is skipped in the template repository itself.
 
 **Fix:** Replace template metadata with product-specific metadata, or disable the rule with a documented reason when the repository is intentionally a template or example.

@@ -7,7 +7,7 @@ Run `cargo xtask <command> --help` for command-specific targets, platform suppor
 
 const BUILD_AFTER_HELP: &str = "\
 Targets:
-  clap, vst3, au, standalone
+  clap, vst3, au, aax, standalone
 
 Default targets by platform:
   macOS:   clap, vst3, au, standalone
@@ -25,11 +25,11 @@ Examples:
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   `install`, `validate`, and `launch` build their required artifacts before use.
-  VST3/AU/standalone targets require clap-wrapper dependencies.";
+  VST3/AU/AAX/standalone targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
 Targets:
-  clap, vst3, au
+  clap, vst3, au, aax
 
 Default targets by platform:
   macOS:   clap, vst3, au
@@ -51,7 +51,7 @@ Notes:
 
 const UNINSTALL_AFTER_HELP: &str = "\
 Targets:
-  clap, vst3, au
+  clap, vst3, au, aax
 
 Default targets by platform:
   macOS:   clap, vst3, au
@@ -72,7 +72,7 @@ Notes:
 
 const VALIDATE_AFTER_HELP: &str = "\
 Targets:
-  clap, vst3, au
+  clap, vst3, au, aax
 
 Default targets by platform:
   macOS:   clap, vst3, au
@@ -93,6 +93,7 @@ Notes:
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
+  AAX validation requires the AAX SDK plus AAX validator/DSH and is run only when explicitly targeted.
   AU validation fails if the same AU bundle exists under /Library/Audio/Plug-Ins/Components.";
 
 const LAUNCH_AFTER_HELP: &str = "\
@@ -135,7 +136,7 @@ pub(crate) enum Commands {
     )]
     Uninstall(UninstallArgs),
     #[command(
-        about = "Build and validate CLAP/VST3/AU artifacts.",
+        about = "Build and validate plugin artifacts.",
         after_help = VALIDATE_AFTER_HELP
     )]
     Validate(ValidateArgs),
@@ -173,7 +174,7 @@ pub(crate) struct BuildArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to build, comma-separated.",
-        long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, and standalone. Defaults to every target supported by the current OS."
+        long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, aax, and standalone. Defaults to every target supported by the current OS except AAX, which must be requested explicitly."
     )]
     pub(crate) target: Vec<Target>,
 }
@@ -208,7 +209,7 @@ pub(crate) struct InstallArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Plugin formats to install, comma-separated.",
-        long_help = "Plugin formats to install, comma-separated. Supported values are clap, vst3, and au. Defaults to every plugin format supported by the current OS. standalone is not supported here."
+        long_help = "Plugin formats to install, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to every plugin format supported by the current OS except AAX, which must be requested explicitly. standalone is not supported here."
     )]
     pub(crate) target: Vec<PluginTarget>,
 }
@@ -253,7 +254,7 @@ pub(crate) struct UninstallArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Plugin formats to uninstall, comma-separated.",
-        long_help = "Plugin formats to uninstall, comma-separated. Supported values are clap, vst3, and au. Defaults to every plugin format supported by the current OS. standalone is not supported here."
+        long_help = "Plugin formats to uninstall, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to every plugin format supported by the current OS except AAX, which must be requested explicitly. standalone is not supported here."
     )]
     pub(crate) target: Vec<PluginTarget>,
 
@@ -286,7 +287,7 @@ pub(crate) struct ValidateArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to validate, comma-separated.",
-        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, and au. Defaults to every validation target supported by the current OS."
+        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to every validation target supported by the current OS except AAX, which must be requested explicitly."
     )]
     pub(crate) target: Vec<ValidateTarget>,
 }

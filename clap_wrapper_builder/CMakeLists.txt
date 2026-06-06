@@ -312,6 +312,10 @@ endif()
 if(APPLE)
     set(CLAP_BUNDLE_ID "${BUNDLE_ID}.clap")
     set(VST3_BUNDLE_ID "${BUNDLE_ID}.vst3")
+    # Keep the AAX bundle ID format-specific. AAX hosts load `.aaxplugin`
+    # bundles from the Avid folder, and sharing the CLAP/VST3 ID would make
+    # macOS bundle metadata ambiguous during local validation.
+    set(AAX_BUNDLE_ID "${BUNDLE_ID}.aaxplugin")
     set(STANDALONE_INFO_PLIST "${CMAKE_CURRENT_LIST_DIR}/StandaloneInfo.plist.in")
 
     if(TARGET ${PLUGIN_NAME_SAFE}_clap)
@@ -325,6 +329,13 @@ if(APPLE)
         set_target_properties(${PLUGIN_NAME_SAFE}_vst3 PROPERTIES
             MACOSX_BUNDLE_GUI_IDENTIFIER "${VST3_BUNDLE_ID}"
             XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${VST3_BUNDLE_ID}"
+        )
+    endif()
+
+    if(TARGET ${PLUGIN_NAME_SAFE}_aax)
+        set_target_properties(${PLUGIN_NAME_SAFE}_aax PROPERTIES
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${AAX_BUNDLE_ID}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${AAX_BUNDLE_ID}"
         )
     endif()
 
@@ -387,6 +398,25 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
             add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_vst3 POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.vst3"
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PLUGIN_NAME_SAFE}_vst3>/../.." "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.vst3"
+                VERBATIM
+            )
+        endif()
+    endif()
+
+    if(TARGET ${PLUGIN_NAME_SAFE}_aax)
+        # clap-wrapper leaves AAX artifacts in generator-specific locations.
+        # Stage them beside the other plugin formats so xtask can install,
+        # validate, and print one deterministic path per target.
+        if(APPLE)
+            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_aax POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.aaxplugin"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${PLUGIN_NAME_SAFE}_aax>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.aaxplugin"
+                VERBATIM
+            )
+        elseif(WIN32)
+            add_custom_command(TARGET ${PLUGIN_NAME_SAFE}_aax POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.aaxplugin"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:${PLUGIN_NAME_SAFE}_aax>/../.." "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.aaxplugin"
                 VERBATIM
             )
         endif()

@@ -3088,6 +3088,7 @@ dependencies = [
  "clap-sys",
  "libloading",
  "serde",
+ "serde_json",
  "toml",
 ]
 

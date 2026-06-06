@@ -17,7 +17,9 @@ build = "build.rs"
 company_name = "Your Company"
 # AUv2 manufacturer code. Use the same 4-byte ASCII code across your AUv2 plugin catalog.
 auv2_manufacturer_code = "YrCo"
-# Shared CLAP/VST3 bundle name. Product-specific AU bundles use plugin_name below.
+# AAX manufacturer ID registered with Avid. Keep it stable across the AAX product catalog.
+aax_manufacturer_id = "YrCo"
+# Shared CLAP/VST3/AAX bundle name. Product-specific AU bundles use plugin_name below.
 bundle_name = "WRAC Gain"
 # Reverse-DNS bundle identifier used by macOS bundles. Keep it stable.
 bundle_identifier = "com.your-company.wrac-gain"
@@ -50,6 +52,23 @@ standalone_name = "WRAC Gain Standalone"
 auv2_type = "aufx"
 # AUv2 subtype. Pick a unique 4-byte ASCII code for each plugin from the same vendor.
 auv2_subtype = "WtGn"
+# AAX category names are converted to AAX_EPlugInCategory bits.
+aax_categories = ["effect"]
+# AAX product ID registered with Avid. Usually stable per product.
+aax_product_id = "WtGn"
+
+[[package.metadata.wrac.plugins.aax_stem_configs]]
+# Each AAX stem config needs a unique PlugInID_Native for Pro Tools recall.
+name = "Mono"
+input = "mono"
+output = "mono"
+plugin_id = "WtGM"
+
+[[package.metadata.wrac.plugins.aax_stem_configs]]
+name = "Stereo"
+input = "stereo"
+output = "stereo"
+plugin_id = "WtGS"
 
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]

@@ -1,6 +1,11 @@
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
 
 use crate::Result;
 use crate::cli::{BuildArgs, InstallScope, UninstallScope};
@@ -18,6 +23,35 @@ use crate::util::{
 use crate::validation::validate_wrac_rules;
 
 const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
+// Keep the local AAX contract explicit instead of delegating to the validator's
+// broad `runtests` collection. `runtests` includes hardware/DSP and page-table
+// coverage that this source-built native template does not generate, so CI should
+// fail only on the concrete native tests that the generated bundle is expected to pass.
+const AAX_VALIDATOR_REQUIRED_TESTS: &[&str] = &[
+    "info.productids",
+    "info.support.audiosuite",
+    "info.support.general",
+    "info.support.s6_feature",
+    "test.data_model",
+    "test.describe_validation",
+    "test.load_unload",
+    "test.page_table.automation_list",
+    "test.parameter_traversal.linear",
+    "test.parameter_traversal.random",
+    "test.parameter_traversal.random.fast",
+    "test.parameters",
+];
+const AAX_VALIDATOR_SKIPPED_TESTS: &[(&str, &str)] = &[
+    (
+        "test.cycle_counts",
+        "targets DSP/HDX cycle-count validation, which is outside this native local build target",
+    ),
+    (
+        "test.page_table.load",
+        "requires page-table XML resources, which this template does not generate",
+    ),
+];
+const AAX_VALIDATOR_TIMEOUT_SECS: u64 = 15 * 60;
 
 pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
     let profile = BuildProfile::from_release(args.release);
@@ -31,6 +65,7 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
             ctx,
             targets.contains(&Target::Vst3),
             targets.contains(&Target::Au),
+            targets.contains(&Target::Aax),
         )?;
     }
 
@@ -62,6 +97,7 @@ pub(crate) fn build(ctx: &Context, args: BuildArgs) -> Result<()> {
             WrapperBuild::Plugin {
                 vst3: targets.contains(&Target::Vst3),
                 au: targets.contains(&Target::Au),
+                aax: targets.contains(&Target::Aax),
             },
         )?;
     }
@@ -207,7 +243,7 @@ fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
 
 #[derive(Debug, Clone, Copy)]
 enum WrapperBuild {
-    Plugin { vst3: bool, au: bool },
+    Plugin { vst3: bool, au: bool, aax: bool },
     Standalone,
 }
 
@@ -270,20 +306,23 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
             ctx.metadata.version
         ))
         .arg(format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()))
-        .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
         .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF")
         .arg("-DCLAP_WRAPPER_CXX_STANDARD=23");
     add_wrapper_product_args(ctx, &mut configure, build);
 
     match build {
-        WrapperBuild::Plugin { vst3, au } => {
+        WrapperBuild::Plugin { vst3, au, aax } => {
             configure
                 .arg(format!(
                     "-DCLAP_WRAPPER_BUILDER_BUILD_VST3={}",
                     on_off(vst3)
                 ))
                 .arg(format!("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2={}", on_off(au)))
+                .arg(format!("-DCLAP_WRAPPER_BUILDER_BUILD_AAX={}", on_off(aax)))
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=OFF");
+            if aax {
+                configure.arg(format!("-DAAX_SDK_ROOT={}", aax_sdk_root(ctx)?.display()));
+            }
         }
         WrapperBuild::Standalone => {
             // standalone requires additional app-side dependencies that plugin wrappers do not.
@@ -292,6 +331,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
             configure
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_VST3=OFF")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AUV2=OFF")
+                .arg("-DCLAP_WRAPPER_BUILDER_BUILD_AAX=OFF")
                 .arg("-DCLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
                 .arg("-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=ON");
         }
@@ -340,7 +380,7 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
     run(build_cmd.current_dir(&ctx.root))?;
 
     match build {
-        WrapperBuild::Plugin { vst3, au } => {
+        WrapperBuild::Plugin { vst3, au, aax } => {
             if vst3 {
                 ensure_exists(&ctx.vst3_bundle(profile), "VST3 artifact")?;
                 if ctx.platform == Platform::Macos {
@@ -353,6 +393,14 @@ fn build_wrapper_set(ctx: &Context, profile: BuildProfile, build: WrapperBuild) 
                     ensure_exists(&artifact, "AU artifact")?;
                     // AU components are loaded via AudioComponentRegistrar, so they must be signed even for local builds.
                     codesign_nested_macos_bundle(&artifact)?;
+                }
+            }
+            if aax {
+                ensure_exists(&ctx.aax_bundle(profile), "AAX artifact")?;
+                if ctx.platform == Platform::Macos {
+                    // AAX developer validation loads the bundle directly, so keep the
+                    // local artifact ad-hoc signed before the validator sees it.
+                    codesign_nested_macos_bundle(&ctx.aax_bundle(profile))?;
                 }
             }
         }
@@ -378,7 +426,7 @@ fn add_wrapper_product_args(ctx: &Context, command: &mut Command, build: Wrapper
     for (index, plugin) in ctx.metadata.plugins.iter().enumerate() {
         match build {
             WrapperBuild::Plugin { au: true, .. } => {
-                // CLAP/VST3 read product descriptors from the Rust plugin factory.
+                // CLAP/VST3/AAX read product descriptors from the Rust plugin factory.
                 // AUv2 cannot, so only AUv2 builds need per-product output and
                 // four-character AudioComponent identity values from xtask.
                 command
@@ -497,6 +545,10 @@ fn install_plugin_targets(
                 &ctx.vst3_bundle(profile),
                 &install_dir(ctx, scope, PluginFormat::Vst3)?,
             )?,
+            PluginTarget::Aax => install_artifact(
+                &ctx.aax_bundle(profile),
+                &install_dir(ctx, scope, PluginFormat::Aax)?,
+            )?,
             PluginTarget::Au => {
                 let install_dir = install_dir(ctx, scope, PluginFormat::Au)?;
                 for artifact in ctx.au_bundles(profile) {
@@ -549,6 +601,7 @@ enum PluginFormat {
     Clap,
     Vst3,
     Au,
+    Aax,
 }
 
 fn install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Result<PathBuf> {
@@ -562,6 +615,12 @@ fn install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Resu
         (Platform::Macos, InstallScope::User, PluginFormat::Au) => {
             home_dir()?.join("Library/Audio/Plug-Ins/Components")
         }
+        (Platform::Macos, InstallScope::User, PluginFormat::Aax) => {
+            return Err(
+                "AAX plugins install to the system-wide Avid folder on macOS; use --scope=system"
+                    .into(),
+            );
+        }
         (Platform::Macos, InstallScope::System, PluginFormat::Clap) => {
             PathBuf::from("/Library/Audio/Plug-Ins/CLAP")
         }
@@ -571,6 +630,9 @@ fn install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Resu
         (Platform::Macos, InstallScope::System, PluginFormat::Au) => {
             PathBuf::from("/Library/Audio/Plug-Ins/Components")
         }
+        (Platform::Macos, InstallScope::System, PluginFormat::Aax) => {
+            PathBuf::from("/Library/Application Support/Avid/Audio/Plug-Ins")
+        }
         (Platform::Windows, InstallScope::User, PluginFormat::Clap) => local_app_data()?
             .join("Programs")
             .join("Common")
@@ -579,17 +641,30 @@ fn install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Resu
             .join("Programs")
             .join("Common")
             .join("VST3"),
+        (Platform::Windows, InstallScope::User, PluginFormat::Aax) => {
+            return Err(
+                "AAX plugins install to the system-wide Avid folder on Windows; use --scope=system"
+                    .into(),
+            );
+        }
         (Platform::Windows, InstallScope::System, PluginFormat::Clap) => {
             common_program_files()?.join("CLAP")
         }
         (Platform::Windows, InstallScope::System, PluginFormat::Vst3) => {
             common_program_files()?.join("VST3")
         }
+        (Platform::Windows, InstallScope::System, PluginFormat::Aax) => common_program_files()?
+            .join("Avid")
+            .join("Audio")
+            .join("Plug-Ins"),
         (Platform::Windows, _, PluginFormat::Au) => {
             return Err("AU is not supported on Windows".into());
         }
         (Platform::Linux, InstallScope::User, PluginFormat::Clap) => home_dir()?.join(".clap"),
         (Platform::Linux, InstallScope::User, PluginFormat::Vst3) => home_dir()?.join(".vst3"),
+        (Platform::Linux, _, PluginFormat::Aax) => {
+            return Err("AAX is not supported on Linux".into());
+        }
         (Platform::Linux, InstallScope::System, PluginFormat::Clap) => {
             PathBuf::from("/usr/lib/clap")
         }
@@ -628,10 +703,12 @@ fn installed_artifacts(
         PluginTarget::Clap => PluginFormat::Clap,
         PluginTarget::Vst3 => PluginFormat::Vst3,
         PluginTarget::Au => PluginFormat::Au,
+        PluginTarget::Aax => PluginFormat::Aax,
     };
     let bundle_names = match target {
         PluginTarget::Clap => vec![ctx.metadata.clap_bundle_name()],
         PluginTarget::Vst3 => vec![ctx.metadata.vst3_bundle_name()],
+        PluginTarget::Aax => vec![ctx.metadata.aax_bundle_name()],
         PluginTarget::Au => ctx
             .metadata
             .plugins
@@ -640,18 +717,34 @@ fn installed_artifacts(
             .collect(),
     };
     let mut artifacts = Vec::new();
-    for install_scope in uninstall_scopes(scope) {
+    for install_scope in uninstall_scopes(ctx.platform, scope, format)? {
         let dir = install_dir(ctx, *install_scope, format)?;
         artifacts.extend(bundle_names.iter().map(|bundle_name| dir.join(bundle_name)));
     }
     Ok(artifacts)
 }
 
-fn uninstall_scopes(scope: UninstallScope) -> &'static [InstallScope] {
+fn uninstall_scopes(
+    platform: Platform,
+    scope: UninstallScope,
+    format: PluginFormat,
+) -> Result<&'static [InstallScope]> {
     match scope {
-        UninstallScope::All => &[InstallScope::User, InstallScope::System],
-        UninstallScope::User => &[InstallScope::User],
-        UninstallScope::System => &[InstallScope::System],
+        UninstallScope::All => {
+            if matches!(
+                (platform, format),
+                (Platform::Macos | Platform::Windows, PluginFormat::Aax)
+            ) {
+                // AAX has no user-local install location on macOS or Windows.
+                // Keep the default broad cleanup useful by targeting the only valid
+                // install scope instead of failing before it can remove system bundles.
+                Ok(&[InstallScope::System])
+            } else {
+                Ok(&[InstallScope::User, InstallScope::System])
+            }
+        }
+        UninstallScope::User => Ok(&[InstallScope::User]),
+        UninstallScope::System => Ok(&[InstallScope::System]),
     }
 }
 
@@ -666,6 +759,9 @@ pub(crate) fn validate(
         // the artifact. Proceeding to CMake with an empty submodule directory produces an opaque error.
         ensure_vst3_sdk_input(ctx)?;
     }
+    if targets.contains(&ValidateTarget::Aax) {
+        ensure_aax_sdk_input(ctx)?;
+    }
     validate_targets(ctx, profile, &targets)
 }
 
@@ -675,7 +771,7 @@ fn validate_targets(
     targets: &[ValidateTarget],
 ) -> Result<()> {
     if targets.is_empty() {
-        println!("No CLAP/VST3/AU targets to validate.");
+        println!("No validation targets to validate.");
         return Ok(());
     }
 
@@ -728,7 +824,551 @@ fn validate_targets(
         }
     }
 
+    if targets.contains(&ValidateTarget::Aax) {
+        let aax = ctx.aax_bundle(profile);
+        ensure_exists(&aax, "AAX artifact")?;
+        run_aax_validator(ctx, &aax)?;
+    }
+
     Ok(())
+}
+
+fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
+    let results_dir = ctx.wrac_dir().join("validation").join("aax");
+    // A fresh directory prevents a previous pass result from masking a missing
+    // validator output if DTT exits early or changes a result reference.
+    remove_if_exists(&results_dir)?;
+    fs::create_dir_all(&results_dir)?;
+    let aax = stage_aax_for_validator(&results_dir, aax)?;
+
+    println!("Running AAX validator for: {}", aax.display());
+    println!(
+        "AAX validation runs {} selected validator tests.",
+        AAX_VALIDATOR_REQUIRED_TESTS.len()
+    );
+    for (test_id, reason) in AAX_VALIDATOR_SKIPPED_TESTS {
+        println!("Skipping {test_id}: {reason}.");
+    }
+    println!();
+
+    run_aax_validator_dtt(ctx, &aax, &results_dir)?;
+
+    assert_aax_validator_results(&results_dir)
+}
+
+fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Result<()> {
+    let dtt = ensure_aax_validator_dtt(ctx)?;
+    let aax_search_dir = aax
+        .parent()
+        .ok_or_else(|| format!("AAX bundle path has no parent directory: {}", aax.display()))?;
+    println!("========== Running command ==========");
+    println!("$ {}", dtt.display());
+
+    for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
+        let test_dir =
+            results_dir
+                .join("dtt")
+                .join(format!("{:02}-{}", index + 1, test_id.replace('.', "_")));
+        let log_dir = test_dir.join("logs");
+        fs::create_dir_all(&test_dir)?;
+        fs::create_dir_all(&log_dir)?;
+
+        // Avid ships DTT as the automatable scripting layer for DigiShell. Use the
+        // bundled ValidatorRunAllTests script instead of scripting DigiShell stdin
+        // directly because Windows hosted CI can launch DigiShell while dropping
+        // scripted stdin. The script expects a search directory for `findaaxplugins`;
+        // passing the bundle path itself gives a different result shape on some packages.
+        let child = Command::new(&dtt)
+            .arg("--script")
+            .arg("ValidatorRunAllTests")
+            .arg("--no_pref_delete")
+            .arg("--no_move_options")
+            .arg("--disable_digitrace")
+            .arg("--verbose")
+            .arg("--logdir")
+            .arg(&log_dir)
+            .arg("--arg")
+            .arg(format!("pi_path={}", aax_search_dir.display()))
+            .arg("--arg")
+            .arg(format!("out_path={}", test_dir.display()))
+            .arg("--arg")
+            .arg("result_format=json")
+            .arg("--arg")
+            .arg(format!("test_id={test_id}"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .current_dir(dtt.parent().unwrap_or(&ctx.root))
+            .spawn()?;
+        let output = wait_for_aax_validator_process(child, aax_validator_timeout()?)?;
+        let stdout_path = test_dir.join("dtt-stdout.log");
+        let stderr_path = test_dir.join("dtt-stderr.log");
+        fs::write(&stdout_path, &output.stdout)?;
+        fs::write(&stderr_path, &output.stderr)?;
+
+        let result_path = aax_validator_result_path(results_dir, index, test_id);
+        let dtt_result = find_aax_validator_dtt_result(&test_dir, test_id)?;
+        // DTT writes result files with connection-specific suffixes. Copy each one to
+        // a deterministic per-test path so CI artifacts and final pass/fail checks do
+        // not depend on DigiShell connection IDs.
+        fs::copy(&dtt_result, &result_path).map_err(|err| {
+            format!(
+                "failed to copy AAX validator result {} to {}: {err}",
+                dtt_result.display(),
+                result_path.display()
+            )
+        })?;
+
+        if !output.status.success() {
+            print_aax_validator_output(&output.stdout, &output.stderr);
+            print_aax_validator_result(&result_path)?;
+            print_aax_validator_dtt_logs(&log_dir)?;
+            return Err(format!(
+                "AAX validator/DTT failed while running {test_id}; see {} and {}",
+                stdout_path.display(),
+                result_path.display()
+            )
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
+fn find_aax_validator_dtt_result(test_dir: &Path, test_id: &str) -> Result<PathBuf> {
+    let result_dir = test_dir.join("run_all_tests_result");
+    let expected_prefix = format!("{test_id}__");
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(&result_dir).map_err(|err| {
+        format!(
+            "failed to read AAX validator DTT result directory {}: {err}",
+            result_dir.display()
+        )
+    })? {
+        let path = entry?.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if file_name.starts_with(&expected_prefix)
+            && path.extension().is_some_and(|ext| ext == "json")
+        {
+            matches.push(path);
+        }
+    }
+    match matches.as_slice() {
+        [path] => Ok(path.clone()),
+        [] => Err(format!(
+            "AAX validator/DTT did not write a JSON result for {test_id} under {}",
+            result_dir.display()
+        )
+        .into()),
+        _ => Err(format!(
+            "AAX validator/DTT wrote multiple JSON results for {test_id} under {}",
+            result_dir.display()
+        )
+        .into()),
+    }
+}
+
+fn assert_aax_validator_results(results_dir: &Path) -> Result<()> {
+    let mut failed = Vec::new();
+    for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
+        let result_path = aax_validator_result_path(results_dir, index, test_id);
+        let status = aax_validator_result_status(&result_path)?;
+        if status == "E_COMPLETED_PASS" {
+            println!("AAX validator PASS: {test_id}");
+        } else {
+            println!(
+                "AAX validator FAIL: {test_id} ({status}); see {}",
+                result_path.display()
+            );
+            failed.push(format!("{test_id} ({status})"));
+        }
+    }
+    if !failed.is_empty() {
+        return Err(format!(
+            "AAX validator reported failed validation results: {}",
+            failed.join(", ")
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result<Output> {
+    let started_at = Instant::now();
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(child.wait_with_output()?);
+        }
+        if started_at.elapsed() >= timeout {
+            // Keep timeouts outside `run()` so failed DTT processes still have their
+            // stdout/stderr printed. That output is usually the only clue when the
+            // validator hangs while loading a bundle.
+            child.kill()?;
+            let output = child.wait_with_output()?;
+            print_aax_validator_output(&output.stdout, &output.stderr);
+            return Err(format!(
+                "AAX validator process timed out after {} seconds",
+                timeout.as_secs()
+            )
+            .into());
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn aax_validator_timeout() -> Result<Duration> {
+    let seconds = match env::var("AAX_VALIDATOR_TIMEOUT_SECS") {
+        Ok(value) => value
+            .parse::<u64>()
+            .map_err(|err| format!("failed to parse AAX_VALIDATOR_TIMEOUT_SECS={value}: {err}"))?,
+        Err(env::VarError::NotPresent) => AAX_VALIDATOR_TIMEOUT_SECS,
+        Err(err) => {
+            return Err(format!("failed to read AAX_VALIDATOR_TIMEOUT_SECS: {err}").into());
+        }
+    };
+    Ok(Duration::from_secs(seconds))
+}
+
+fn stage_aax_for_validator(results_dir: &Path, aax: &Path) -> Result<PathBuf> {
+    let bundle_name = aax
+        .file_name()
+        .ok_or_else(|| format!("AAX bundle path has no file name: {}", aax.display()))?;
+    let staged_aax = results_dir.join("input").join(bundle_name);
+    // DSH/DTT path handling is easier to keep stable when the search directory has
+    // no spaces, but the `.aaxplugin` bundle name itself should stay product-facing.
+    // Avid's DTT discovery inspects bundle structure, so renaming the bundle during
+    // staging can make `findaaxplugins` miss an otherwise valid plug-in.
+    remove_if_exists(&staged_aax)?;
+    if let Some(parent) = staged_aax.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    copy_path(aax, &staged_aax)?;
+    Ok(staged_aax)
+}
+
+fn print_aax_validator_output(stdout: &[u8], stderr: &[u8]) {
+    let stdout = String::from_utf8_lossy(stdout);
+    if !stdout.trim().is_empty() {
+        println!("========== AAX validator stdout ==========");
+        println!("{stdout}");
+    }
+    let stderr = String::from_utf8_lossy(stderr);
+    if !stderr.trim().is_empty() {
+        println!("========== AAX validator stderr ==========");
+        println!("{stderr}");
+    }
+}
+
+fn print_aax_validator_result(path: &Path) -> Result<()> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read AAX validator result {}: {err}",
+            path.display()
+        )
+    })?;
+    println!(
+        "========== AAX validator result ({}) ==========",
+        path.display()
+    );
+    println!("{content}");
+    Ok(())
+}
+
+fn print_aax_validator_dtt_logs(log_dir: &Path) -> Result<()> {
+    for path in collect_files(log_dir)? {
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !file_name.ends_with(".txt") {
+            continue;
+        }
+        let content = fs::read_to_string(&path).map_err(|err| {
+            format!(
+                "failed to read AAX validator DTT log {}: {err}",
+                path.display()
+            )
+        })?;
+        println!(
+            "========== AAX validator DTT log ({}) ==========",
+            path.display()
+        );
+        let max_len = 64 * 1024;
+        if content.len() > max_len {
+            let split = content
+                .char_indices()
+                .map(|(index, _)| index)
+                .take_while(|index| *index <= max_len)
+                .last()
+                .unwrap_or(0);
+            println!("{}", &content[..split]);
+            println!(
+                "... truncated {} bytes from {}",
+                content.len() - split,
+                path.display()
+            );
+        } else {
+            println!("{content}");
+        }
+    }
+    Ok(())
+}
+
+fn collect_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    if !root.exists() {
+        return Ok(files);
+    }
+    collect_files_inner(root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(path)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_files_inner(&path, files)?;
+        } else {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn aax_validator_result_path(results_dir: &Path, index: usize, test_id: &str) -> PathBuf {
+    results_dir.join(format!(
+        "{:02}-{}.json",
+        index + 1,
+        test_id.replace('.', "_")
+    ))
+}
+
+fn aax_validator_result_status(path: &Path) -> Result<String> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read AAX validator result {}: {err}",
+            path.display()
+        )
+    })?;
+    let json: Value = serde_json::from_str(&content).map_err(|err| {
+        format!(
+            "failed to parse AAX validator result {}: {err}",
+            path.display()
+        )
+    })?;
+    json.get("result_status")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "AAX validator result did not include result_status: {}",
+                path.display()
+            )
+            .into()
+        })
+}
+
+fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
+    let root = aax_validator_dsh_root(ctx)?;
+    let dtt = aax_validator_dtt_runner(&root, ctx.platform)?;
+    ensure_exists(&dtt, "AAX validator DTT runner")?;
+    if ctx.platform == Platform::Windows {
+        normalize_windows_aax_validator_dtt_config(&root)?;
+    }
+    if ctx.platform == Platform::Macos {
+        // Browser-downloaded Avid archives may carry quarantine attributes, and
+        // `run_test.command` is not guaranteed to preserve its executable bit after
+        // extraction. Normalize both here so first-run local validation behaves like CI.
+        let _ = Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine"])
+            .arg(&root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        run(Command::new("chmod")
+            .arg("+x")
+            .arg(&dtt)
+            .current_dir(&ctx.root))?;
+    }
+    Ok(dtt)
+}
+
+fn normalize_windows_aax_validator_dtt_config(root: &Path) -> Result<()> {
+    // User-supplied roots may point either at the archive root or directly at the
+    // AAXValidatorResources root. Normalize every matching extracted config so both
+    // layouts behave the same without asking users to repack Avid's archive.
+    for candidate in [
+        root.join("DigiShell")
+            .join("AAXValidatorResources")
+            .join("Main.valconfig"),
+        root.join("AAXValidatorResources").join("Main.valconfig"),
+    ] {
+        if candidate.exists() {
+            normalize_windows_aax_validator_main_config(&candidate)?;
+        }
+    }
+    Ok(())
+}
+
+fn normalize_windows_aax_validator_main_config(path: &Path) -> Result<()> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read AAX validator config {}: {err}",
+            path.display()
+        )
+    })?;
+    // Avid's Windows 2024.6 validator package uses POSIX single quotes for the
+    // DTT process arguments in Main.valconfig. `cmd.exe` passes those quotes
+    // through literally, so DTT does not receive `bundle_path` and its helper
+    // scripts fall back to sample plug-in names such as `Trim.aaxplugin`. Patch
+    // only the extracted target/ copy and use the same escaped double-quote style
+    // already used by the validator's other Windows process definitions.
+    let normalized = content
+        .replace(
+            "elem: \"\\'bundle_path=$AAXVAL_PARAM_AAXPLUGIN$\\'\"",
+            "elem: \"\\\"bundle_path=$AAXVAL_PARAM_AAXPLUGIN$\\\"\"",
+        )
+        .replace(
+            "elem: \"\\'uniq_id=$AAXVAL_PARAM_UNIQ_ID$\\'\"",
+            "elem: \"\\\"uniq_id=$AAXVAL_PARAM_UNIQ_ID$\\\"\"",
+        );
+    if normalized != content {
+        fs::write(path, normalized).map_err(|err| {
+            format!(
+                "failed to write normalized AAX validator config {}: {err}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
+    if let Some(root) = env::var_os("AAX_VALIDATOR_DSH_ROOT").map(PathBuf::from) {
+        return Ok(root);
+    }
+
+    let extracted_root = ctx.target_dir.join("tools").join("aax-validator-dsh");
+    if aax_validator_dsh_executable(&extracted_root, ctx.platform).is_ok() {
+        return Ok(extracted_root);
+    }
+
+    let archive = aax_validator_dsh_archive()?;
+    // Extract into target/ so CI caches or local builds can reuse the private
+    // validator without committing Avid binaries to the template repository.
+    remove_if_exists(&extracted_root)?;
+    fs::create_dir_all(&extracted_root)?;
+    if archive
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+    {
+        // Windows validator downloads are zip archives. GitHub-hosted Windows runners
+        // provide 7-Zip, and using it here avoids relying on tar implementations that
+        // only support tar streams.
+        run(Command::new("7z")
+            .arg("x")
+            .arg(&archive)
+            .arg(format!("-o{}", extracted_root.display()))
+            .arg("-y")
+            .current_dir(&ctx.root))?;
+    } else {
+        run(Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("--strip-components=1")
+            .arg("-C")
+            .arg(&extracted_root)
+            .current_dir(&ctx.root))?;
+    }
+    Ok(extracted_root)
+}
+
+fn aax_validator_dsh_archive() -> Result<PathBuf> {
+    if let Some(archive) = env::var_os("AAX_VALIDATOR_DSH_ARCHIVE").map(PathBuf::from) {
+        ensure_exists(&archive, "AAX validator/DSH archive")?;
+        return Ok(archive);
+    }
+    // Environment variables are the reproducible path for CI. The Downloads fallback
+    // is only a local developer convenience for the exact Avid archive names.
+    let downloads = home_dir()?.join("Downloads");
+    for name in [
+        "aax-validator-dsh-2024-6-0-138bab0d-mac-arm64.tar.gz",
+        "aax-validator-dsh-2024-6-0-138bab0d-mac-x64.tar.gz",
+        "aax-validator-dsh-2024-6-0-dc68c2dd-win-x86_64.zip",
+    ] {
+        let archive = downloads.join(name);
+        if archive.exists() {
+            return Ok(archive);
+        }
+    }
+    Err("AAX validator/DSH not found. Set AAX_VALIDATOR_DSH_ROOT to the extracted validator directory or AAX_VALIDATOR_DSH_ARCHIVE to the downloaded archive.".into())
+}
+
+fn aax_validator_dsh_executable(root: &Path, platform: Platform) -> Result<PathBuf> {
+    let executable = executable_name("dsh", platform);
+    for candidate in [
+        // Avid's Windows validator ReadMe starts DigiShell from the package root.
+        // The Tools copy can launch but may not consume scripted stdin reliably on
+        // hosted CI, so prefer the root executable for Windows zip archives.
+        root.join("DigiShell").join(&executable),
+        // Zip extraction keeps the archive's top-level DigiShell directory. Include the
+        // nested Windows paths so CI can consume Avid's downloaded archive directly.
+        root.join("DigiShell")
+            .join("AAXValidatorResources")
+            .join("Tools")
+            .join(&executable),
+        // Windows validator archives place the runnable validator dish and helper
+        // executables under AAXValidatorResources/Tools. Keep it as a fallback for
+        // extracted roots supplied by users.
+        root.join("AAXValidatorResources")
+            .join("Tools")
+            .join(&executable),
+        // macOS archives expose CommandLineTools at the package root.
+        root.join("CommandLineTools").join(&executable),
+        // Some Windows archives also include a top-level dsh.exe. Keep it as a fallback
+        // for extracted roots supplied by users, but do not rely on it in CI.
+        root.join(&executable),
+    ] {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "AAX validator DSH executable not found under {}",
+        root.display()
+    )
+    .into())
+}
+
+fn aax_validator_dtt_runner(root: &Path, platform: Platform) -> Result<PathBuf> {
+    let runner = if platform == Platform::Windows {
+        "run_test.bat"
+    } else {
+        "run_test.command"
+    };
+    for candidate in [
+        root.join("DigiShell").join("DTT").join(runner),
+        root.join("DTT").join(runner),
+        root.join("DigiShell")
+            .join("AAXValidatorResources")
+            .join("Tools")
+            .join("DTT")
+            .join(runner),
+        root.join("AAXValidatorResources")
+            .join("Tools")
+            .join("DTT")
+            .join(runner),
+    ] {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    Err(format!(
+        "AAX validator DTT runner not found under {}",
+        root.display()
+    )
+    .into())
 }
 
 fn ensure_clap_validator(ctx: &Context) -> Result<PathBuf> {
@@ -873,7 +1513,12 @@ pub(crate) fn clean(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-fn ensure_wrapper_inputs(ctx: &Context, needs_vst3: bool, needs_au: bool) -> Result<()> {
+fn ensure_wrapper_inputs(
+    ctx: &Context,
+    needs_vst3: bool,
+    needs_au: bool,
+    needs_aax: bool,
+) -> Result<()> {
     // Missing subtree files or uninitialized SDK submodules otherwise surface as opaque CMake errors.
     // Check the sentinel files the wrapper actually reads.
     ensure_exists(&ctx.wrapper_dir, "clap_wrapper_builder directory")?;
@@ -902,6 +1547,9 @@ fn ensure_wrapper_inputs(ctx: &Context, needs_vst3: bool, needs_au: bool) -> Res
             "AudioUnitSDK submodule",
         )?;
     }
+    if needs_aax {
+        ensure_aax_sdk_input(ctx)?;
+    }
     Ok(())
 }
 
@@ -912,11 +1560,51 @@ fn ensure_vst3_sdk_input(ctx: &Context) -> Result<()> {
     )
 }
 
+fn ensure_aax_sdk_input(ctx: &Context) -> Result<()> {
+    let root = aax_sdk_root(ctx)?;
+    ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")
+}
+
+fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
+    if let Some(root) = env::var_os("AAX_SDK_ROOT").map(PathBuf::from) {
+        // clap-wrapper evaluates AAX_SDK_ROOT inside its CMake project, so a relative
+        // path would be resolved against clap_wrapper_builder rather than this repo.
+        // Normalize here so CI and local shells can both use repo-relative paths.
+        return Ok(if root.is_absolute() {
+            root
+        } else {
+            ctx.root.join(root)
+        });
+    }
+
+    // Local Avid downloads are commonly unpacked under Downloads. Environment
+    // variables remain the deterministic CI path; this fallback keeps first-run
+    // developer validation from requiring shell-profile edits.
+    let downloads = home_dir()?.join("Downloads");
+    for name in ["aax-sdk-2-9-0", "aax-sdk-2-8-1"] {
+        let root = downloads.join(name);
+        if root.join("Interfaces").join("AAX.h").exists() {
+            return Ok(root);
+        }
+    }
+
+    Err("AAX SDK not found. Set AAX_SDK_ROOT to the extracted AAX SDK root directory.".into())
+}
+
+fn executable_name(name: &str, platform: Platform) -> String {
+    if platform == Platform::Windows {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
+}
+
 fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
     for target in targets {
         match target {
             Target::Clap => println!("CLAP: {}", ctx.clap_bundle(profile).display()),
             Target::Vst3 => println!("VST3: {}", ctx.vst3_bundle(profile).display()),
+            Target::Aax => println!("AAX: {}", ctx.aax_bundle(profile).display()),
             Target::Au => {
                 for artifact in ctx.au_bundles(profile) {
                     println!("AU: {}", artifact.display());

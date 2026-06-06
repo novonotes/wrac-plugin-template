@@ -32,16 +32,16 @@ It is also structured so it can be used as a template.
 
 - CLAP plugin implementation in Rust using [clap-sys](https://github.com/micahrj/clap-sys)
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
-- VST3 / AU plugin builds and a development standalone app via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
+- VST3 / AU / AAX plugin builds and a development standalone app via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
 
 ## Quick Start
 
 Want to try the bundled WRAC Gain plugin before building your own? Follow the minimal steps below.
 With just Rust and Node.js you should be able to build CLAP.
-For the prerequisites to build VST3 / AU or the development standalone app, see the [Setup doc](docs/setup.md#prerequisites).
+For the prerequisites to build VST3 / AU / AAX or the development standalone app, see the [Setup doc](docs/setup.md#prerequisites).
 
 ```sh
-# Clone the template. Add --recursive if you plan to build VST3 / AU or the development standalone app.
+# Clone the template. Add --recursive if you plan to build VST3 / AU / AAX or the development standalone app.
 git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
@@ -75,7 +75,8 @@ Yes. This repository is licensed under the MIT License, which permits commercial
 
 ### What about AAX and AUv3 support?
 
-AAX and AUv3 support are ongoing. `clap-wrapper` already has AAX support on its `next` branch, and NovoNotes is using it for internal macOS AAX builds. AUv3 support also has open `clap-wrapper` pull requests, but NovoNotes has not verified it yet. This template currently supports CLAP / VST3 / AU as plugin formats, plus a development-only standalone app target.
+AAX is supported as an explicit build/install/validate target on macOS and Windows. See [AAX Build and Validation](docs/aax.md).
+AUv3 support is still ongoing.
 
 ## Build
 
@@ -111,11 +112,11 @@ Supported plugin formats:
 
 | OS | Supported formats |
 |----|---------------------------|
-| macOS | CLAP / VST3 / AU |
-| Windows | CLAP / VST3 |
+| macOS | CLAP / VST3 / AU / AAX |
+| Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
 
-For build/debug commands, the `--target` option also accepts `standalone` as a development-only target.
+AAX must be requested explicitly with `--target=aax`; it is not included in default build, install, or validate target sets. For build/debug commands, the `--target` option also accepts `standalone` as a development-only target.
 
 For detailed usage:
 

@@ -26,7 +26,7 @@ use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudi
 use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
 use wrac_clap_adapter::{
-    ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
+    AaxDescriptor, AaxStemConfig, ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
     PluginConfigurableAudioPortsExtension, PluginCore, PluginCoreContext, PluginDescriptor,
     PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension, PluginParamsExtension,
     PluginResult, PluginStateExtension, Processor, Vst3Descriptor,

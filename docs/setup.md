@@ -11,9 +11,9 @@ This guide explains how to create a new wxp plugin starting from `wrac-plugin-te
 - Rust (latest stable)
 - Node.js (npm)
 
-### Building VST3 / AU or the development standalone app
+### Building VST3 / AU / AAX or the development standalone app
 
-To generate VST3 / AU using clap-wrapper, or to build the development standalone app, the following are additionally required.
+To generate VST3 / AU / AAX using clap-wrapper, or to build the development standalone app, the following are additionally required.
 
 **macOS:**
 - Xcode or Xcode Command Line Tools
@@ -48,6 +48,7 @@ git submodule update --init --recursive
 
 Submodules are not needed if you are only building CLAP.
 The SDK submodules used by clap-wrapper are required when building VST3 / AU, building the development standalone app, or validating VST3 / AU.
+AAX builds additionally require the private AAX SDK. Set `AAX_SDK_ROOT` to the extracted SDK root directory. See [AAX Build and Validation](aax.md).
 
 ### 2. Configure Plugin Identity
 
@@ -59,6 +60,8 @@ Edit the commented `[package.metadata.wrac]` and `[[package.metadata.wrac.plugin
 > `clap_features` must match the plugin's real audio/MIDI behavior because CLAP hosts read it directly.
 > `vst3_subcategories` controls VST3 host browser categories; use Steinberg-style `|`-separated values such as `Fx|Dynamics`.
 > `vst3_component_id` must be a stable UUID. Generate it once before release and never change it for the same product.
+> `aax_manufacturer_id`, `aax_product_id`, and each AAX stem config `plugin_id` must be stable 4-byte ASCII IDs.
+> AAX stem configs should list only the channel layouts the product actually supports.
 
 ### 3. Bulk Replace Remaining Identifiers
 
@@ -106,7 +109,9 @@ cargo xtask install
 Use `-p/--package` with the Cargo package name when the workspace contains multiple WRAC plugin packages.
 `cargo xtask install` installs to user-local paths by default.
 Use `cargo xtask install --scope=system` for hosts that only scan system-wide plugin folders.
-The `--target` option accepts `clap`, `vst3`, and `au` as comma-separated values.
+The `--target` option accepts `clap`, `vst3`, `au`, and `aax` as comma-separated values.
+AAX is not included in the default target set; request it explicitly with `--target=aax`.
+On macOS and Windows, AAX installs to the system-wide Avid plugin folder, so use `--scope=system`.
 
 ### 5. Verify
 

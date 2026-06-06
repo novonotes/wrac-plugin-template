@@ -7,6 +7,7 @@ pub(crate) enum Target {
     Clap,
     Vst3,
     Au,
+    Aax,
     Standalone,
 }
 
@@ -16,12 +17,13 @@ impl Target {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
             Self::Au => "AU",
+            Self::Aax => "AAX",
             Self::Standalone => "Standalone",
         }
     }
 
     pub(crate) fn is_wrapper(self) -> bool {
-        matches!(self, Self::Vst3 | Self::Au)
+        matches!(self, Self::Vst3 | Self::Au | Self::Aax)
     }
 }
 
@@ -30,6 +32,7 @@ pub(crate) enum PluginTarget {
     Clap,
     Vst3,
     Au,
+    Aax,
 }
 
 impl PluginTarget {
@@ -38,6 +41,7 @@ impl PluginTarget {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
             Self::Au => "AU",
+            Self::Aax => "AAX",
         }
     }
 
@@ -46,6 +50,7 @@ impl PluginTarget {
             Self::Clap => Target::Clap,
             Self::Vst3 => Target::Vst3,
             Self::Au => Target::Au,
+            Self::Aax => Target::Aax,
         }
     }
 }
@@ -55,6 +60,7 @@ pub(crate) enum ValidateTarget {
     Clap,
     Vst3,
     Au,
+    Aax,
 }
 
 impl ValidateTarget {
@@ -63,6 +69,7 @@ impl ValidateTarget {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
             Self::Au => "AU",
+            Self::Aax => "AAX",
         }
     }
 
@@ -71,6 +78,7 @@ impl ValidateTarget {
             Self::Clap => Target::Clap,
             Self::Vst3 => Target::Vst3,
             Self::Au => Target::Au,
+            Self::Aax => Target::Aax,
         }
     }
 }
@@ -100,11 +108,15 @@ impl Platform {
     }
 
     pub(crate) fn supports_wrappers(self) -> bool {
-        self.supports_vst3() || self.supports_au()
+        self.supports_vst3() || self.supports_au() || self.supports_aax()
     }
 
     pub(crate) fn supports_au(self) -> bool {
         self == Self::Macos
+    }
+
+    pub(crate) fn supports_aax(self) -> bool {
+        matches!(self, Self::Macos | Self::Windows)
     }
 
     pub(crate) fn supports_target(self, target: Target) -> bool {
@@ -112,6 +124,7 @@ impl Platform {
             Target::Clap => true,
             Target::Vst3 => self.supports_vst3(),
             Target::Au => self.supports_au(),
+            Target::Aax => self.supports_aax(),
             Target::Standalone => matches!(self, Self::Macos | Self::Windows | Self::Linux),
         }
     }

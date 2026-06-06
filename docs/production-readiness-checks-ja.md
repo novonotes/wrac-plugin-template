@@ -80,6 +80,6 @@ reason = "This product does not support Fender Studio Pro generic editor workflo
 
 **理由:** テンプレート由来の値は、製品作成時に手作業で置き換える必要があるため、見落としが起きやすいです。
 
-**エラー条件:** manifest metadata に `Your Company`、`YrCo`、`com.your-company`、`example.com`、`WRAC Gain`、`wrac_gain_plugin`、`WtGn`、template VST3 component UUID、テンプレートリポジトリ URL などの placeholder が残っている。このルールはテンプレートリポジトリ自体では skipped されます。
+**エラー条件:** manifest metadata に `Your Company`、`YrCo`、`com.your-company`、`example.com`、`WRAC Gain`、`wrac_gain_plugin`、`WtGn`、`WtGM`、`WtGS`、template VST3 component UUID、テンプレートリポジトリ URL などの placeholder が残っている。このルールはテンプレートリポジトリ自体では skipped されます。
 
 **修正方法:** テンプレート由来の metadata を製品固有の metadata に置き換えてください。テンプレートまたは example repository として意図的に残す場合は、reason を書いてルールを無効化してください。

@@ -81,7 +81,7 @@ jobs:
         run: cargo test --locked --workspace
 
   plugin-build:
-    name: Plugin artifact validation (${{ matrix.os }})
+    name: VST3/AU/CLAP Validator (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     env:
       CARGO_HTTP_MULTIPLEXING: false
@@ -150,12 +150,114 @@ jobs:
       - name: Cargo fetch
         run: bash .github/scripts/retry.sh cargo fetch --locked
 
-      - name: Build all supported artifacts
+      - name: Build plugin and standalone artifacts
         run: cargo xtask build --release
 
-      - name: Validate plugin artifacts
+      - name: Run VST3/AU/CLAP validators
         if: matrix.validate-targets != ''
         run: cargo xtask validate --release --target=${{ matrix.validate-targets }}
 
-      - name: Verify plugin artifacts
+      - name: Verify plugin and standalone artifacts
         run: ${{ matrix.verify }}
+
+  aax-validation:
+    name: AAX Validator
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    env:
+      CARGO_HTTP_MULTIPLEXING: false
+      AAX_SDK_ARCHIVE_URL: ${{ vars.AAX_SDK_ARCHIVE_URL || secrets.AAX_SDK_ARCHIVE_URL }}
+      AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL || secrets.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL }}
+      AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL || secrets.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL }}
+    # AAX uses private Avid downloads, so this job is intentionally kept out of
+    # fork pull-request CI. Maintainers can run it with workflow_dispatch before
+    # merging, and protected-branch pushes validate the same contract after merge.
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.12.0"
+          cache: npm
+          cache-dependency-path: plugins/wrac-gain/src-gui/package-lock.json
+
+      - name: Show tool versions
+        run: |
+          rustup show
+          rustc --version
+          cargo --version
+          cmake --version
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            xcodebuild -version
+          fi
+
+      - name: Require AAX archive URLs
+        run: |
+          validator_url="$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            validator_url="$AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL"
+          fi
+
+          if [[ -z "$AAX_SDK_ARCHIVE_URL" ]]; then
+            echo "::error::AAX_SDK_ARCHIVE_URL is required for AAX validation."
+            exit 1
+          fi
+          if [[ -z "$validator_url" ]]; then
+            echo "::error::AAX validator archive URL is required for $RUNNER_OS."
+            exit 1
+          fi
+
+      - name: Download AAX dependencies
+        run: |
+          mkdir -p target/tools/aax-ci
+
+          validator_url="$AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL"
+          validator_archive="target/tools/aax-ci/aax-validator-dsh.tar.gz"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            validator_url="$AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL"
+            validator_archive="target/tools/aax-ci/aax-validator-dsh.zip"
+          fi
+
+          curl --fail --location --retry 3 --output target/tools/aax-ci/aax-sdk.zip "$AAX_SDK_ARCHIVE_URL"
+          curl --fail --location --retry 3 --output "$validator_archive" "$validator_url"
+
+          {
+            echo "AAX_SDK_ARCHIVE=target/tools/aax-ci/aax-sdk.zip"
+            echo "AAX_VALIDATOR_DSH_ARCHIVE=$validator_archive"
+          } >> "$GITHUB_ENV"
+
+      - name: Extract AAX SDK
+        run: |
+          rm -rf target/tools/aax-sdk
+          mkdir -p target/tools/aax-sdk
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z x "$AAX_SDK_ARCHIVE" -otarget/tools/aax-sdk -y
+          else
+            tar -xf "$AAX_SDK_ARCHIVE" -C target/tools/aax-sdk
+          fi
+          sdk_root="$(find target/tools/aax-sdk -maxdepth 3 -type f -path '*/Interfaces/AAX.h' -print -quit)"
+          if [[ -z "$sdk_root" ]]; then
+            echo "::error::AAX SDK archive did not contain Interfaces/AAX.h."
+            exit 1
+          fi
+          sdk_root="${sdk_root%/Interfaces/AAX.h}"
+          sdk_root="$(cd "$sdk_root" && pwd -P)"
+          echo "AAX_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+
+      - name: Cargo fetch
+        run: bash .github/scripts/retry.sh cargo fetch --locked
+
+      - name: Run AAX Validator
+        run: cargo xtask validate --release --target=aax

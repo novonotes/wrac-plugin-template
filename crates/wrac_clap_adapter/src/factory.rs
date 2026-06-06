@@ -2,14 +2,16 @@ use std::ffi::{c_char, c_void};
 use std::ptr;
 
 use clap_sys::factory::plugin_factory::clap_plugin_factory;
+use clap_sys::plugin::clap_plugin;
 
-use crate::descriptor::ClapDescriptorStorage;
+use crate::descriptor::{AaxStemConfig, ClapDescriptorStorage};
 use crate::entry::EntryRegistration;
 
 pub(crate) struct PluginRegistrationStorage {
     pub clap_factory: ClapFactoryState,
     pub auv2_factory: Auv2FactoryState,
     pub vst3_factory: Vst3FactoryState,
+    pub aax_factory: AaxFactoryState,
     pub descriptors: Vec<ClapDescriptorStorage>,
 }
 
@@ -69,6 +71,31 @@ impl PluginRegistrationStorage {
                 },
                 registration,
             },
+            aax_factory: AaxFactoryState {
+                factory: ClapPluginFactoryAsAax {
+                    // AAX package fields describe the binary package, not an individual
+                    // product. clap-wrapper reads them before selecting a plugin index.
+                    package_name: descriptors
+                        .iter()
+                        .find_map(ClapDescriptorStorage::aax_package_name_ptr)
+                        .unwrap_or(ptr::null()),
+                    package_manufacturer: descriptors
+                        .first()
+                        .map(ClapDescriptorStorage::vendor_ptr)
+                        .unwrap_or(ptr::null()),
+                    package_version: descriptors
+                        .iter()
+                        .find_map(ClapDescriptorStorage::aax_package_version)
+                        .unwrap_or(0),
+                    get_aax_info: Some(crate::abi::aax_get_info),
+                    // The template describes static AAX products only. Exposing a
+                    // configuration callback before there is product-side policy for
+                    // host-requested layout changes would make clap-wrapper believe
+                    // dynamic AAX configurations are supported.
+                    can_apply_configuration: None,
+                },
+                registration,
+            },
             descriptors,
         }
     }
@@ -104,6 +131,15 @@ unsafe impl Sync for Vst3FactoryState {}
 unsafe impl Send for Vst3FactoryState {}
 
 #[repr(C)]
+pub(crate) struct AaxFactoryState {
+    pub factory: ClapPluginFactoryAsAax,
+    pub registration: &'static EntryRegistration,
+}
+
+unsafe impl Sync for AaxFactoryState {}
+unsafe impl Send for AaxFactoryState {}
+
+#[repr(C)]
 pub(crate) struct ClapPluginInfoAsAuv2 {
     pub au_type: [c_char; 5],
     pub au_subt: [c_char; 5],
@@ -135,6 +171,9 @@ pub(crate) struct ClapPluginInfoAsVst3 {
 unsafe impl Sync for ClapPluginInfoAsVst3 {}
 unsafe impl Send for ClapPluginInfoAsVst3 {}
 
+// Mirrors clap-wrapper's VST3 factory-info extension ABI. Keep this local copy
+// aligned with free-audio/clap-wrapper `next`; clap-sys intentionally does not
+// define wrapper-private factory extensions.
 #[repr(C)]
 pub(crate) struct ClapPluginFactoryAsVst3 {
     pub vendor: *const c_char,
@@ -150,6 +189,48 @@ pub(crate) struct ClapPluginFactoryAsVst3 {
 
 unsafe impl Sync for ClapPluginFactoryAsVst3 {}
 unsafe impl Send for ClapPluginFactoryAsVst3 {}
+
+#[repr(C)]
+pub(crate) struct ClapPluginInfoAsAax {
+    pub aax_features: u32,
+    pub id_manufacturer: u32,
+    pub id_product: u32,
+    pub midi_in_name: *const c_char,
+    pub midi_out_name: *const c_char,
+    pub midi_in_channel_mask: u32,
+    pub midi_out_channel_mask: u32,
+    pub get_num_stem_configs: Option<unsafe extern "C" fn() -> u32>,
+    pub get_stem_config: Option<unsafe extern "C" fn(index: u32) -> *const AaxStemConfig>,
+}
+
+unsafe impl Sync for ClapPluginInfoAsAax {}
+unsafe impl Send for ClapPluginInfoAsAax {}
+
+// Mirrors clap-wrapper's `clap_plugin_factory_as_aax` extension ABI. Keep the
+// field order and nullability aligned with free-audio/clap-wrapper `next`; unlike
+// the CLAP SDK structs, this extension is not provided by clap-sys.
+#[repr(C)]
+pub(crate) struct ClapPluginFactoryAsAax {
+    pub package_name: *const c_char,
+    pub package_manufacturer: *const c_char,
+    pub package_version: u32,
+    pub get_aax_info: Option<
+        unsafe extern "C" fn(
+            factory: *const ClapPluginFactoryAsAax,
+            index: u32,
+        ) -> *const ClapPluginInfoAsAax,
+    >,
+    pub can_apply_configuration: Option<
+        unsafe extern "C" fn(
+            plugin: *const clap_plugin,
+            requests: *const c_void,
+            request_count: u32,
+        ) -> bool,
+    >,
+}
+
+unsafe impl Sync for ClapPluginFactoryAsAax {}
+unsafe impl Send for ClapPluginFactoryAsAax {}
 
 pub(crate) fn clap_factory_state(
     factory: *const clap_plugin_factory,
@@ -178,6 +259,15 @@ pub(crate) fn vst3_factory_state(
     Some(unsafe { &*(factory as *const Vst3FactoryState) })
 }
 
+pub(crate) fn aax_factory_state(
+    factory: *const ClapPluginFactoryAsAax,
+) -> Option<&'static AaxFactoryState> {
+    if factory.is_null() {
+        return None;
+    }
+    Some(unsafe { &*(factory as *const AaxFactoryState) })
+}
+
 pub(crate) fn factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
     &storage.clap_factory.factory as *const clap_plugin_factory as *const c_void
 }
@@ -188,4 +278,8 @@ pub(crate) fn auv2_factory_ptr(storage: &'static PluginRegistrationStorage) -> *
 
 pub(crate) fn vst3_factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
     &storage.vst3_factory.factory as *const ClapPluginFactoryAsVst3 as *const c_void
+}
+
+pub(crate) fn aax_factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
+    &storage.aax_factory.factory as *const ClapPluginFactoryAsAax as *const c_void
 }

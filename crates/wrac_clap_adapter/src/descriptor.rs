@@ -20,7 +20,7 @@ use clap_sys::plugin_features::{
 };
 use clap_sys::version::CLAP_VERSION;
 
-use crate::factory::ClapPluginInfoAsVst3;
+use crate::factory::{ClapPluginInfoAsAax, ClapPluginInfoAsVst3};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PluginDescriptor {
@@ -35,6 +35,7 @@ pub struct PluginDescriptor {
     pub features: &'static [PluginFeature],
     pub auv2: Option<Auv2Descriptor>,
     pub vst3: Option<Vst3Descriptor>,
+    pub aax: Option<AaxDescriptor>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -142,6 +143,35 @@ pub struct Vst3Descriptor {
     pub component_id: [u8; 16],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct AaxDescriptor {
+    pub package_name: &'static str,
+    /// AAX package version encoded as 0xMMmmppbb.
+    pub package_version: u32,
+    pub categories: u32,
+    /// Avid-facing FourCC identity. Changing these IDs after release breaks recall.
+    pub manufacturer_id: u32,
+    pub product_id: u32,
+    /// AAX wrapper asks for stem metadata before creating plugin instances.
+    /// Keep these callbacks independent from product runtime state.
+    pub get_num_stem_configs: unsafe extern "C" fn() -> u32,
+    pub get_stem_config: unsafe extern "C" fn(index: u32) -> *const AaxStemConfig,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AaxStemConfig {
+    pub name: *const c_char,
+    pub format_in: u32,
+    pub format_out: u32,
+    pub plugin_id: u32,
+}
+
+// Safety: generated stem configs point at immutable, NUL-terminated static strings.
+// clap-wrapper reads them during factory-time metadata collection only.
+unsafe impl Sync for AaxStemConfig {}
+unsafe impl Send for AaxStemConfig {}
+
 // `clap_plugin_descriptor` holds only C string pointers, so the owners of the CString
 // and feature pointer arrays are placed in the same storage to keep their lifetimes
 // aligned with the descriptor pointer.
@@ -163,6 +193,10 @@ pub(crate) struct ClapDescriptorStorage {
     _vst3_subcategories: Option<CString>,
     _vst3_component_id: Option<Box<[u8; 16]>>,
     vst3_info: Option<ClapPluginInfoAsVst3>,
+    // AAX package info is returned through a factory extension before any plugin
+    // instance exists, so the raw pointer owner must live with descriptor storage.
+    _aax_package_name: Option<CString>,
+    aax_info: Option<ClapPluginInfoAsAax>,
     clap_descriptor: clap_plugin_descriptor,
 }
 
@@ -196,6 +230,7 @@ impl ClapDescriptorStorage {
         let auv2_manufacturer_name = descriptor.auv2.map(|auv2| cstring(auv2.manufacturer_name));
         let vst3_subcategories = descriptor.vst3.map(|vst3| cstring(vst3.subcategories));
         let vst3_component_id = descriptor.vst3.map(|vst3| Box::new(vst3.component_id));
+        let aax_package_name = descriptor.aax.map(|aax| cstring(aax.package_name));
         let vst3_info = descriptor.vst3.map(|_| ClapPluginInfoAsVst3 {
             vendor: vendor.as_ptr(),
             component_id: vst3_component_id
@@ -205,6 +240,17 @@ impl ClapDescriptorStorage {
                 .as_ref()
                 .map(|value| value.as_ptr())
                 .unwrap_or(ptr::null()),
+        });
+        let aax_info = descriptor.aax.map(|aax| ClapPluginInfoAsAax {
+            aax_features: aax.categories,
+            id_manufacturer: aax.manufacturer_id,
+            id_product: aax.product_id,
+            midi_in_name: ptr::null(),
+            midi_out_name: ptr::null(),
+            midi_in_channel_mask: 0,
+            midi_out_channel_mask: 0,
+            get_num_stem_configs: Some(aax.get_num_stem_configs),
+            get_stem_config: Some(aax.get_stem_config),
         });
 
         let clap_descriptor = clap_plugin_descriptor {
@@ -236,6 +282,8 @@ impl ClapDescriptorStorage {
             _vst3_subcategories: vst3_subcategories,
             _vst3_component_id: vst3_component_id,
             vst3_info,
+            _aax_package_name: aax_package_name,
+            aax_info,
             clap_descriptor,
         }
     }
@@ -268,6 +316,20 @@ impl ClapDescriptorStorage {
         self.vst3_info
             .as_ref()
             .map(|value| value as *const ClapPluginInfoAsVst3)
+    }
+
+    pub(crate) fn aax_info_ptr(&self) -> Option<*const ClapPluginInfoAsAax> {
+        self.aax_info
+            .as_ref()
+            .map(|value| value as *const ClapPluginInfoAsAax)
+    }
+
+    pub(crate) fn aax_package_name_ptr(&self) -> Option<*const c_char> {
+        self._aax_package_name.as_ref().map(|value| value.as_ptr())
+    }
+
+    pub(crate) fn aax_package_version(&self) -> Option<u32> {
+        self.descriptor.aax.map(|aax| aax.package_version)
     }
 
     pub(crate) fn descriptor(&self) -> PluginDescriptor {

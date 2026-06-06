@@ -71,6 +71,14 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
         "pub(crate) const AUV2_MANUFACTURER_CODE: [u8; 4] = {};\n",
         four_ascii_array_literal(&metadata.auv2_manufacturer_code)
     ));
+    rust.push_str(&format!(
+        "pub(crate) const AAX_MANUFACTURER_ID: u32 = {};\n",
+        fourcc_literal(&metadata.aax_manufacturer_id)
+    ));
+    rust.push_str(&format!(
+        "pub(crate) const AAX_PACKAGE_VERSION: u32 = {};\n",
+        aax_package_version_literal()?
+    ));
     // CLAP hosts read feature strings during discovery. Generate them from the
     // manifest so the production-readiness checks and runtime descriptor cannot
     // drift after a product rename or capability change.
@@ -79,6 +87,24 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
             "const PLUGIN_{index}_FEATURES: &[PluginFeature] = &{};\n",
             plugin_feature_array_literal(&plugin.clap_features)?
         ));
+        // AAX asks for stem configs through C callbacks during package description,
+        // before any Rust plugin instance exists. Generate static tables so the
+        // callback can be lifetime-independent and allocation-free.
+        write_aax_stem_config_statics(&mut rust, index, plugin)?;
+        rust.push_str(&format!(
+            "unsafe extern \"C\" fn plugin_{index}_aax_get_num_stem_configs() -> u32 {{\n"
+        ));
+        rust.push_str(&format!(
+            "    PLUGIN_{index}_AAX_STEM_CONFIGS.len() as u32\n"
+        ));
+        rust.push_str("}\n");
+        rust.push_str(&format!(
+            "unsafe extern \"C\" fn plugin_{index}_aax_get_stem_config(index: u32) -> *const AaxStemConfig {{\n"
+        ));
+        rust.push_str(&format!(
+            "    PLUGIN_{index}_AAX_STEM_CONFIGS.get(index as usize).map_or(core::ptr::null(), |config| config)\n"
+        ));
+        rust.push_str("}\n");
     }
     rust.push_str("pub(crate) const PLUGIN_DESCRIPTORS: &[PluginDescriptor] = &[\n");
     for (index, plugin) in metadata.plugins.iter().enumerate() {
@@ -118,6 +144,28 @@ fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<
         rust.push_str(&format!(
             "            component_id: {},\n",
             uuid_array_literal(&plugin.vst3_component_id)?
+        ));
+        rust.push_str("        }),\n");
+        rust.push_str("        aax: Some(AaxDescriptor {\n");
+        rust.push_str(&format!(
+            "            package_name: {:?},\n",
+            metadata.bundle_name
+        ));
+        rust.push_str("            package_version: AAX_PACKAGE_VERSION,\n");
+        rust.push_str(&format!(
+            "            categories: {},\n",
+            aax_categories_literal(&plugin.aax_categories)?
+        ));
+        rust.push_str("            manufacturer_id: AAX_MANUFACTURER_ID,\n");
+        rust.push_str(&format!(
+            "            product_id: {},\n",
+            fourcc_literal(&plugin.aax_product_id)
+        ));
+        rust.push_str(&format!(
+            "            get_num_stem_configs: plugin_{index}_aax_get_num_stem_configs,\n"
+        ));
+        rust.push_str(&format!(
+            "            get_stem_config: plugin_{index}_aax_get_stem_config,\n"
         ));
         rust.push_str("        }),\n");
         rust.push_str("    },\n");
@@ -206,6 +254,8 @@ struct PackageMetadata {
 struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
+    aax_manufacturer_id: String,
+    bundle_name: String,
     bundle_identifier: String,
     homepage_url: String,
     manual_url: String,
@@ -225,6 +275,17 @@ struct WracPluginMetadata {
     standalone_name: String,
     auv2_type: String,
     auv2_subtype: String,
+    aax_categories: Vec<String>,
+    aax_product_id: String,
+    aax_stem_configs: Vec<AaxStemConfigMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AaxStemConfigMetadata {
+    name: String,
+    input: String,
+    output: String,
+    plugin_id: String,
 }
 
 fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
@@ -239,6 +300,7 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         .ok_or_else(missing_wrac_metadata)?;
     validate_required("package.metadata.wrac.company_name", &metadata.company_name)?;
     validate_four_ascii("auv2_manufacturer_code", &metadata.auv2_manufacturer_code)?;
+    validate_four_ascii("aax_manufacturer_id", &metadata.aax_manufacturer_id)?;
     validate_required(
         "package.metadata.wrac.bundle_identifier",
         &metadata.bundle_identifier,
@@ -278,6 +340,32 @@ fn read_wrac_metadata(manifest_path: &Path) -> io::Result<WracMetadata> {
         )?;
         validate_four_ascii("auv2_type", &plugin.auv2_type)?;
         validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
+        validate_non_empty_list(
+            "package.metadata.wrac.plugins.aax_categories",
+            &plugin.aax_categories,
+        )?;
+        for category in &plugin.aax_categories {
+            aax_category_literal(category)?;
+        }
+        validate_four_ascii("plugins.aax_product_id", &plugin.aax_product_id)?;
+        if plugin.aax_stem_configs.is_empty() {
+            return Err(missing_metadata("plugins.aax_stem_configs"));
+        }
+        let mut aax_plugin_ids = HashSet::new();
+        for stem_config in &plugin.aax_stem_configs {
+            validate_required(
+                "package.metadata.wrac.plugins.aax_stem_configs.name",
+                &stem_config.name,
+            )?;
+            aax_stem_format_literal(&stem_config.input)?;
+            aax_stem_format_literal(&stem_config.output)?;
+            validate_four_ascii("plugins.aax_stem_configs.plugin_id", &stem_config.plugin_id)?;
+            validate_unique(
+                "aax_stem_configs.plugin_id",
+                &stem_config.plugin_id,
+                &mut aax_plugin_ids,
+            )?;
+        }
         validate_unique("plugin_id", &plugin.plugin_id, &mut plugin_ids)?;
         validate_unique(
             "standalone_name",
@@ -344,6 +432,121 @@ fn validate_four_ascii(key: &str, value: &str) -> io::Result<()> {
             format!("package.metadata.wrac.{key} must be exactly 4 ASCII bytes"),
         ))
     }
+}
+
+fn fourcc_literal(value: &str) -> String {
+    let bytes = value.as_bytes();
+    format!(
+        "0x{:02X}{:02X}{:02X}{:02X}",
+        bytes[0], bytes[1], bytes[2], bytes[3]
+    )
+}
+
+fn aax_categories_literal(categories: &[String]) -> io::Result<String> {
+    let mut values = Vec::new();
+    for category in categories {
+        values.push(aax_category_literal(category)?);
+    }
+    Ok(values.join(" | "))
+}
+
+fn aax_category_literal(category: &str) -> io::Result<&'static str> {
+    // Keep the manifest vocabulary human-readable, but emit the AAX bit values
+    // directly so the runtime crate does not need to link against Avid headers.
+    match category {
+        "eq" => Ok("0x0000_0001"),
+        "dynamics" => Ok("0x0000_0002"),
+        "pitch-shift" => Ok("0x0000_0004"),
+        "reverb" => Ok("0x0000_0008"),
+        "delay" => Ok("0x0000_0010"),
+        "modulation" => Ok("0x0000_0020"),
+        "harmonic" => Ok("0x0000_0040"),
+        "noise-reduction" => Ok("0x0000_0080"),
+        "dither" => Ok("0x0000_0100"),
+        "sound-field" => Ok("0x0000_0200"),
+        "hardware-generator" => Ok("0x0000_0400"),
+        "software-generator" => Ok("0x0000_0800"),
+        "wrapped-plugin" => Ok("0x0000_1000"),
+        "effect" => Ok("0x0000_2000"),
+        "midi-effect" => Ok("0x0001_0000"),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported package.metadata.wrac.plugins.aax_categories value: {category}"),
+        )),
+    }
+}
+
+fn write_aax_stem_config_statics(
+    rust: &mut String,
+    plugin_index: usize,
+    plugin: &WracPluginMetadata,
+) -> io::Result<()> {
+    let mut items = Vec::new();
+    for (stem_index, stem_config) in plugin.aax_stem_configs.iter().enumerate() {
+        rust.push_str(&format!(
+            "static PLUGIN_{plugin_index}_AAX_STEM_{stem_index}_NAME: &[u8] = &{:?};\n",
+            nul_terminated(&stem_config.name)
+        ));
+        items.push(format!(
+            "AaxStemConfig {{ name: PLUGIN_{plugin_index}_AAX_STEM_{stem_index}_NAME.as_ptr().cast(), format_in: {}, format_out: {}, plugin_id: {} }}",
+            aax_stem_format_literal(&stem_config.input)?,
+            aax_stem_format_literal(&stem_config.output)?,
+            fourcc_literal(&stem_config.plugin_id)
+        ));
+    }
+    rust.push_str(&format!(
+        "static PLUGIN_{plugin_index}_AAX_STEM_CONFIGS: &[AaxStemConfig] = &[{}];\n",
+        items.join(", ")
+    ));
+    Ok(())
+}
+
+fn aax_stem_format_literal(format: &str) -> io::Result<&'static str> {
+    // The starter template only emits mono/stereo native processing layouts. Add
+    // more AAX stem constants here only after the Rust audio-port configuration and
+    // validator coverage for those layouts are added together.
+    match format {
+        "mono" => Ok("1"),
+        "stereo" => Ok("0x0001_0002"),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "package.metadata.wrac.plugins.aax_stem_configs format must be mono or stereo: {format}"
+            ),
+        )),
+    }
+}
+
+fn nul_terminated(value: &str) -> Vec<u8> {
+    // Stem names cross the C ABI as raw pointers; store the terminator in the
+    // generated static bytes rather than appending it at callback time.
+    let mut bytes = value.as_bytes().to_vec();
+    bytes.push(0);
+    bytes
+}
+
+fn aax_package_version_literal() -> io::Result<String> {
+    // AAX package versions are not semantic-version strings. Encoding Cargo's
+    // MAJOR.MINOR.PATCH as 0xMMmmpp00 keeps package identity deterministic while
+    // leaving the lowest byte unused.
+    let major = aax_version_component("CARGO_PKG_VERSION_MAJOR")?;
+    let minor = aax_version_component("CARGO_PKG_VERSION_MINOR")?;
+    let patch = aax_version_component("CARGO_PKG_VERSION_PATCH")?;
+    Ok(format!("0x{major:02X}{minor:02X}{patch:02X}00"))
+}
+
+fn aax_version_component(name: &str) -> io::Result<u32> {
+    let value = env::var(name)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        .parse::<u32>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if value > 0xFF {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{name} must fit in one byte for AAX package_version: {value}"),
+        ));
+    }
+    Ok(value)
 }
 
 fn uuid_array_literal(value: &str) -> io::Result<String> {

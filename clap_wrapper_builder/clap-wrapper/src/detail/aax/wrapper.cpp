@@ -54,6 +54,7 @@
 // #include <functional>
 
 static const char *kAAXMasterBypassID = "MasterBypass";
+static constexpr int32_t kAAXContinuousParameterDefaultSteps = 2048;
 
 class ClapAsAAXRegistry
 {
@@ -710,7 +711,12 @@ AAX_Result ClapAsAAX::GetParameterNumberOfSteps(AAX_CParamID iParameterID, int32
     }
     else
     {
-      *aNumSteps = 0;  // 0 means discrete/continuous, see class AAX_CParameter
+      // AAX requires every parameter to report a positive step count, while
+      // CLAP represents continuous parameters without an explicit step count.
+      // Use a high-resolution commercial default for control-surface and generic
+      // UI gestures, but keep it bounded for older AAX control-surface behavior
+      // instead of leaking CLAP's "continuous" shape as invalid 0.
+      *aNumSteps = kAAXContinuousParameterDefaultSteps;
     }
 
     return AAX_SUCCESS;
