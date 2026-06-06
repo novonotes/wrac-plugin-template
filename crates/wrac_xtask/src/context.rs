@@ -123,7 +123,7 @@ impl Context {
         plugin: &PluginProductMetadata,
     ) -> PathBuf {
         // AUv2 products are installed as separate component bundles, named by
-        // product display name rather than the shared CLAP/VST3 bundle name.
+        // product display name rather than the shared CLAP/VST3/AAX bundle name.
         self.plugins_dir(profile)
             .join(self.metadata.au_bundle_name(plugin))
     }

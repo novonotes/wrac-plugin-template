@@ -88,6 +88,10 @@ impl PluginRegistrationStorage {
                         .find_map(ClapDescriptorStorage::aax_package_version)
                         .unwrap_or(0),
                     get_aax_info: Some(crate::abi::aax_get_info),
+                    // The template describes static AAX products only. Exposing a
+                    // configuration callback before there is product-side policy for
+                    // host-requested layout changes would make clap-wrapper believe
+                    // dynamic AAX configurations are supported.
                     can_apply_configuration: None,
                 },
                 registration,
@@ -167,6 +171,9 @@ pub(crate) struct ClapPluginInfoAsVst3 {
 unsafe impl Sync for ClapPluginInfoAsVst3 {}
 unsafe impl Send for ClapPluginInfoAsVst3 {}
 
+// Mirrors clap-wrapper's VST3 factory-info extension ABI. Keep this local copy
+// aligned with free-audio/clap-wrapper `next`; clap-sys intentionally does not
+// define wrapper-private factory extensions.
 #[repr(C)]
 pub(crate) struct ClapPluginFactoryAsVst3 {
     pub vendor: *const c_char,

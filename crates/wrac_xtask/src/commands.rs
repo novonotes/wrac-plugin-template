@@ -24,9 +24,9 @@ use crate::validation::validate_wrac_rules;
 
 const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
 // Keep the local AAX contract explicit instead of delegating to the validator's
-// broad `runtests` collection. The template intentionally does not cover HDX
-// cycle-count or page-table XML validation, so the CI-facing contract is the
-// concrete set of native tests that should pass for the generated bundle.
+// broad `runtests` collection. `runtests` includes hardware/DSP and page-table
+// coverage that this source-built native template does not generate, so CI should
+// fail only on the concrete native tests that the generated bundle is expected to pass.
 const AAX_VALIDATOR_REQUIRED_TESTS: &[&str] = &[
     "info.productids",
     "info.support.audiosuite",
@@ -426,7 +426,7 @@ fn add_wrapper_product_args(ctx: &Context, command: &mut Command, build: Wrapper
     for (index, plugin) in ctx.metadata.plugins.iter().enumerate() {
         match build {
             WrapperBuild::Plugin { au: true, .. } => {
-                // CLAP/VST3 read product descriptors from the Rust plugin factory.
+                // CLAP/VST3/AAX read product descriptors from the Rust plugin factory.
                 // AUv2 cannot, so only AUv2 builds need per-product output and
                 // four-character AudioComponent identity values from xtask.
                 command
@@ -717,18 +717,34 @@ fn installed_artifacts(
             .collect(),
     };
     let mut artifacts = Vec::new();
-    for install_scope in uninstall_scopes(scope) {
+    for install_scope in uninstall_scopes(ctx.platform, scope, format)? {
         let dir = install_dir(ctx, *install_scope, format)?;
         artifacts.extend(bundle_names.iter().map(|bundle_name| dir.join(bundle_name)));
     }
     Ok(artifacts)
 }
 
-fn uninstall_scopes(scope: UninstallScope) -> &'static [InstallScope] {
+fn uninstall_scopes(
+    platform: Platform,
+    scope: UninstallScope,
+    format: PluginFormat,
+) -> Result<&'static [InstallScope]> {
     match scope {
-        UninstallScope::All => &[InstallScope::User, InstallScope::System],
-        UninstallScope::User => &[InstallScope::User],
-        UninstallScope::System => &[InstallScope::System],
+        UninstallScope::All => {
+            if matches!(
+                (platform, format),
+                (Platform::Macos | Platform::Windows, PluginFormat::Aax)
+            ) {
+                // AAX has no user-local install location on macOS or Windows.
+                // Keep the default broad cleanup useful by targeting the only valid
+                // install scope instead of failing before it can remove system bundles.
+                Ok(&[InstallScope::System])
+            } else {
+                Ok(&[InstallScope::User, InstallScope::System])
+            }
+        }
+        UninstallScope::User => Ok(&[InstallScope::User]),
+        UninstallScope::System => Ok(&[InstallScope::System]),
     }
 }
 
@@ -755,7 +771,7 @@ fn validate_targets(
     targets: &[ValidateTarget],
 ) -> Result<()> {
     if targets.is_empty() {
-        println!("No CLAP/VST3/AU targets to validate.");
+        println!("No validation targets to validate.");
         return Ok(());
     }
 
@@ -857,11 +873,11 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
         fs::create_dir_all(&test_dir)?;
         fs::create_dir_all(&log_dir)?;
 
-        // Avid ships DTT as the automatable scripting layer for DigiShell, and it
-        // behaves consistently across macOS and Windows CI. The bundled
-        // ValidatorRunAllTests script discovers plug-ins via `findaaxplugins`, which
-        // returns the expected list shape when given a search directory rather than
-        // the `.aaxplugin` bundle path itself.
+        // Avid ships DTT as the automatable scripting layer for DigiShell. Use the
+        // bundled ValidatorRunAllTests script instead of scripting DigiShell stdin
+        // directly because Windows hosted CI can launch DigiShell while dropping
+        // scripted stdin. The script expects a search directory for `findaaxplugins`;
+        // passing the bundle path itself gives a different result shape on some packages.
         let child = Command::new(&dtt)
             .arg("--script")
             .arg("ValidatorRunAllTests")
@@ -891,6 +907,9 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
 
         let result_path = aax_validator_result_path(results_dir, index, test_id);
         let dtt_result = find_aax_validator_dtt_result(&test_dir, test_id)?;
+        // DTT writes result files with connection-specific suffixes. Copy each one to
+        // a deterministic per-test path so CI artifacts and final pass/fail checks do
+        // not depend on DigiShell connection IDs.
         fs::copy(&dtt_result, &result_path).map_err(|err| {
             format!(
                 "failed to copy AAX validator result {} to {}: {err}",
@@ -982,6 +1001,9 @@ fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result
             return Ok(child.wait_with_output()?);
         }
         if started_at.elapsed() >= timeout {
+            // Keep timeouts outside `run()` so failed DTT processes still have their
+            // stdout/stderr printed. That output is usually the only clue when the
+            // validator hangs while loading a bundle.
             child.kill()?;
             let output = child.wait_with_output()?;
             print_aax_validator_output(&output.stdout, &output.stderr);
@@ -1173,6 +1195,9 @@ fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
 }
 
 fn normalize_windows_aax_validator_dtt_config(root: &Path) -> Result<()> {
+    // User-supplied roots may point either at the archive root or directly at the
+    // AAXValidatorResources root. Normalize every matching extracted config so both
+    // layouts behave the same without asking users to repack Avid's archive.
     for candidate in [
         root.join("DigiShell")
             .join("AAXValidatorResources")

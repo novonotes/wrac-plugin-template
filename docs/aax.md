@@ -50,10 +50,15 @@ cargo xtask build --target=aax
 ## Install
 
 AAX plugins install to the system-wide Avid plugin folder on macOS and Windows.
+`cargo xtask install` defaults to `--scope=user`, so AAX install commands must
+request `--scope=system`.
 
 ```sh
 cargo xtask install --target=aax --scope=system
 ```
+
+`cargo xtask uninstall` defaults to `--scope=all`; for AAX this resolves to the
+system-wide Avid plugin folder because there is no user-local AAX install scope.
 
 ## Validate
 

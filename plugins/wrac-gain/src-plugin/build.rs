@@ -502,6 +502,9 @@ fn write_aax_stem_config_statics(
 }
 
 fn aax_stem_format_literal(format: &str) -> io::Result<&'static str> {
+    // The starter template only emits mono/stereo native processing layouts. Add
+    // more AAX stem constants here only after the Rust audio-port configuration and
+    // validator coverage for those layouts are added together.
     match format {
         "mono" => Ok("1"),
         "stereo" => Ok("0x0001_0002"),

@@ -19,7 +19,7 @@ company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
 # AAX manufacturer ID registered with Avid. Keep it stable across the AAX product catalog.
 aax_manufacturer_id = "YrCo"
-# Shared CLAP/VST3 bundle name. Product-specific AU bundles use plugin_name below.
+# Shared CLAP/VST3/AAX bundle name. Product-specific AU bundles use plugin_name below.
 bundle_name = "WRAC Gain"
 # Reverse-DNS bundle identifier used by macOS bundles. Keep it stable.
 bundle_identifier = "com.your-company.wrac-gain"

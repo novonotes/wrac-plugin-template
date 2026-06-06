@@ -25,7 +25,7 @@ Examples:
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   `install`, `validate`, and `launch` build their required artifacts before use.
-  VST3/AU/standalone targets require clap-wrapper dependencies.";
+  VST3/AU/AAX/standalone targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
 Targets:
@@ -136,7 +136,7 @@ pub(crate) enum Commands {
     )]
     Uninstall(UninstallArgs),
     #[command(
-        about = "Build and validate CLAP/VST3/AU artifacts.",
+        about = "Build and validate plugin artifacts.",
         after_help = VALIDATE_AFTER_HELP
     )]
     Validate(ValidateArgs),
