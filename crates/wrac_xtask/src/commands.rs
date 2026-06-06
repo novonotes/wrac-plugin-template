@@ -1076,10 +1076,14 @@ fn aax_validator_dsh_timeout() -> Result<Duration> {
 }
 
 fn stage_aax_for_validator(results_dir: &Path, aax: &Path) -> Result<PathBuf> {
-    let staged_aax = results_dir.join("input").join("plugin.aaxplugin");
-    // DSH documents path handling problems around spaces. The template bundle name is
-    // intentionally human-readable, so validation uses a temporary no-space copy rather
-    // than constraining product-facing bundle names.
+    let bundle_name = aax
+        .file_name()
+        .ok_or_else(|| format!("AAX bundle path has no file name: {}", aax.display()))?;
+    let staged_aax = results_dir.join("input").join(bundle_name);
+    // DSH/DTT path handling is easier to keep stable when the search directory has
+    // no spaces, but the `.aaxplugin` bundle name itself should stay product-facing.
+    // Avid's DTT discovery inspects bundle structure, so renaming the bundle during
+    // staging can make `findaaxplugins` miss an otherwise valid plug-in.
     remove_if_exists(&staged_aax)?;
     if let Some(parent) = staged_aax.parent() {
         fs::create_dir_all(parent)?;
