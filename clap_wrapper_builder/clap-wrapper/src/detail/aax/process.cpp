@@ -241,7 +241,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   }
 
   // check MIDI IN
-  if (context->mInputNode)
+  if (_midi_first_portid != CLAP_INVALID_ID && context->mInputNode)
   {
     auto midiInputStream = context->mInputNode->GetNodeBuffer();
     const AAX_CMidiPacket *midiInPacketPtr = midiInputStream->mBuffer;
