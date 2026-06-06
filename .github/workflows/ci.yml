@@ -173,9 +173,6 @@ jobs:
       AAX_SDK_ARCHIVE_URL: ${{ vars.AAX_SDK_ARCHIVE_URL || secrets.AAX_SDK_ARCHIVE_URL }}
       AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL || secrets.AAX_VALIDATOR_MAC_ARM64_ARCHIVE_URL }}
       AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL: ${{ vars.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL || secrets.AAX_VALIDATOR_WINDOWS_X86_64_ARCHIVE_URL }}
-    # AAX uses private Avid downloads, so this job is intentionally kept out of
-    # fork pull-request CI. Maintainers can run it with workflow_dispatch before
-    # merging, and protected-branch pushes validate the same contract after merge.
     strategy:
       fail-fast: false
       matrix:

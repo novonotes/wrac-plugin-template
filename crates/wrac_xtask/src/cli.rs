@@ -10,7 +10,7 @@ Targets:
   clap, vst3, au, aax, standalone
 
 Default targets:
-  package.metadata.wrac.supported_formats plus standalone
+  package.metadata.wrac.supported_formats supported on this platform, plus standalone
 
 Examples:
   cargo xtask build
@@ -23,7 +23,9 @@ Examples:
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   xtask expands requested terminal tasks into a dependency graph before execution.
+  Default target selection skips formats unsupported on the current platform and logs the reason.
   Explicit plugin-format targets must be listed in package.metadata.wrac.supported_formats.
+  Explicit plugin-format targets fail when unsupported on the current platform.
   VST3/AU/AAX/standalone targets require clap-wrapper dependencies.";
 
 const INSTALL_AFTER_HELP: &str = "\
@@ -31,7 +33,7 @@ Targets:
   clap, vst3, au, aax
 
 Default targets:
-  package.metadata.wrac.supported_formats
+  package.metadata.wrac.supported_formats supported on this platform
 
 Examples:
   cargo xtask install
@@ -43,7 +45,9 @@ Examples:
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   install expands the selected plugin formats into a dependency graph before copying artifacts.
+  Default target selection skips formats unsupported on the current platform and logs the reason.
   Explicit targets must be listed in package.metadata.wrac.supported_formats.
+  Explicit targets fail when unsupported on the current platform.
   --scope=default installs AAX system-wide and CLAP/VST3/AU user-locally.
   standalone is not a plugin format and cannot be installed with this command.";
 
@@ -52,7 +56,7 @@ Targets:
   clap, vst3, au, aax
 
 Default targets:
-  package.metadata.wrac.supported_formats
+  package.metadata.wrac.supported_formats supported on this platform
 
 Examples:
   cargo xtask uninstall
@@ -64,7 +68,9 @@ Examples:
 
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
+  Default target selection skips formats unsupported on the current platform and logs the reason.
   Explicit targets must be listed in package.metadata.wrac.supported_formats.
+  Explicit targets fail when unsupported on the current platform.
   --scope defaults to all and removes both user-local and system-wide plugin artifacts.
   AAX has no user-local install scope, so --scope=all removes only its system-wide Avid bundle.";
 
@@ -73,7 +79,7 @@ Targets:
   clap, vst3, au, aax
 
 Default targets:
-  package.metadata.wrac.supported_formats
+  package.metadata.wrac.supported_formats supported on this platform
 
 Examples:
   cargo xtask validate
@@ -85,7 +91,9 @@ Examples:
 Notes:
   -p/--package can be omitted when the workspace contains exactly one WRAC plugin package.
   validate expands the selected plugin formats into a dependency graph, runs WRAC checks, then runs external validators.
+  Default target selection skips formats unsupported on the current platform and logs the reason.
   Explicit targets must be listed in package.metadata.wrac.supported_formats.
+  Explicit targets fail when unsupported on the current platform.
   WRAC check violations are errors. See docs/production-readiness-checks.md for rule IDs and disable metadata.
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
@@ -185,7 +193,7 @@ pub(crate) struct BuildArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to build, comma-separated.",
-        long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, aax, and standalone. Defaults to package.metadata.wrac.supported_formats plus standalone."
+        long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, aax, and standalone. Defaults to package.metadata.wrac.supported_formats supported on this platform plus standalone."
     )]
     pub(crate) target: Vec<Target>,
 }
@@ -230,7 +238,7 @@ pub(crate) struct InstallArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Plugin formats to install, comma-separated.",
-        long_help = "Plugin formats to install, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats. standalone is not supported here."
+        long_help = "Plugin formats to install, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats supported on this platform. standalone is not supported here."
     )]
     pub(crate) target: Vec<PluginTarget>,
 }
@@ -277,7 +285,7 @@ pub(crate) struct UninstallArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Plugin formats to uninstall, comma-separated.",
-        long_help = "Plugin formats to uninstall, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats. standalone is not supported here."
+        long_help = "Plugin formats to uninstall, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats supported on this platform. standalone is not supported here."
     )]
     pub(crate) target: Vec<PluginTarget>,
 
@@ -325,7 +333,7 @@ pub(crate) struct ValidateArgs {
         value_delimiter = ',',
         num_args = 1..,
         help = "Targets to validate, comma-separated.",
-        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats."
+        long_help = "Targets to validate, comma-separated. Supported values are clap, vst3, au, and aax. Defaults to package.metadata.wrac.supported_formats supported on this platform."
     )]
     pub(crate) target: Vec<ValidateTarget>,
 }

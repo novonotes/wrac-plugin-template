@@ -39,15 +39,6 @@ impl PluginFormat {
             Self::Aax => Target::Aax,
         }
     }
-
-    pub(crate) fn validate_target(self) -> ValidateTarget {
-        match self {
-            Self::Clap => ValidateTarget::Clap,
-            Self::Vst3 => ValidateTarget::Vst3,
-            Self::Au => ValidateTarget::Au,
-            Self::Aax => ValidateTarget::Aax,
-        }
-    }
 }
 
 impl Target {
@@ -58,6 +49,16 @@ impl Target {
             Self::Au => "AU",
             Self::Aax => "AAX",
             Self::Standalone => "Standalone",
+        }
+    }
+
+    pub(crate) fn plugin_format(self) -> Option<PluginFormat> {
+        match self {
+            Self::Clap => Some(PluginFormat::Clap),
+            Self::Vst3 => Some(PluginFormat::Vst3),
+            Self::Au => Some(PluginFormat::Au),
+            Self::Aax => Some(PluginFormat::Aax),
+            Self::Standalone => None,
         }
     }
 }
@@ -169,6 +170,14 @@ impl Platform {
             Target::Au => self.supports_au(),
             Target::Aax => self.supports_aax(),
             Target::Standalone => matches!(self, Self::Macos | Self::Windows | Self::Linux),
+        }
+    }
+
+    pub(crate) fn display(self) -> &'static str {
+        match self {
+            Self::Macos => "macOS",
+            Self::Windows => "Windows",
+            Self::Linux => "Linux",
         }
     }
 
