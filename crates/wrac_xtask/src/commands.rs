@@ -884,15 +884,6 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
         fs::write(&stdout_path, &output.stdout)?;
         fs::write(&stderr_path, &output.stderr)?;
 
-        if !output.status.success() {
-            print_aax_validator_output(&output.stdout, &output.stderr);
-            return Err(format!(
-                "AAX validator/DTT failed while running {test_id}; see {}",
-                stdout_path.display()
-            )
-            .into());
-        }
-
         let result_path = aax_validator_result_path(results_dir, index, test_id);
         let dtt_result = find_aax_validator_dtt_result(&test_dir, test_id)?;
         fs::copy(&dtt_result, &result_path).map_err(|err| {
@@ -902,6 +893,17 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
                 result_path.display()
             )
         })?;
+
+        if !output.status.success() {
+            print_aax_validator_output(&output.stdout, &output.stderr);
+            print_aax_validator_result(&result_path)?;
+            return Err(format!(
+                "AAX validator/DTT failed while running {test_id}; see {} and {}",
+                stdout_path.display(),
+                result_path.display()
+            )
+            .into());
+        }
     }
 
     Ok(())
@@ -1028,6 +1030,21 @@ fn print_aax_validator_output(stdout: &[u8], stderr: &[u8]) {
         println!("========== AAX validator stderr ==========");
         println!("{stderr}");
     }
+}
+
+fn print_aax_validator_result(path: &Path) -> Result<()> {
+    let content = fs::read_to_string(path).map_err(|err| {
+        format!(
+            "failed to read AAX validator result {}: {err}",
+            path.display()
+        )
+    })?;
+    println!(
+        "========== AAX validator result ({}) ==========",
+        path.display()
+    );
+    println!("{content}");
+    Ok(())
 }
 
 fn aax_validator_result_path(results_dir: &Path, index: usize, test_id: &str) -> PathBuf {
