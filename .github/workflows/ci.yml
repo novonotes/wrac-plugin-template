@@ -94,18 +94,21 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            build-targets: clap,vst3,standalone
             validate-targets: clap,vst3
             verify: |
               test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
               test -x "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone"
           - os: windows-latest
+            build-targets: clap,vst3,standalone
             validate-targets: clap,vst3
             verify: |
               test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
               test -f "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone.exe"
           - os: macos-latest
+            build-targets: clap,vst3,au,standalone
             validate-targets: clap,vst3,au
             verify: |
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
@@ -151,7 +154,7 @@ jobs:
         run: bash .github/scripts/retry.sh cargo fetch --locked
 
       - name: Build plugin and standalone artifacts
-        run: cargo xtask build --release
+        run: cargo xtask build --release --target=${{ matrix.build-targets }}
 
       - name: Run VST3/AU/CLAP validators
         if: matrix.validate-targets != ''
