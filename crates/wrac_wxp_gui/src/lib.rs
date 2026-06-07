@@ -4,8 +4,8 @@
 //! owns only the toolkit boundary shared by product GUI runtimes: window-handle conversion,
 //! GUI thread affinity, and WebView DPI/bounds management.
 
+mod commands;
 mod controller;
-mod cursor;
 mod dpi;
 mod pointer;
 mod resize_drag;
@@ -13,8 +13,8 @@ mod runtime;
 mod session;
 mod window;
 
+pub use commands::{register_native_cursor_bridge_commands, register_resize_commands};
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
-pub use cursor::register_native_cursor_bridge_commands;
 pub use dpi::HostGuiSizeUnit;
 pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
