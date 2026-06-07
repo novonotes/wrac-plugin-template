@@ -1246,10 +1246,15 @@ bool ClapAsVst3::gui_can_resize()
 
 bool ClapAsVst3::gui_request_resize(uint32_t width, uint32_t height)
 {
+  const bool hasMainThreadId = _main_thread_id != std::thread::id{};
+
   // UIs with 65kx65k resolution are not supported
   if ((width > 0xffff) || (height > 0xffff)) return false;
 
-  if (_main_thread_id != std::this_thread::get_id())
+  // This vendored WRAC wrapper can leave _main_thread_id default-constructed. Audacity
+  // macOS VST3 does not drain the deferred onIdle resize path, so treating that unknown
+  // thread state as "not main" prevents GUI-run-loop resizes from reaching resizeView().
+  if (hasMainThreadId && _main_thread_id != std::this_thread::get_id())
   {
     uint32_t newSize = ((width & 0xffff) << 16) | (height & 0xffff);
     _gui_resize_request.store(newSize);

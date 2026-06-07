@@ -263,7 +263,17 @@ bool WrappedView::request_resize(uint32_t width, uint32_t height)
   _rect.right = _rect.left + (int32)width;
   _rect.bottom = _rect.top + (int32)height;
 
-  if (_plugFrame && !_plugFrame->resizeView(this, &_rect))
+  if (_plugFrame)
+  {
+    auto result = _plugFrame->resizeView(this, &_rect);
+    // Steinberg uses kResultOk == 0, so this cannot be tested as a boolean failure.
+    if (result != kResultOk)
+    {
+      _rect = oldrect;
+      return false;
+    }
+  }
+  else
   {
     _rect = oldrect;
     return false;
