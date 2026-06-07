@@ -15,9 +15,9 @@ struct NativeResizeDrag {
 
 /// Native pointer correction for host-owned editor resizing.
 ///
-/// Command names and JSON schemas stay in product code. This type only absorbs the
-/// case where WebView-relative coordinates move during resize, so product commands can
-/// pass and return logical sizes.
+/// The shared resize command bridge owns the command names and JSON schemas. This type
+/// only absorbs the case where WebView-relative coordinates move during resize, so the
+/// bridge can pass and return frontend-facing logical sizes.
 #[derive(Debug, Default)]
 pub struct WxpNativeResizeDrag {
     current: RefCell<Option<NativeResizeDrag>>,
