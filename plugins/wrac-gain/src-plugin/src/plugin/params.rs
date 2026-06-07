@@ -143,10 +143,25 @@ impl PluginParamsExtension for WracGainParamsExtension {
     /// Called when parameter values arrive from the host as input events.
     fn apply_param_events(&self, events: ParamInputEvents<'_>) -> PluginResult<()> {
         for event in events.values() {
-            let plain_value = parameter_host_input_to_plain(event.param_id, event.value)?;
-            self.shared
+            let Ok(plain_value) = parameter_host_input_to_plain(event.param_id, event.value) else {
+                wrac_log::rtwarn!(
+                    "params.flush: ignoring invalid parameter input param_id={} value={}",
+                    event.param_id,
+                    event.value
+                );
+                continue;
+            };
+            if self
+                .shared
                 .set_parameter_value(event.param_id, plain_value)
-                .ok_or(PluginError::InvalidParameter)?;
+                .is_none()
+            {
+                wrac_log::rtwarn!(
+                    "params.flush: ignoring unknown parameter input param_id={} value={}",
+                    event.param_id,
+                    event.value
+                );
+            }
         }
         Ok(())
     }
