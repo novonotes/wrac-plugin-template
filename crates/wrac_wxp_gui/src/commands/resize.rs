@@ -4,8 +4,9 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::json;
 use wrac_clap_adapter::HostGuiResizeRequester;
-use wrac_wxp_gui::{WxpGuiResizeHandle, WxpNativeResizeDrag};
 use wxp::{WxpCommandHandler, dpi::LogicalSize};
+
+use crate::{controller::WxpGuiResizeHandle, resize_drag::WxpNativeResizeDrag};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,13 +30,16 @@ struct EndGuiResizeDragRequest {
     drag_id: u64,
 }
 
-pub(super) fn register_resize_commands(
+/// Registers the resize commands used by the shared WRAC frontend resize bridge.
+///
+/// Template plugins should not define their own copies of these command names. The host resize
+/// path has DAW-specific threading and re-entry behavior, so keeping this command contract with
+/// `WxpGuiResizeHandle` makes future fixes apply to all wxp-based plugin GUIs.
+pub fn register_resize_commands(
     command_handler: &Rc<WxpCommandHandler>,
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     gui_resize_handle: WxpGuiResizeHandle,
 ) {
-    // Command names and JSON contracts are the frontend/product boundary, so registration
-    // stays here. Only native drag correction and DPI-aware resize requests are delegated.
     let native_resize_drag = Rc::new(WxpNativeResizeDrag::default());
 
     {
