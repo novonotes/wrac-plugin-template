@@ -31,6 +31,8 @@
 
 - (id)initWithAUv2:(free_audio::auv2_wrapper::ui_connection *)cont preferredSize:(NSSize)size;
 - (void)doIdle;
+- (void)startIdleTimer;
+- (void)stopIdleTimer;
 - (void)dealloc;
 - (void)setFrame:(NSRect)newSize;
 
@@ -86,7 +88,7 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 
 - (id)initWithAUv2:(free_audio::auv2_wrapper::ui_connection *)cont preferredSize:(NSSize)size
 {
-  LOGINFO("[clap-wrapper] creating NSView");
+  LOGINFO("[clap-wrapper] creating NSView self={}", (void *)self);
 
   ui = *cont;
   canary = 0xbeebbeeb;
@@ -135,12 +137,7 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
   }
 
   idleTimer = nil;
-  CFTimeInterval TIMER_INTERVAL = .05;  // In SurgeGUISynthesizer.h it uses 50 ms
-  CFRunLoopTimerContext TimerContext = {0, self, NULL, NULL, NULL};
-  CFAbsoluteTime FireTime = CFAbsoluteTimeGetCurrent() + TIMER_INTERVAL;
-  idleTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, FireTime, TIMER_INTERVAL, 0, 0,
-                                   CLAP_WRAPPER_TIMER_CALLBACK, &TimerContext);
-  if (idleTimer) CFRunLoopAddTimer(CFRunLoopGetMain(), idleTimer, kCFRunLoopCommonModes);
+  [self startIdleTimer];
 
   return self;
 }
@@ -149,37 +146,50 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 {
   // auto gui = ui._plugin->_ext._gui;
 }
+- (void)startIdleTimer
+{
+  if (idleTimer) return;
+
+  CFTimeInterval TIMER_INTERVAL = .05;  // In SurgeGUISynthesizer.h it uses 50 ms
+  CFRunLoopTimerContext TimerContext = {0, self, NULL, NULL, NULL};
+  CFAbsoluteTime FireTime = CFAbsoluteTimeGetCurrent() + TIMER_INTERVAL;
+  idleTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, FireTime, TIMER_INTERVAL, 0, 0,
+                                   CLAP_WRAPPER_TIMER_CALLBACK, &TimerContext);
+  if (idleTimer) CFRunLoopAddTimer(CFRunLoopGetMain(), idleTimer, kCFRunLoopCommonModes);
+}
+- (void)stopIdleTimer
+{
+  if (idleTimer)
+  {
+    CFRunLoopTimerInvalidate(idleTimer);
+    idleTimer = 0;
+  }
+}
 - (void)viewDidMoveToWindow
 {
   if ([self window] == nil)
   {
-    LOGINFO("[clap-wrapper] - view removed from a window");
-    if (idleTimer)
-    {
-      CFRunLoopTimerInvalidate(idleTimer);
-      idleTimer = 0;
-    }
-    if (canary)
-    {
-      ui._destroyWindow();
-
-      assert(canary == 0);
-    }
+    LOGINFO("[clap-wrapper] - view removed from a window; keeping CLAP GUI alive until dealloc self={}",
+            (void *)self);
+    [self stopIdleTimer];
+  }
+  else
+  {
+    LOGINFO("[clap-wrapper] - view attached to a window self={} window={}", (void *)self,
+            (void *)[self window]);
+    [self startIdleTimer];
   }
   [super viewDidMoveToWindow];
 }
 
 - (void)dealloc
 {
-  LOGINFO("[clap-wrapper] NS View dealloc");
-  if (idleTimer)
-  {
-    CFRunLoopTimerInvalidate(idleTimer);
-  }
+  LOGINFO("[clap-wrapper] NS View dealloc self={} canary={}", (void *)self, canary);
+  [self stopIdleTimer];
   if (canary)
   {
     LOGINFO("[clap-wrapper] the host did not call viewDidMoveWindow with a nil window");
-    ui._destroyWindow();
+    ui._destroyWindow("CLAP_WRAPPER_COCOA_CLASS_NSVIEW::dealloc");
   }
   [super dealloc];
 }

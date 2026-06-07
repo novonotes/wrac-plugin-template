@@ -162,6 +162,7 @@ WrapAsAUV2::~WrapAsAUV2()
       *_uiconn._canary = 0;       // notify the view
       _uiconn._canary = nullptr;  // disable the canary reference
 
+      LOGINFO("[clap-wrapper] AUv2 destroying CLAP GUI: reason=WrapAsAUV2::~WrapAsAUV2");
       // close destroy the gui ourselves
       _plugin->_ext._gui->destroy(_plugin->_plugin);
       _uiIsOpened = false;
@@ -639,22 +640,10 @@ OSStatus WrapAsAUV2::Stop()
 }
 void WrapAsAUV2::Cleanup()
 {
-  LOGINFO("[clap-wrapper] Cleaning up Plugin");
+  LOGINFO("[clap-wrapper] Cleaning up Plugin uiIsOpened={} canary={}", this->_uiIsOpened,
+          (void *)this->_uiconn._canary);
   auto guarantee_mainthread = _plugin->AlwaysMainThread();
-  if (this->_uiIsOpened)
-  {
-    LOGINFO("[clap-wrapper] !! UI still open, destroying UI and disconnecting view");
-    if (_uiconn._canary)
-    {
-      *_uiconn._canary = 0;       // reset the canary
-      _uiconn._canary = nullptr;  // and disconnect it
-      if (_plugin->_plugin && _plugin->_ext._gui)
-      {
-        this->_uiconn._destroyWindow();
-        this->_plugin->_ext._gui->destroy(_plugin->_plugin);
-      }
-    }
-  }
+  LOGINFO("[clap-wrapper] AUv2 Cleanup keeps CLAP GUI alive; Cocoa view/destructor own GUI teardown");
   deactivateCLAP();
   Base::Cleanup();
 }
@@ -809,8 +798,10 @@ OSStatus WrapAsAUV2::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
           this->_uiIsOpened = true;
           _plugin->_ext._gui->create(_plugin->_plugin, CLAP_WINDOW_API_COCOA, false);
         };
-        _uiconn._destroyWindow = [this]
+        _uiconn._destroyWindow = [this](const char *reason)
         {
+          LOGINFO("[clap-wrapper] AUv2 destroying CLAP GUI: reason={}",
+                  reason ? reason : "unknown");
           // this must exist
           _plugin->_ext._gui->destroy(_plugin->_plugin);
 
