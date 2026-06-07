@@ -7,6 +7,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
+use serde::Deserialize;
 use serde_json::json;
 use wrac_clap_adapter::{
     HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
@@ -21,6 +22,24 @@ use crate::state::{EditorPage, ProjectStateStore, SharedState};
 mod resize;
 
 use resize::register_resize_commands;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum FrontendLogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FrontendLogEntry {
+    level: FrontendLogLevel,
+    message: String,
+    #[serde(default)]
+    data: Option<serde_json::Value>,
+}
 
 pub(crate) struct CommandRegistrationDependencies {
     pub(crate) project_state: Arc<ProjectStateStore>,
@@ -66,8 +85,10 @@ pub(crate) fn register_commands(
     // The WebView console is often invisible inside a DAW. Bridge frontend logs to the
     // plugin's logger so GUI initialisation progress is visible in native log output.
     command_handler.register_sync("write_to_log", move |ctx| {
-        let message = ctx.arg::<String>("message").map_err(|e| e.to_string())?;
-        log::debug!("frontend: {message}");
+        let entry = ctx
+            .arg::<FrontendLogEntry>("entry")
+            .map_err(|e| e.to_string())?;
+        write_frontend_log(entry);
         Ok::<_, String>(json!({ "ok": true }))
     });
 
@@ -255,6 +276,20 @@ pub(crate) fn register_commands(
         gui_resize_handle,
     );
     register_native_cursor_bridge_commands(&command_handler);
+}
+
+fn write_frontend_log(entry: FrontendLogEntry) {
+    let message = match entry.data {
+        Some(data) => format!("{} data={data}", entry.message),
+        None => entry.message,
+    };
+
+    match entry.level {
+        FrontendLogLevel::Debug => log::debug!(target: "frontend", "{message}"),
+        FrontendLogLevel::Info => log::info!(target: "frontend", "{message}"),
+        FrontendLogLevel::Warn => log::warn!(target: "frontend", "{message}"),
+        FrontendLogLevel::Error => log::error!(target: "frontend", "{message}"),
+    }
 }
 
 fn frontend_runtime_context(host_context: &HostContext) -> serde_json::Value {
