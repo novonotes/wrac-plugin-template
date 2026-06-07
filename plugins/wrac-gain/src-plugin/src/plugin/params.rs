@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use wrac_clap_adapter::{
-    ParamFlags, ParamInfo, ParamValueEvent, PluginError, PluginParamsExtension, PluginResult,
+    ParamFlags, ParamInfo, ParamInputEvents, PluginError, PluginParamsExtension, PluginResult,
 };
 
 use crate::state::SharedState;
@@ -140,14 +140,15 @@ impl PluginParamsExtension for WracGainParamsExtension {
         Ok(plain_to_host(spec, value))
     }
 
-    /// Called when a parameter value arrives from the host as an input event.
-    fn apply_param_value(&self, event: ParamValueEvent) -> PluginResult<f64> {
-        let plain_value = parameter_host_input_to_plain(event.param_id, event.value)?;
-        let applied = self
-            .shared
-            .set_parameter_value(event.param_id, plain_value)
-            .ok_or(PluginError::InvalidParameter)?;
-        parameter_host_value(event.param_id, applied)
+    /// Called when parameter values arrive from the host as input events.
+    fn apply_param_events(&self, events: ParamInputEvents<'_>) -> PluginResult<()> {
+        for event in events.values() {
+            let plain_value = parameter_host_input_to_plain(event.param_id, event.value)?;
+            self.shared
+                .set_parameter_value(event.param_id, plain_value)
+                .ok_or(PluginError::InvalidParameter)?;
+        }
+        Ok(())
     }
 
     /// Converts a host-domain value to a display string. Example: 0.5 -> "0.0 dB".

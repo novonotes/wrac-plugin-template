@@ -1,26 +1,28 @@
-use crate::{ParamInfo, ParamValueEvent, PluginResult};
+use crate::{ParamInfo, ParamInputEvents, PluginResult};
 
 /// CLAP params extension.
 ///
 /// Native CLAP marks parameter queries `[main-thread]`, but wrappers may query them
-/// from `[control-thread]`. Query methods are not audio-thread APIs.
+/// from control or realtime workers. Query methods must be realtime-safe.
 pub trait PluginParamsExtension: Send + Sync + 'static {
-    /// Called from CLAP `params.count`. `[thread-safe & control-thread]`
+    /// Called from CLAP `params.count`. `[thread-safe]`
     fn param_count(&self) -> u32;
 
-    /// Called from CLAP `params.get_info`. `[thread-safe & control-thread]`
+    /// Called from CLAP `params.get_info`. `[thread-safe]`
     fn param_info(&self, index: u32) -> Option<ParamInfo>;
 
-    /// Called from CLAP `params.get_value`. `[thread-safe & control-thread]`
+    /// Called from CLAP `params.get_value`. `[thread-safe]`
     fn param_value(&self, param_id: u32) -> PluginResult<f64>;
 
     /// Called from CLAP `params.flush` input parameter events.
     /// `[control-thread,audio-thread]`
     ///
     /// CLAP may call `params.flush` on the audio thread while active, but not
-    /// concurrently with `plugin.process`. Parameter events delivered to
-    /// `plugin.process` are handled by `Processor::process`, not this method.
-    fn apply_param_value(&self, event: ParamValueEvent) -> PluginResult<f64>;
+    /// concurrently with `plugin.process`. The event-list boundary is preserved
+    /// so implementations can handle ordered parameter updates as one callback.
+    /// Parameter events delivered to `plugin.process` are handled by
+    /// `Processor::process`, not this method.
+    fn apply_param_events(&self, events: ParamInputEvents<'_>) -> PluginResult<()>;
 
     /// Called from CLAP `params.value_to_text`. `[thread-safe & control-thread]`
     fn value_to_text(&self, param_id: u32, value: f64) -> PluginResult<String>;
