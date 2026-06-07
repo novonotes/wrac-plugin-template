@@ -164,6 +164,22 @@ impl WxpWebViewSession {
         self.apply_bounds()
     }
 
+    pub fn set_host_parent_size(&mut self, size: GuiSize) -> PluginResult<()> {
+        // Used only when the host has already resized the native parent view. Applying
+        // template GUI limits here would make the child WebView smaller than the host-owned
+        // container and reintroduce visible gaps.
+        self.host_size = size;
+        self.logical_size = self.dpi_converter.gui_size_to_logical(self.host_size);
+        log::debug!(
+            "setting wxp WebView size from host parent: width={}, height={}, applied_width={}, applied_height={}",
+            size.width,
+            size.height,
+            self.logical_size.width,
+            self.logical_size.height
+        );
+        self.apply_bounds()
+    }
+
     pub fn show(&mut self) -> PluginResult<()> {
         log::debug!("showing wxp WebView session");
         if let Some(web_view) = &self.web_view {

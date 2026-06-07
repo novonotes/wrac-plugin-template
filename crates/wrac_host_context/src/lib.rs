@@ -96,6 +96,7 @@ pub enum HostFamily {
     AbletonLive,
     AdobeAudition,
     AdobePremiere,
+    Audacity,
     AppleAuLab,
     AppleAuval,
     AppleFinalCut,
@@ -296,6 +297,9 @@ fn detect_host_macos(host_path: &str, host_filename: &str) -> Option<HostMatch> 
     }
     if contains_ignore_case(host_filename, "Adobe Premiere") {
         return Some(host(HostFamily::AdobePremiere, "Adobe Premiere", None));
+    }
+    if contains_ignore_case(host_filename, "Audacity") {
+        return Some(host(HostFamily::Audacity, "Audacity", None));
     }
     if contains_ignore_case(host_filename, "GarageBand") {
         return Some(host(HostFamily::AppleGarageBand, "Apple GarageBand", None));
@@ -552,6 +556,9 @@ fn detect_host_windows(host_path: &str, host_filename: &str) -> Option<HostMatch
     if contains_ignore_case(host_filename, "Adobe Premiere") {
         return Some(host(HostFamily::AdobePremiere, "Adobe Premiere", None));
     }
+    if contains_ignore_case(host_filename, "Audacity") {
+        return Some(host(HostFamily::Audacity, "Audacity", None));
+    }
     if contains_ignore_case(host_filename, "ProTools") {
         return Some(host(HostFamily::ProTools, "ProTools", None));
     }
@@ -787,6 +794,9 @@ fn detect_host_unix(host_filename: &str) -> Option<HostMatch> {
     if contains_ignore_case(host_filename, "Ardour") {
         return Some(host(HostFamily::Ardour, "Ardour", None));
     }
+    if contains_ignore_case(host_filename, "Audacity") {
+        return Some(host(HostFamily::Audacity, "Audacity", None));
+    }
     if starts_with_ignore_case(host_filename, "Waveform") {
         return Some(host(
             HostFamily::TracktionWaveform,
@@ -842,6 +852,10 @@ mod tests {
         let luna = detect_host_from_path("/Applications/LUNA.app/Contents/MacOS/LUNA");
         assert_eq!(luna.display_name, "LUNA");
         assert_eq!(luna.family, HostFamily::Luna);
+
+        let audacity = detect_host_from_path("/Applications/Audacity.app/Contents/MacOS/Audacity");
+        assert_eq!(audacity.display_name, "Audacity");
+        assert_eq!(audacity.family, HostFamily::Audacity);
     }
 
     #[cfg(target_os = "windows")]
