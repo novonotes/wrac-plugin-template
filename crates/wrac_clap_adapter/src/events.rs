@@ -105,6 +105,30 @@ impl<'a> InputEvents<'a> {
             _ => None,
         })
     }
+
+    pub fn param_events(&self) -> ParamInputEvents<'a> {
+        ParamInputEvents { input: *self }
+    }
+}
+
+/// View over parameter input events delivered by `params.flush()`.
+///
+/// This preserves the CLAP callback's event-list boundary while exposing only
+/// parameter value events to product code. The underlying host-owned event list is
+/// confined to the callback lifetime.
+#[derive(Clone, Copy)]
+pub struct ParamInputEvents<'a> {
+    input: InputEvents<'a>,
+}
+
+impl<'a> ParamInputEvents<'a> {
+    pub fn values(&self) -> impl Iterator<Item = ParamValueEvent> + '_ {
+        self.input.parameter_values()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values().next().is_none()
+    }
 }
 
 pub struct InputEventsIter<'a> {

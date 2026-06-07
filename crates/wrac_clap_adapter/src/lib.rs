@@ -33,8 +33,8 @@ pub use descriptor::{
 pub use entry::{EntryContext, PluginEntry, PluginFactory};
 pub use events::{
     InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent, NoteExpressionEvent,
-    OutputEvent, OutputEvents, ParamGestureEvent, ParamModEvent, ProcessEvents, TransportEvent,
-    TransportFlags, UnknownEvent,
+    OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents, ParamModEvent, ProcessEvents,
+    TransportEvent, TransportFlags, UnknownEvent,
 };
 pub use process_buffer::{
     AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,
