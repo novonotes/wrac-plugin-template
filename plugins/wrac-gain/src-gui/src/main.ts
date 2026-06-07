@@ -227,6 +227,17 @@ void (async () => {
     "get_frontend_runtime_context",
   ).catch(() => ({}));
   installNativeCursorBridge(runtimeContext);
+  if (runtimeContext.resizeHandleEnabled === false) {
+    // Remove the affordance entirely when the native host owns resizing. A disabled
+    // but visible grip reads as a broken control, especially in Audacity VST3 where
+    // the WebView-internal resize request is intentionally not installed.
+    resizeGrip.remove();
+  } else {
+    installResizeBridge({
+      resizeGrip,
+      restoreHostFocus: restoreHostFocusIfNeeded,
+    });
+  }
 })();
 
 function clamp(value: number): number {
@@ -488,11 +499,6 @@ pluginName.addEventListener("click", (event) => {
 headerAction.addEventListener("click", (event) => {
   setEditorPage("controls");
   restoreHostFocusIfNeeded(event.target);
-});
-
-installResizeBridge({
-  resizeGrip,
-  restoreHostFocus: restoreHostFocusIfNeeded,
 });
 
 // -----------------------------------------------------------------------

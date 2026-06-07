@@ -9,6 +9,7 @@ export type FrontendRuntimeContext = {
   hostFamily?: string;
   hostName?: string;
   processName?: string;
+  resizeHandleEnabled?: boolean;
 };
 
 type NativeCursorIntent =

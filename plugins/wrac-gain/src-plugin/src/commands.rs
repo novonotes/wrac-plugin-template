@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde_json::json;
 use wrac_clap_adapter::{
     HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
+    PluginFormat,
 };
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
@@ -293,12 +294,18 @@ fn write_frontend_log(entry: FrontendLogEntry) {
 }
 
 fn frontend_runtime_context(host_context: &HostContext) -> serde_json::Value {
+    let audacity_vst3_resize_workaround = host_context.host.family == HostFamily::Audacity
+        && host_context.plugin_format == PluginFormat::Vst3;
     json!({
         "os": std::env::consts::OS,
         "pluginFormat": host_context.plugin_format.as_str(),
         "hostFamily": host_family_id(host_context.host.family),
         "hostName": host_context.host.display_name,
         "processName": host_context.host.process_name,
+        // Audacity's VST3 host/window path is resized from the native frame side.
+        // Leaving the WebView grip visible would advertise a resize path that the
+        // wrapper cannot complete synchronously in this host.
+        "resizeHandleEnabled": !audacity_vst3_resize_workaround,
     })
 }
 
@@ -307,6 +314,7 @@ fn host_family_id(family: HostFamily) -> &'static str {
         HostFamily::AbletonLive => "ableton-live",
         HostFamily::AdobeAudition => "adobe-audition",
         HostFamily::AdobePremiere => "adobe-premiere",
+        HostFamily::Audacity => "audacity",
         HostFamily::AppleAuLab => "apple-au-lab",
         HostFamily::AppleAuval => "apple-auval",
         HostFamily::AppleFinalCut => "apple-final-cut",
