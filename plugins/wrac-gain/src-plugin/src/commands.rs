@@ -8,7 +8,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use serde_json::json;
-use wrac_clap_adapter::{HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor};
+use wrac_clap_adapter::{
+    HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
+};
 use wrac_wxp_gui::WxpGuiResizeHandle;
 use wxp::{Channel, WxpCommandHandler};
 
@@ -16,8 +18,10 @@ use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, param
 use crate::plugin::{parameter_default_value, parameter_host_value, parameter_text_value};
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
+mod cursor;
 mod resize;
 
+use cursor::register_native_cursor_commands;
 use resize::register_resize_commands;
 
 pub(crate) struct CommandRegistrationDependencies {
@@ -28,6 +32,7 @@ pub(crate) struct CommandRegistrationDependencies {
     pub(crate) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     pub(crate) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     pub(crate) gui_resize_handle: WxpGuiResizeHandle,
+    pub(crate) host_context: HostContext,
 }
 
 /// Registers commands callable from the WebView frontend with the [`WxpCommandHandler`].
@@ -46,6 +51,7 @@ pub(crate) fn register_commands(
         host_parameter_edit_notifier,
         host_gui_resize_requester,
         gui_resize_handle,
+        host_context,
     } = dependencies;
 
     // Metadata comes from the descriptor selected by the host, not from Vite build-time
@@ -65,6 +71,11 @@ pub(crate) fn register_commands(
         let message = ctx.arg::<String>("message").map_err(|e| e.to_string())?;
         log::debug!("frontend: {message}");
         Ok::<_, String>(json!({ "ok": true }))
+    });
+
+    let frontend_runtime_context = frontend_runtime_context(&host_context);
+    command_handler.register_sync("get_frontend_runtime_context", move |_| {
+        Ok::<_, String>(frontend_runtime_context.clone())
     });
 
     // Editor page is project state unrelated to audio. It lives in a separate store from
@@ -245,4 +256,62 @@ pub(crate) fn register_commands(
         host_gui_resize_requester,
         gui_resize_handle,
     );
+    register_native_cursor_commands(&command_handler);
+}
+
+fn frontend_runtime_context(host_context: &HostContext) -> serde_json::Value {
+    json!({
+        "os": std::env::consts::OS,
+        "pluginFormat": host_context.plugin_format.as_str(),
+        "hostFamily": host_family_id(host_context.host.family),
+        "hostName": host_context.host.display_name,
+        "processName": host_context.host.process_name,
+    })
+}
+
+fn host_family_id(family: HostFamily) -> &'static str {
+    match family {
+        HostFamily::AbletonLive => "ableton-live",
+        HostFamily::AdobeAudition => "adobe-audition",
+        HostFamily::AdobePremiere => "adobe-premiere",
+        HostFamily::AppleAuLab => "apple-au-lab",
+        HostFamily::AppleAuval => "apple-auval",
+        HostFamily::AppleFinalCut => "apple-final-cut",
+        HostFamily::AppleGarageBand => "apple-garage-band",
+        HostFamily::AppleInfoHelper => "apple-info-helper",
+        HostFamily::AppleLogic => "apple-logic",
+        HostFamily::AppleMainStage => "apple-mainstage",
+        HostFamily::Ardour => "ardour",
+        HostFamily::BitwigStudio => "bitwig-studio",
+        HostFamily::CakewalkByBandlab => "cakewalk-by-bandlab",
+        HostFamily::CakewalkSonar => "cakewalk-sonar",
+        HostFamily::DaVinciResolve => "davinci-resolve",
+        HostFamily::DigitalPerformer => "digital-performer",
+        HostFamily::FlStudio => "fl-studio",
+        HostFamily::JuceAudioPluginHost => "juce-audio-plugin-host",
+        HostFamily::Luna => "luna",
+        HostFamily::MagixSamplitude => "magix-samplitude",
+        HostFamily::MagixSequoia => "magix-sequoia",
+        HostFamily::MuseReceptor => "muse-receptor",
+        HostFamily::NiMaschine => "ni-maschine",
+        HostFamily::Pluginval => "pluginval",
+        HostFamily::ProTools => "pro-tools",
+        HostFamily::Pyramix => "pyramix",
+        HostFamily::Reason => "reason",
+        HostFamily::Renoise => "renoise",
+        HostFamily::Reaper => "reaper",
+        HostFamily::Sadie => "sadie",
+        HostFamily::SteinbergCubase => "steinberg-cubase",
+        HostFamily::SteinbergCubaseBridged => "steinberg-cubase-bridged",
+        HostFamily::SteinbergNuendo => "steinberg-nuendo",
+        HostFamily::SteinbergTestHost => "steinberg-test-host",
+        HostFamily::SteinbergWavelab => "steinberg-wavelab",
+        HostFamily::StudioOne => "studio-one",
+        HostFamily::Tracktion => "tracktion",
+        HostFamily::TracktionWaveform => "tracktion-waveform",
+        HostFamily::VbVstScanner => "vb-vst-scanner",
+        HostFamily::ViennaEnsemblePro => "vienna-ensemble-pro",
+        HostFamily::WaveBurner => "waveburner",
+        HostFamily::Unknown => "unknown",
+    }
 }

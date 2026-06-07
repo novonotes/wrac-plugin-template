@@ -59,13 +59,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # The wrapped library ends up inside shared plugin bundles (.vst3/.so/.dylib),
 # so every object on the link line must be position-independent.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-# 10.15 is the floor the Rust plugin staticlib is built against; keep the C++
+# 11.0 is the floor the Rust plugin staticlib is built against; keep the C++
 # side from targeting a newer minimum and producing a mismatched bundle.
-if(APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
+if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR "${CMAKE_OSX_DEPLOYMENT_TARGET}" STREQUAL ""))
     if(DEFINED ENV{MACOSX_DEPLOYMENT_TARGET} AND NOT "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
-        set(CMAKE_OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET}")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "$ENV{MACOSX_DEPLOYMENT_TARGET}" CACHE STRING "macOS deployment target" FORCE)
     else()
-        set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING "macOS deployment target" FORCE)
     endif()
 endif()
 

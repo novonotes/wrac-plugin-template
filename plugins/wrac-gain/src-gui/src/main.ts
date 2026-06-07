@@ -112,12 +112,116 @@ let gestureActive = false;
 let parameterSubscriptionId: number | undefined;
 let editorPageSubscriptionId: number | undefined;
 let pluginMetadata: PluginMetadata | undefined;
+let nativeCursorBridgeEnabled = false;
 
 type ResizeResponse = {
   ok?: boolean;
   width?: number;
   height?: number;
 };
+
+type FrontendRuntimeContext = {
+  os?: string;
+  pluginFormat?: string;
+  hostFamily?: string;
+  hostName?: string;
+  processName?: string;
+};
+
+type NativeCursorIntent =
+  | "alias"
+  | "all-scroll"
+  | "arrow"
+  | "cell"
+  | "col-resize"
+  | "context-menu"
+  | "copy"
+  | "crosshair"
+  | "e-resize"
+  | "ew-resize"
+  | "grab"
+  | "grabbing"
+  | "help"
+  | "move"
+  | "n-resize"
+  | "ne-resize"
+  | "nesw-resize"
+  | "no-drop"
+  | "none"
+  | "not-allowed"
+  | "ns-resize"
+  | "nw-resize"
+  | "nwse-resize"
+  | "pointer"
+  | "progress"
+  | "row-resize"
+  | "s-resize"
+  | "se-resize"
+  | "sw-resize"
+  | "text"
+  | "vertical-text"
+  | "w-resize"
+  | "wait"
+  | "zoom-in"
+  | "zoom-out"
+  | "unsupported";
+
+function writeFrontendLog(message: string): void {
+  void invoke("write_to_log", { message }).catch(() => undefined);
+}
+
+function shouldUseNativeCursorBridge(context: FrontendRuntimeContext): boolean {
+  return (
+    context.os === "macos" &&
+    context.pluginFormat === "vst3" &&
+    context.hostFamily === "steinberg-cubase"
+  );
+}
+
+function nativeCursorIntentFromCss(cssCursor: string): NativeCursorIntent {
+  switch (cssCursor) {
+    case "auto":
+    case "default":
+      return "arrow";
+    case "alias":
+    case "all-scroll":
+    case "cell":
+    case "col-resize":
+    case "context-menu":
+    case "copy":
+    case "crosshair":
+    case "e-resize":
+    case "ew-resize":
+    case "grab":
+    case "grabbing":
+    case "help":
+    case "move":
+    case "n-resize":
+    case "ne-resize":
+    case "nesw-resize":
+    case "no-drop":
+    case "none":
+    case "not-allowed":
+    case "ns-resize":
+    case "nw-resize":
+    case "nwse-resize":
+    case "pointer":
+    case "progress":
+    case "row-resize":
+    case "s-resize":
+    case "se-resize":
+    case "sw-resize":
+    case "text":
+    case "vertical-text":
+    case "w-resize":
+    case "wait":
+    case "zoom-in":
+    case "zoom-out":
+      return cssCursor;
+    default:
+      return "unsupported";
+  }
+}
 
 function isEditableElement(target: EventTarget | null): boolean {
   return (
@@ -222,9 +326,11 @@ void (async () => {
   editorPageSubscriptionId = editorPageSubscription.subscriptionId;
   // Log frontend initialization to the native log without relying on the WebView console.
   // Some environments inside a DAW do not allow opening devtools, so this boundary log is preserved.
-  await invoke("write_to_log", {
-    message: "GUI initialization completed",
-  });
+  writeFrontendLog("GUI initialization completed");
+  const runtimeContext = await invoke<FrontendRuntimeContext>(
+    "get_frontend_runtime_context",
+  ).catch(() => ({}));
+  nativeCursorBridgeEnabled = shouldUseNativeCursorBridge(runtimeContext);
 })();
 
 function clamp(value: number): number {
@@ -487,6 +593,61 @@ headerAction.addEventListener("click", (event) => {
   setEditorPage("controls");
   restoreHostFocusIfNeeded(event.target);
 });
+
+{
+  let lastCssCursor = "";
+
+  const applyNativeCursor = (
+    cursorIntent: NativeCursorIntent,
+    reason: string,
+  ): void => {
+    void invoke("apply_native_cursor", {
+      cursorIntent,
+      reason,
+    }).catch(() => undefined);
+  };
+
+  const logCursorPropagationTrigger = (event: PointerEvent | MouseEvent): void => {
+    if (!nativeCursorBridgeEnabled) {
+      return;
+    }
+    const hitElement = document.elementFromPoint(event.clientX, event.clientY);
+    const hitCursor = hitElement
+      ? window.getComputedStyle(hitElement).cursor
+      : "none";
+    if (hitCursor === lastCssCursor) {
+      return;
+    }
+    const cursorIntent = nativeCursorIntentFromCss(hitCursor);
+    lastCssCursor = hitCursor;
+    applyNativeCursor(cursorIntent, `css-change:${event.type}`);
+  };
+
+  for (const type of ["pointerover", "pointermove", "pointerout"]) {
+    document.addEventListener(type, logCursorPropagationTrigger, {
+      capture: true,
+    });
+  }
+
+  const resetNativeCursor = (reason: string): void => {
+    if (!nativeCursorBridgeEnabled) {
+      return;
+    }
+    if (lastCssCursor !== "auto") {
+      lastCssCursor = "auto";
+    }
+    applyNativeCursor("arrow", reason);
+  };
+
+  document.addEventListener("mouseleave", () => resetNativeCursor("document-mouseleave"), {
+    capture: true,
+  });
+  window.addEventListener("blur", () => resetNativeCursor("window-blur"));
+  window.addEventListener("pagehide", () => resetNativeCursor("pagehide"));
+  window.addEventListener("pointercancel", () => resetNativeCursor("pointercancel"), {
+    capture: true,
+  });
+}
 
 {
   let dragStart:

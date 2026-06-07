@@ -5,8 +5,8 @@ use std::time::Duration;
 use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
-    PluginError, PluginResult,
+    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, HostParamsEditNotifier,
+    PluginDescriptor, PluginError, PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
@@ -46,6 +46,7 @@ pub(super) struct GuiRuntimeDependencies {
     pub(super) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
     pub(super) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     pub(super) resize_handle: WxpGuiResizeHandle,
+    pub(super) host_context: HostContext,
 }
 
 /// Runtime for one GUI window. Created each time the host opens the GUI; dropped when closed.
@@ -93,6 +94,7 @@ impl WracGainGuiRuntime {
                 host_parameter_edit_notifier: dependencies.host_parameter_edit_notifier,
                 host_gui_resize_requester: dependencies.host_gui_resize_requester,
                 gui_resize_handle: dependencies.resize_handle,
+                host_context: dependencies.host_context,
             },
         );
 

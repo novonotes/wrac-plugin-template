@@ -87,6 +87,7 @@ pub(crate) fn create_gui_integration(
         host_parameter_edit_notifier,
         host_gui_resize_requester,
         resize_handle: resize_handle.clone(),
+        host_context: host_context.clone(),
     };
     let controller = Arc::new(WxpGuiController::new_with_resize_handle(
         WracGainGuiFactory {

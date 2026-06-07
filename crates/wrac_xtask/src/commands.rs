@@ -346,6 +346,11 @@ pub(crate) fn configure_wrapper(
     }
 
     if ctx.platform == Platform::Macos {
+        let macos_deployment_target = env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0");
+        push_cmake_arg(
+            &mut args,
+            format!("-DCMAKE_OSX_DEPLOYMENT_TARGET={macos_deployment_target}"),
+        );
         // AUv2 uses 4-character type/manufacturer/subtype codes as the host discovery key.
         // Drive them from the template's constants rather than inferring from the Rust descriptor.
         push_cmake_arg(
@@ -387,6 +392,12 @@ pub(crate) fn configure_wrapper(
 
     let mut configure = Command::new("cmake");
     configure.args(&args);
+    if ctx.platform == Platform::Macos {
+        configure.env(
+            "MACOSX_DEPLOYMENT_TARGET",
+            env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
+        );
+    }
     run(configure.current_dir(&ctx.root))?;
     write_cmake_configure_stamp(&build_dir, &args)?;
     Ok(())

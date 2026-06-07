@@ -3076,6 +3076,8 @@ dependencies = [
  "atomic_float",
  "log",
  "novonotes_run_loop",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "parking_lot",
  "run_loop_timer",
  "serde",
