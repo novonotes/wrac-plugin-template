@@ -87,6 +87,10 @@ unsafe extern "C" fn gui_create(
     is_floating: bool,
 ) -> bool {
     ffi_bool(|| {
+        log::debug!(
+            "gui.create: called api={} is_floating={is_floating}",
+            gui_api_name(api)
+        );
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "create") }) else {
             return false;
         };
@@ -95,7 +99,10 @@ unsafe extern "C" fn gui_create(
             return false;
         };
         match gui.create(GuiConfig { api, is_floating }) {
-            Ok(()) => true,
+            Ok(()) => {
+                log::debug!("gui.create: completed");
+                true
+            }
             Err(error) => {
                 log::warn!("gui.create: plugin create failed: {error}");
                 false
@@ -106,10 +113,12 @@ unsafe extern "C" fn gui_create(
 
 unsafe extern "C" fn gui_destroy(plugin: *const clap_plugin) {
     ffi_unit(|| {
+        log::debug!("gui.destroy: called");
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "destroy") }) else {
             return;
         };
         gui.destroy();
+        log::debug!("gui.destroy: completed");
     });
 }
 
@@ -254,6 +263,16 @@ unsafe extern "C" fn gui_set_parent(
     window: *const clap_window,
 ) -> bool {
     ffi_bool(|| {
+        let window_api = if window.is_null() {
+            "<null>".to_string()
+        } else {
+            unsafe { gui_api_name((*window).api) }
+        };
+        log::debug!(
+            "gui.set_parent: called window_is_null={} api={}",
+            window.is_null(),
+            window_api
+        );
         if window.is_null() {
             log::warn!("gui.set_parent: null window pointer");
             return false;
@@ -266,7 +285,10 @@ unsafe extern "C" fn gui_set_parent(
             return false;
         };
         match gui.set_parent(parent) {
-            Ok(()) => true,
+            Ok(()) => {
+                log::debug!("gui.set_parent: completed");
+                true
+            }
             Err(error) => {
                 log::warn!("gui.set_parent: plugin set_parent failed: {error}");
                 false
@@ -295,11 +317,15 @@ unsafe extern "C" fn gui_suggest_title(plugin: *const clap_plugin, _title: *cons
 
 unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
+        log::debug!("gui.show: called");
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "show") }) else {
             return false;
         };
         match gui.show() {
-            Ok(()) => true,
+            Ok(()) => {
+                log::debug!("gui.show: completed");
+                true
+            }
             Err(error) => {
                 log::warn!("gui.show: plugin show failed: {error}");
                 false
@@ -310,11 +336,15 @@ unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {
 
 unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
+        log::debug!("gui.hide: called");
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "hide") }) else {
             return false;
         };
         match gui.hide() {
-            Ok(()) => true,
+            Ok(()) => {
+                log::debug!("gui.hide: completed");
+                true
+            }
             Err(error) => {
                 log::warn!("gui.hide: plugin hide failed: {error}");
                 false
@@ -409,4 +439,13 @@ fn gui_api_cstr(api: GuiApi) -> &'static CStr {
         GuiApi::Win32 => CLAP_WINDOW_API_WIN32,
         GuiApi::X11 => CLAP_WINDOW_API_X11,
     }
+}
+
+fn gui_api_name(api: *const c_char) -> String {
+    if api.is_null() {
+        return "<null>".to_string();
+    }
+    unsafe { CStr::from_ptr(api) }
+        .to_string_lossy()
+        .into_owned()
 }

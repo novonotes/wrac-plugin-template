@@ -7,6 +7,7 @@
 mod controller;
 mod cursor;
 mod dpi;
+mod host_policy;
 mod pointer;
 mod resize_drag;
 mod runtime;

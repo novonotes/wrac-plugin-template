@@ -68,10 +68,13 @@ impl WxpWebViewSession {
         command_handler: Rc<WxpCommandHandler>,
     ) -> PluginResult<Self> {
         log::debug!(
-            "creating wxp WebView session: plugin_id={}, width={}, height={}",
+            "creating wxp WebView session: plugin_id={}, width={}, height={}, parent={:?}, devtools={}, host_size_unit={:?}",
             config.plugin_id,
             config.initial_size.width,
-            config.initial_size.height
+            config.initial_size.height,
+            config.parent,
+            config.devtools,
+            config.host_size_unit
         );
 
         let data_dir = webview_data_dir(config.plugin_id);
@@ -114,7 +117,10 @@ impl WxpWebViewSession {
                 }
             }
             WxpFrontendSource::Zip { scheme, url, bytes } => {
-                log::debug!("configuring wxp WebView session zip frontend: url={url}");
+                log::debug!(
+                    "configuring wxp WebView session zip frontend: scheme={scheme}, url={url}, bytes={}",
+                    bytes.len()
+                );
                 WxpWebViewBuilder::new(&mut wxp_context)
                     .with_command_handler(command_handler.clone())
                     .with_devtools(config.devtools)
@@ -126,6 +132,13 @@ impl WxpWebViewSession {
             }
         };
 
+        log::debug!(
+            "building wxp WebView child: host_width={}, host_height={}, logical_width={}, logical_height={}",
+            host_size.width,
+            host_size.height,
+            logical_size.width,
+            logical_size.height
+        );
         let web_view = builder
             .build_as_child(&config.parent)
             .map_err(|_| PluginError::Message("failed to build webview"))?;
@@ -165,7 +178,10 @@ impl WxpWebViewSession {
     }
 
     pub fn show(&mut self) -> PluginResult<()> {
-        log::debug!("showing wxp WebView session");
+        log::debug!(
+            "showing wxp WebView session: web_view_active={}",
+            self.web_view.is_some()
+        );
         if let Some(web_view) = &self.web_view {
             web_view
                 .dispatch()
@@ -176,7 +192,10 @@ impl WxpWebViewSession {
     }
 
     pub fn hide(&mut self) -> PluginResult<()> {
-        log::debug!("hiding wxp WebView session");
+        log::debug!(
+            "hiding wxp WebView session: web_view_active={}",
+            self.web_view.is_some()
+        );
         if let Some(web_view) = &self.web_view {
             web_view
                 .dispatch()
@@ -188,6 +207,11 @@ impl WxpWebViewSession {
 
     fn apply_bounds(&self) -> PluginResult<()> {
         if let Some(web_view) = &self.web_view {
+            log::debug!(
+                "applying wxp WebView bounds: logical_width={}, logical_height={}",
+                self.logical_size.width,
+                self.logical_size.height
+            );
             // Use the same dispatch path as command handlers and close handling so a closing
             // WebView's native owner is not kept alive by direct access.
             web_view
@@ -201,7 +225,11 @@ impl WxpWebViewSession {
 
 impl Drop for WxpWebViewSession {
     fn drop(&mut self) {
-        log::debug!("dropping wxp WebView session");
+        log::debug!(
+            "dropping wxp WebView session: web_view_active={} web_context_active={}",
+            self.web_view.is_some(),
+            self.wxp_context.is_some()
+        );
         self.web_view = None;
         log::debug!("dropping wxp WebView session: webview dropped");
         self.wxp_context = None;

@@ -8,10 +8,11 @@ use wrac_clap_adapter::{
     GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
     PluginGuiExtension, PluginResult,
 };
-use wrac_host_context::{HostContext, HostFamily, PluginFormat};
+use wrac_host_context::HostContext;
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
 use crate::dpi::{DpiConverter, HostGuiSizeUnit};
+use crate::host_policy::HostGuiPolicy;
 use crate::runtime::{
     GuiRuntimeHandle, GuiThreadLease, WxpGuiFactory, create_gui_runtime_handle, is_gui_thread,
 };
@@ -36,7 +37,7 @@ pub struct WxpGuiController {
     layout: Arc<HostGuiLayout>,
     scale: Arc<Mutex<f64>>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
-    host_context: HostContext,
+    host_policy: HostGuiPolicy,
 }
 
 struct HostGuiLayout {
@@ -117,7 +118,8 @@ impl WxpGuiController {
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
     ) -> Self {
-        resize_handle.set_host_size_unit(host_gui_size_unit_for_context(&host_context));
+        let host_policy = HostGuiPolicy::new(host_context);
+        resize_handle.set_host_size_unit(host_policy.host_size_unit());
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
@@ -131,16 +133,23 @@ impl WxpGuiController {
                 pending_creation_generation: None,
                 destroy_requested_while_creating: false,
             })),
-            host_context,
+            host_policy,
         }
     }
 
-    fn destroy_gui_session(&self) {
-        log::debug!("wxp controller: destroy_gui_session requested");
+    fn force_destroy_gui_session(&self) {
+        log::debug!(
+            "wxp controller: destroy_gui_session requested state={}",
+            self.runtime_state_summary()
+        );
         {
             let mut state = self.runtime.lock();
             if state.is_creating_runtime {
-                log::debug!("wxp controller: destroy_gui_session deferred during runtime creation");
+                log::debug!(
+                    "wxp controller: destroy_gui_session deferred during runtime creation: generation={} creating_generation={:?}",
+                    state.generation,
+                    state.creating_generation
+                );
                 let session = state.session.take();
                 state.generation = state.generation.wrapping_add(1);
                 state.destroy_requested_while_creating = true;
@@ -155,15 +164,18 @@ impl WxpGuiController {
         if drop_session(session) {
             self.note_runtime_destroyed();
         }
-        log::debug!("wxp controller: destroy_gui_session completed");
+        log::debug!(
+            "wxp controller: destroy_gui_session completed state={}",
+            self.runtime_state_summary()
+        );
     }
 
     fn should_async_resync_bounds_after_set_size(&self) -> bool {
-        is_cubase_vst3(&self.host_context)
+        self.host_policy.should_async_resync_bounds_after_set_size()
     }
 
     fn correct_host_scale(&self, scale: f64, parent: Option<StoredParentWindow>) -> f64 {
-        if !is_cubase_vst3(&self.host_context) {
+        if !self.host_policy.needs_cubase_vst3_scale_correction() {
             return scale;
         }
         // Cubase 10 on Windows has been observed to report integer VST3 scale factors
@@ -171,7 +183,7 @@ impl WxpGuiController {
         // HWND is the closest source of truth for the actual size conversion.
         let corrected = corrected_scale_for_parent(parent).unwrap_or(scale);
         if (corrected - scale).abs() > f64::EPSILON {
-            log::info!(
+            log::debug!(
                 "wxp controller: corrected Cubase VST3 host scale from {scale} to {corrected}"
             );
         }
@@ -183,6 +195,10 @@ impl WxpGuiController {
     }
 
     fn schedule_runtime_creation(&self, generation: u64) -> PluginResult<()> {
+        log::debug!(
+            "wxp controller: schedule_runtime_creation requested generation={generation} state={}",
+            self.runtime_state_summary()
+        );
         schedule_runtime_creation(
             self.factory.clone(),
             self.runtime.clone(),
@@ -190,27 +206,36 @@ impl WxpGuiController {
             generation,
         )
     }
-}
 
-fn is_cubase_vst3(host_context: &HostContext) -> bool {
-    host_context.host.family == HostFamily::SteinbergCubase
-        && host_context.plugin_format == PluginFormat::Vst3
-}
-
-fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit {
-    // macOS wrapper formats expose Cocoa/NSView geometry at the CLAP GUI boundary.
-    // Treating those logical coordinates as physical pixels would divide the child
-    // WebView bounds by the scale factor and clip the editor to the top-left area.
-    if cfg!(target_os = "macos")
-        && matches!(
-            host_context.plugin_format,
-            PluginFormat::Vst3 | PluginFormat::Au | PluginFormat::Aax
-        )
-    {
-        HostGuiSizeUnit::LogicalPoints
-    } else {
-        HostGuiSizeUnit::PhysicalPixels
+    fn runtime_state_summary(&self) -> String {
+        let state = self.runtime.lock();
+        runtime_state_summary(&state)
     }
+}
+
+fn runtime_state_summary(state: &GuiRuntimeState) -> String {
+    let session = match state.session.as_ref() {
+        Some(session) => format!(
+            "session=Some(generation={}, has_parent={}, has_parent_lease={}, has_handle={}, visible={}, scale={}, config={:?})",
+            session.generation,
+            session.parent.is_some(),
+            session.parent_lease.is_some(),
+            session.handle.is_some(),
+            session.visible,
+            session.scale,
+            session.configuration
+        ),
+        None => "session=None".to_string(),
+    };
+    format!(
+        "generation={} {session} is_creating_runtime={} creating_generation={:?} pending_creation_generation={:?} destroy_requested_while_creating={} last_runtime_destroyed_at_present={}",
+        state.generation,
+        state.is_creating_runtime,
+        state.creating_generation,
+        state.pending_creation_generation,
+        state.destroy_requested_while_creating,
+        state.last_runtime_destroyed_at.is_some()
+    )
 }
 
 fn schedule_runtime_creation(
@@ -227,18 +252,24 @@ fn schedule_runtime_creation(
         let mut state = runtime.lock();
         if state.is_creating_runtime {
             log::debug!(
-                "wxp controller: runtime creation pending while another creation is in progress: generation={generation}"
+                "wxp controller: runtime creation pending while another creation is in progress: generation={generation} state={}",
+                runtime_state_summary(&state)
             );
             state.pending_creation_generation = Some(generation);
             return Ok(());
         }
         let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
         if session.generation != generation {
+            log::debug!(
+                "wxp controller: runtime creation rejected stale generation: requested={generation} state={}",
+                runtime_state_summary(&state)
+            );
             return Err(PluginError::InvalidState);
         }
         if session.handle.is_some() {
             log::debug!(
-                "wxp controller: runtime creation skipped; runtime already exists: generation={generation}"
+                "wxp controller: runtime creation skipped; runtime already exists: generation={generation} state={}",
+                runtime_state_summary(&state)
             );
             return Ok(());
         }
@@ -255,7 +286,9 @@ fn schedule_runtime_creation(
         (configuration, parent)
     };
 
-    log::debug!("wxp controller: posting runtime creation: generation={generation}");
+    log::debug!(
+        "wxp controller: posting runtime creation: generation={generation} parent={parent:?} configuration={configuration:?}"
+    );
     let factory_for_callback = factory.clone();
     let runtime_for_callback = runtime.clone();
     let layout_for_callback = layout.clone();
@@ -348,6 +381,10 @@ fn schedule_runtime_creation(
 
         let mut state = runtime_for_callback.lock();
         let Some(session) = state.session.as_mut() else {
+            log::debug!(
+                "wxp controller: posted runtime creation has no session after create: generation={generation} state={}",
+                runtime_state_summary(&state)
+            );
             drop(state);
             handle.destroy();
             runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
@@ -359,6 +396,10 @@ fn schedule_runtime_creation(
             return;
         };
         if session.generation != generation {
+            let actual_generation = session.generation;
+            log::debug!(
+                "wxp controller: posted runtime creation session generation changed: requested={generation} actual={actual_generation}"
+            );
             drop(state);
             handle.destroy();
             runtime_for_callback.lock().last_runtime_destroyed_at = Some(Instant::now());
@@ -389,7 +430,10 @@ fn schedule_runtime_creation(
             );
             state.pending_creation_generation = None;
         }
-        log::debug!("wxp controller: posted runtime creation completed: generation={generation}");
+        log::debug!(
+            "wxp controller: posted runtime creation completed: generation={generation} state={}",
+            runtime_state_summary(&state)
+        );
         drop(state);
         schedule_pending_runtime_creation(
             factory_for_callback,
@@ -861,12 +905,15 @@ impl PluginGuiExtension for WxpGuiController {
     }
 
     fn create(&self, configuration: GuiConfig) -> PluginResult<()> {
-        log::debug!("wxp controller: create called: configuration={configuration:?}");
+        log::debug!(
+            "wxp controller: create called: configuration={configuration:?} state={}",
+            self.runtime_state_summary()
+        );
         if !self.is_api_supported(configuration.api, configuration.is_floating) {
             log::debug!("wxp controller: create rejected unsupported configuration");
             return Err(PluginError::Message("unsupported GUI configuration"));
         }
-        self.destroy_gui_session();
+        self.force_destroy_gui_session();
         let scale = *self.scale.lock();
         let generation = {
             let mut state = self.runtime.lock();
@@ -886,14 +933,23 @@ impl PluginGuiExtension for WxpGuiController {
             });
             generation
         };
-        log::debug!("wxp controller: create completed: generation={generation}");
+        log::debug!(
+            "wxp controller: create completed: generation={generation} state={}",
+            self.runtime_state_summary()
+        );
         Ok(())
     }
 
     fn destroy(&self) {
-        log::debug!("wxp controller: destroy called");
-        self.destroy_gui_session();
-        log::debug!("wxp controller: destroy completed");
+        log::debug!(
+            "wxp controller: destroy called state={}",
+            self.runtime_state_summary()
+        );
+        self.force_destroy_gui_session();
+        log::debug!(
+            "wxp controller: destroy completed state={}",
+            self.runtime_state_summary()
+        );
     }
 
     fn set_scale(&self, scale: f64) -> PluginResult<()> {
@@ -977,11 +1033,20 @@ impl PluginGuiExtension for WxpGuiController {
     }
 
     fn set_parent(&self, window: HostWindow) -> PluginResult<()> {
-        log::debug!("wxp controller: set_parent called");
+        log::debug!(
+            "wxp controller: set_parent called state={}",
+            self.runtime_state_summary()
+        );
         let parent = StoredParentWindow::from_host_window(window);
         let (generation, needs_parent_lease) = {
             let state = self.runtime.lock();
-            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            let Some(session) = state.session.as_ref() else {
+                log::debug!(
+                    "wxp controller: set_parent rejected with no session: parent={parent:?} state={}",
+                    runtime_state_summary(&state)
+                );
+                return Err(PluginError::InvalidState);
+            };
             let needs_parent_lease = if session.parent.is_some() {
                 if !is_gui_thread() {
                     log::debug!("wxp controller: set_parent rejected non-GUI thread reparent");
@@ -1029,7 +1094,15 @@ impl PluginGuiExtension for WxpGuiController {
             }
         }
         let mut state = self.runtime.lock();
-        let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
+        let Some(session) = state.session.as_mut() else {
+            log::debug!(
+                "wxp controller: set_parent lost session before storing parent: parent={parent:?} state={}",
+                runtime_state_summary(&state)
+            );
+            drop(state);
+            drop(parent_lease);
+            return Err(PluginError::InvalidState);
+        };
         if session.generation != generation {
             drop(state);
             drop(parent_lease);
@@ -1048,15 +1121,27 @@ impl PluginGuiExtension for WxpGuiController {
         // On failure, leave the session without a runtime and let a subsequent
         // show/set_parent reschedule it.
         self.schedule_runtime_creation(generation)?;
-        log::debug!("wxp controller: set_parent completed");
+        log::debug!(
+            "wxp controller: set_parent completed parent={parent:?} state={}",
+            self.runtime_state_summary()
+        );
         Ok(())
     }
 
     fn show(&self) -> PluginResult<()> {
-        log::debug!("wxp controller: show called");
+        log::debug!(
+            "wxp controller: show called state={}",
+            self.runtime_state_summary()
+        );
         let action = {
             let state = self.runtime.lock();
-            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            let Some(session) = state.session.as_ref() else {
+                log::debug!(
+                    "wxp controller: show rejected with no session: state={}",
+                    runtime_state_summary(&state)
+                );
+                return Err(PluginError::InvalidState);
+            };
             if let Some(handle) = session.handle.clone() {
                 ShowAction::ShowExisting {
                     handle,
@@ -1073,35 +1158,52 @@ impl PluginGuiExtension for WxpGuiController {
 
         match action {
             ShowAction::ShowExisting { handle, generation } => {
-                log::debug!("wxp controller: show existing runtime");
+                log::debug!("wxp controller: show existing runtime generation={generation}");
                 handle.show()?;
                 if let Some(session) = &mut self.runtime.lock().session
                     && session.generation == generation
                 {
                     session.visible = true;
                 }
-                log::debug!("wxp controller: show completed on existing runtime");
+                log::debug!(
+                    "wxp controller: show completed on existing runtime state={}",
+                    self.runtime_state_summary()
+                );
                 Ok(())
             }
             ShowAction::Create { generation } => {
-                log::debug!("wxp controller: show scheduling runtime creation");
+                log::debug!(
+                    "wxp controller: show scheduling runtime creation generation={generation}"
+                );
                 self.schedule_runtime_creation(generation)?;
                 if let Some(session) = &mut self.runtime.lock().session
                     && session.generation == generation
                 {
                     session.visible = true;
                 }
-                log::debug!("wxp controller: show completed by scheduled runtime creation");
+                log::debug!(
+                    "wxp controller: show completed by scheduled runtime creation state={}",
+                    self.runtime_state_summary()
+                );
                 Ok(())
             }
         }
     }
 
     fn hide(&self) -> PluginResult<()> {
-        log::debug!("wxp controller: hide called");
+        log::debug!(
+            "wxp controller: hide called state={}",
+            self.runtime_state_summary()
+        );
         let (generation, handle) = {
             let state = self.runtime.lock();
-            let session = state.session.as_ref().ok_or(PluginError::InvalidState)?;
+            let Some(session) = state.session.as_ref() else {
+                log::debug!(
+                    "wxp controller: hide rejected with no session: state={}",
+                    runtime_state_summary(&state)
+                );
+                return Err(PluginError::InvalidState);
+            };
             (session.generation, session.handle.clone())
         };
         if let Some(handle) = handle {
@@ -1112,7 +1214,10 @@ impl PluginGuiExtension for WxpGuiController {
         {
             session.visible = false;
         }
-        log::debug!("wxp controller: hide completed");
+        log::debug!(
+            "wxp controller: hide completed state={}",
+            self.runtime_state_summary()
+        );
         Ok(())
     }
 }
@@ -1145,7 +1250,7 @@ fn clamp_size_with_limits(size: GuiSize, limits: GuiSizeLimits) -> GuiSize {
 
 impl Drop for WxpGuiController {
     fn drop(&mut self) {
-        self.destroy_gui_session();
+        self.force_destroy_gui_session();
     }
 }
 
@@ -1179,7 +1284,7 @@ fn default_gui_configuration() -> GuiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wrac_host_context::DetectedHost;
+    use wrac_host_context::{DetectedHost, HostFamily, PluginFormat};
 
     #[test]
     fn clamps_logical_resize_request_in_physical_pixels() {
@@ -1228,7 +1333,8 @@ mod tests {
             } else {
                 HostGuiSizeUnit::PhysicalPixels
             };
-            assert_eq!(host_gui_size_unit_for_context(&context), expected);
+            let policy = HostGuiPolicy::new(context);
+            assert_eq!(policy.host_size_unit(), expected);
         }
     }
 }
