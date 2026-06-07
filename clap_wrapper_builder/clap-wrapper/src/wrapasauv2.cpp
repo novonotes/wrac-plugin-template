@@ -640,10 +640,11 @@ OSStatus WrapAsAUV2::Stop()
 }
 void WrapAsAUV2::Cleanup()
 {
-  LOGINFO("[clap-wrapper] Cleaning up Plugin uiIsOpened={} canary={}", this->_uiIsOpened,
-          (void *)this->_uiconn._canary);
+  LOGINFO("[clap-wrapper] Cleaning up Plugin uiIsOpened={}", this->_uiIsOpened);
   auto guarantee_mainthread = _plugin->AlwaysMainThread();
-  LOGINFO("[clap-wrapper] AUv2 Cleanup keeps CLAP GUI alive; Cocoa view/destructor own GUI teardown");
+  // AudioUnit hosts can call Cleanup while the Cocoa editor view is still alive. The NSView
+  // dealloc/destructor paths own CLAP GUI teardown; doing it here can leave a live host view with a
+  // destroyed child WebView.
   deactivateCLAP();
   Base::Cleanup();
 }

@@ -88,7 +88,7 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 
 - (id)initWithAUv2:(free_audio::auv2_wrapper::ui_connection *)cont preferredSize:(NSSize)size
 {
-  LOGINFO("[clap-wrapper] creating NSView self={}", (void *)self);
+  LOGINFO("[clap-wrapper] creating NSView");
 
   ui = *cont;
   canary = 0xbeebbeeb;
@@ -169,14 +169,14 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 {
   if ([self window] == nil)
   {
-    LOGINFO("[clap-wrapper] - view removed from a window; keeping CLAP GUI alive until dealloc self={}",
-            (void *)self);
+    // Some AUv2 hosts temporarily detach the editor view while the plugin instance remains
+    // active. Destroying the CLAP GUI here leaves the host-owned NSView alive with no child
+    // WebView to redraw, which shows up as a blank editor on the next transport transition.
+    LOGINFO("[clap-wrapper] - view removed from a window; keeping CLAP GUI alive until dealloc");
     [self stopIdleTimer];
   }
   else
   {
-    LOGINFO("[clap-wrapper] - view attached to a window self={} window={}", (void *)self,
-            (void *)[self window]);
     [self startIdleTimer];
   }
   [super viewDidMoveToWindow];
@@ -184,10 +184,12 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 
 - (void)dealloc
 {
-  LOGINFO("[clap-wrapper] NS View dealloc self={} canary={}", (void *)self, canary);
+  LOGINFO("[clap-wrapper] NS View dealloc");
   [self stopIdleTimer];
   if (canary)
   {
+    // Dealloc is the point where Cocoa proves the editor view itself is going away. Tie CLAP GUI
+    // teardown to this lifetime rather than to transient detach/Cleanup callbacks.
     LOGINFO("[clap-wrapper] the host did not call viewDidMoveWindow with a nil window");
     ui._destroyWindow("CLAP_WRAPPER_COCOA_CLASS_NSVIEW::dealloc");
   }
