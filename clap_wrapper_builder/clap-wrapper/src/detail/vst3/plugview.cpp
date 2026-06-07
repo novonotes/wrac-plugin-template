@@ -266,7 +266,9 @@ bool WrappedView::request_resize(uint32_t width, uint32_t height)
   if (_plugFrame)
   {
     auto result = _plugFrame->resizeView(this, &_rect);
-    // Steinberg uses kResultOk == 0, so this cannot be tested as a boolean failure.
+    // VST3 tresult is not a bool: kResultOk is 0. Treating resizeView() with
+    // boolean negation reports successful host resizes as rejected and rolls
+    // back _rect, even after the host has accepted the size via onSize().
     if (result != kResultOk)
     {
       _rect = oldrect;
