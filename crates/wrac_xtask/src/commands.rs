@@ -936,6 +936,10 @@ pub(crate) fn validate_plugin_target(
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
             run(Command::new(validator).arg(&vst3).current_dir(&ctx.root))?;
+            // The VST3 validator checks format behavior but does not prove that the
+            // host-visible class IDs match package metadata. moduleinfotool reads the built
+            // bundle metadata, so this catches build.rs/wrapper byte-order regressions at the
+            // artifact boundary instead of adding a product-policy readiness rule.
             validate_vst3_component_ids(ctx, &vst3)?;
         }
         ValidateTarget::Au => {
