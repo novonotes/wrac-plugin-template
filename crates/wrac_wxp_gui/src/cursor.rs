@@ -4,7 +4,12 @@ use wxp::WxpCommandHandler;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(super) fn register_native_cursor_bridge_commands(command_handler: &WxpCommandHandler) {
+/// Registers the native cursor bridge command used by WebView frontends.
+///
+/// The frontend remains CSS-driven: it sends a normalized `cursorIntent` derived from
+/// `getComputedStyle(...).cursor`, and this bridge applies the closest native cursor
+/// only on platforms that need it.
+pub fn register_native_cursor_bridge_commands(command_handler: &WxpCommandHandler) {
     command_handler.register_sync("apply_native_cursor", move |ctx| {
         let cursor_intent = ctx
             .arg::<String>("cursorIntent")

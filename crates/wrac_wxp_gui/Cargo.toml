@@ -14,6 +14,7 @@ log = "0.4"
 novonotes_run_loop = { workspace = true }
 parking_lot = "0.12"
 raw-window-handle = "0.6"
+serde_json = "1.0"
 url = "2"
 wrac_clap_adapter = { workspace = true }
 wrac_host_context = { workspace = true }
@@ -21,6 +22,10 @@ wxp = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_HiDpi"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSCursor"] }
 
 [lints.rust]
 unreachable_pub = "deny"

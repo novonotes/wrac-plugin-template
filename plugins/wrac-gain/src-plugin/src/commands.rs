@@ -11,17 +11,15 @@ use serde_json::json;
 use wrac_clap_adapter::{
     HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
 };
-use wrac_wxp_gui::WxpGuiResizeHandle;
+use wrac_wxp_gui::{WxpGuiResizeHandle, register_native_cursor_bridge_commands};
 use wxp::{Channel, WxpCommandHandler};
 
 use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload};
 use crate::plugin::{parameter_default_value, parameter_host_value, parameter_text_value};
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
-mod cursor;
 mod resize;
 
-use cursor::register_native_cursor_bridge_commands;
 use resize::register_resize_commands;
 
 pub(crate) struct CommandRegistrationDependencies {

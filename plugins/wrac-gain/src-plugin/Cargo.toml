@@ -91,10 +91,6 @@ wrac_log = { workspace = true }
 wrac_wxp_gui = { workspace = true }
 wxp = { workspace = true }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSCursor"] }
-
 [lints.rust]
 unreachable_pub = "deny"
 

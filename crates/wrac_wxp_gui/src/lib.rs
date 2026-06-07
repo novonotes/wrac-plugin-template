@@ -5,6 +5,7 @@
 //! GUI thread affinity, and WebView DPI/bounds management.
 
 mod controller;
+mod cursor;
 mod dpi;
 mod pointer;
 mod resize_drag;
@@ -13,6 +14,7 @@ mod session;
 mod window;
 
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
+pub use cursor::register_native_cursor_bridge_commands;
 pub use dpi::HostGuiSizeUnit;
 pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
