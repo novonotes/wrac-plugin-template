@@ -796,11 +796,25 @@ OSStatus WrapAsAUV2::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
         };
         _uiconn._createWindow = [this]
         {
+          // A host may replace the Cocoa view after a transient detach. The CLAP GUI remains alive
+          // across that detach so the new view should reparent it, not create a second GUI instance.
+          if (this->_uiIsOpened)
+          {
+            LOGINFO("[clap-wrapper] AUv2 reusing CLAP GUI for replacement Cocoa view");
+            return;
+          }
           this->_uiIsOpened = true;
           _plugin->_ext._gui->create(_plugin->_plugin, CLAP_WINDOW_API_COCOA, false);
         };
-        _uiconn._destroyWindow = [this](const char *reason)
+        _uiconn._destroyWindow = [this](clap_window_t *window, uint32_t *canary, const char *reason)
         {
+          if (this->_uiconn._window != window || this->_uiconn._canary != canary)
+          {
+            LOGINFO("[clap-wrapper] AUv2 ignoring stale CLAP GUI destroy: reason={}",
+                    reason ? reason : "unknown");
+            return false;
+          }
+
           LOGINFO("[clap-wrapper] AUv2 destroying CLAP GUI: reason={}",
                   reason ? reason : "unknown");
           // this must exist
@@ -810,7 +824,10 @@ OSStatus WrapAsAUV2::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
           if (this->_uiconn._canary)
           {
             *(this->_uiconn._canary) = 0;
+            this->_uiconn._canary = nullptr;
           }
+          this->_uiconn._window = nullptr;
+          return true;
         };
         *static_cast<ui_connection *>(outData) = _uiconn;
         return noErr;

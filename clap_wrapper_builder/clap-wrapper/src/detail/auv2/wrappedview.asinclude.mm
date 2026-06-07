@@ -189,9 +189,11 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
   if (canary)
   {
     // Dealloc is the point where Cocoa proves the editor view itself is going away. Tie CLAP GUI
-    // teardown to this lifetime rather than to transient detach/Cleanup callbacks.
-    LOGINFO("[clap-wrapper] the host did not call viewDidMoveWindow with a nil window");
-    ui._destroyWindow("CLAP_WRAPPER_COCOA_CLASS_NSVIEW::dealloc");
+    // teardown to this lifetime rather than to transient detach/Cleanup callbacks. The wrapper
+    // still verifies ownership because a host may create a replacement view before releasing this
+    // detached one.
+    LOGINFO("[clap-wrapper] NS View dealloc requests CLAP GUI teardown");
+    ui._destroyWindow((clap_window_t *)self, &canary, "CLAP_WRAPPER_COCOA_CLASS_NSVIEW::dealloc");
   }
   [super dealloc];
 }

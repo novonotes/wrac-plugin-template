@@ -32,7 +32,7 @@ typedef struct ui_connection
   uint32_t *_canary = nullptr;       // a canary in the Windows class
   std::function<void(clap_window_t *, uint32_t *)> _registerWindow = nullptr;
   std::function<void()> _createWindow = nullptr;
-  std::function<void(const char *)> _destroyWindow = nullptr;
+  std::function<bool(clap_window_t *, uint32_t *, const char *)> _destroyWindow = nullptr;
 } ui_connection;
 
 }  // namespace free_audio::auv2_wrapper
