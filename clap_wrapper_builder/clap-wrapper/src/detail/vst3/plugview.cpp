@@ -263,7 +263,19 @@ bool WrappedView::request_resize(uint32_t width, uint32_t height)
   _rect.right = _rect.left + (int32)width;
   _rect.bottom = _rect.top + (int32)height;
 
-  if (_plugFrame && !_plugFrame->resizeView(this, &_rect))
+  if (_plugFrame)
+  {
+    auto result = _plugFrame->resizeView(this, &_rect);
+    // VST3 tresult is not a bool: kResultOk is 0. Treating resizeView() with
+    // boolean negation reports successful host resizes as rejected and rolls
+    // back _rect, even after the host has accepted the size via onSize().
+    if (result != kResultOk)
+    {
+      _rect = oldrect;
+      return false;
+    }
+  }
+  else
   {
     _rect = oldrect;
     return false;
