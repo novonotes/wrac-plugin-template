@@ -31,6 +31,8 @@
 
 - (id)initWithAUv2:(free_audio::auv2_wrapper::ui_connection *)cont preferredSize:(NSSize)size;
 - (void)doIdle;
+- (void)startIdleTimer;
+- (void)stopIdleTimer;
 - (void)dealloc;
 - (void)setFrame:(NSRect)newSize;
 
@@ -135,12 +137,7 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
   }
 
   idleTimer = nil;
-  CFTimeInterval TIMER_INTERVAL = .05;  // In SurgeGUISynthesizer.h it uses 50 ms
-  CFRunLoopTimerContext TimerContext = {0, self, NULL, NULL, NULL};
-  CFAbsoluteTime FireTime = CFAbsoluteTimeGetCurrent() + TIMER_INTERVAL;
-  idleTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, FireTime, TIMER_INTERVAL, 0, 0,
-                                   CLAP_WRAPPER_TIMER_CALLBACK, &TimerContext);
-  if (idleTimer) CFRunLoopAddTimer(CFRunLoopGetMain(), idleTimer, kCFRunLoopCommonModes);
+  [self startIdleTimer];
 
   return self;
 }
@@ -149,22 +146,38 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 {
   // auto gui = ui._plugin->_ext._gui;
 }
+- (void)startIdleTimer
+{
+  if (idleTimer) return;
+
+  CFTimeInterval TIMER_INTERVAL = .05;  // In SurgeGUISynthesizer.h it uses 50 ms
+  CFRunLoopTimerContext TimerContext = {0, self, NULL, NULL, NULL};
+  CFAbsoluteTime FireTime = CFAbsoluteTimeGetCurrent() + TIMER_INTERVAL;
+  idleTimer = CFRunLoopTimerCreate(kCFAllocatorDefault, FireTime, TIMER_INTERVAL, 0, 0,
+                                   CLAP_WRAPPER_TIMER_CALLBACK, &TimerContext);
+  if (idleTimer) CFRunLoopAddTimer(CFRunLoopGetMain(), idleTimer, kCFRunLoopCommonModes);
+}
+- (void)stopIdleTimer
+{
+  if (idleTimer)
+  {
+    CFRunLoopTimerInvalidate(idleTimer);
+    idleTimer = 0;
+  }
+}
 - (void)viewDidMoveToWindow
 {
   if ([self window] == nil)
   {
-    LOGINFO("[clap-wrapper] - view removed from a window");
-    if (idleTimer)
-    {
-      CFRunLoopTimerInvalidate(idleTimer);
-      idleTimer = 0;
-    }
-    if (canary)
-    {
-      ui._destroyWindow();
-
-      assert(canary == 0);
-    }
+    // Some AUv2 hosts temporarily detach the editor view while the plugin instance remains
+    // active. Destroying the CLAP GUI here leaves the host-owned NSView alive with no child
+    // WebView to redraw, which shows up as a blank editor on the next transport transition.
+    LOGINFO("[clap-wrapper] - view removed from a window; keeping CLAP GUI alive until dealloc");
+    [self stopIdleTimer];
+  }
+  else
+  {
+    [self startIdleTimer];
   }
   [super viewDidMoveToWindow];
 }
@@ -172,14 +185,15 @@ void CLAP_WRAPPER_TIMER_CALLBACK(CFRunLoopTimerRef timer, void *info)
 - (void)dealloc
 {
   LOGINFO("[clap-wrapper] NS View dealloc");
-  if (idleTimer)
-  {
-    CFRunLoopTimerInvalidate(idleTimer);
-  }
+  [self stopIdleTimer];
   if (canary)
   {
-    LOGINFO("[clap-wrapper] the host did not call viewDidMoveWindow with a nil window");
-    ui._destroyWindow();
+    // Dealloc is the point where Cocoa proves the editor view itself is going away. Tie CLAP GUI
+    // teardown to this lifetime rather than to transient detach/Cleanup callbacks. The wrapper
+    // still verifies ownership because a host may create a replacement view before releasing this
+    // detached one.
+    LOGINFO("[clap-wrapper] NS View dealloc requests CLAP GUI teardown");
+    ui._destroyWindow((clap_window_t *)self, &canary, "CLAP_WRAPPER_COCOA_CLASS_NSVIEW::dealloc");
   }
   [super dealloc];
 }
