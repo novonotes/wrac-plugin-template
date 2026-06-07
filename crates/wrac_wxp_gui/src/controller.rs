@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
@@ -50,12 +50,6 @@ struct HostGuiLayout {
     limits: GuiSizeLimits,
     resize_policy: GuiResizePolicy,
     host_size_unit: AtomicU8,
-    // Audacity's VST3 host can resize the parent wx/Cocoa view without delivering a
-    // matching VST3 `onSize`/CLAP `set_size` callback. Keep the parent so the GUI
-    // runtime can follow that host-owned geometry without changing the normal host
-    // resize contract for other DAWs.
-    parent: Mutex<Option<StoredParentWindow>>,
-    audacity_vst3_resize_workaround: AtomicBool,
 }
 
 struct GuiRuntimeState {
@@ -124,9 +118,6 @@ impl WxpGuiController {
         host_context: HostContext,
     ) -> Self {
         resize_handle.set_host_size_unit(host_gui_size_unit_for_context(&host_context));
-        resize_handle
-            .layout
-            .set_audacity_vst3_resize_workaround(is_audacity_vst3(&host_context));
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
@@ -206,15 +197,6 @@ fn is_cubase_vst3(host_context: &HostContext) -> bool {
         && host_context.plugin_format == PluginFormat::Vst3
 }
 
-fn is_audacity_vst3(host_context: &HostContext) -> bool {
-    // clap-wrapper's VST3 bridge may defer `IPlugFrame::resizeView()` when CLAP
-    // `request_resize()` is not made on the wrapper's main thread. Audacity reports the
-    // request as accepted before that deferred resize reaches `WrappedView::onSize()`,
-    // so this host/format pair needs to follow the actual parent view instead.
-    host_context.host.family == HostFamily::Audacity
-        && host_context.plugin_format == PluginFormat::Vst3
-}
-
 fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit {
     // macOS wrapper formats expose Cocoa/NSView geometry at the CLAP GUI boundary.
     // Treating those logical coordinates as physical pixels would divide the child
@@ -229,80 +211,6 @@ fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit
     } else {
         HostGuiSizeUnit::PhysicalPixels
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct NativeFrame {
-    width: f64,
-    height: f64,
-}
-
-#[cfg(target_os = "macos")]
-fn parent_frame(parent: Option<StoredParentWindow>) -> Option<NativeFrame> {
-    use objc2::encode::{Encode, Encoding};
-    use objc2::runtime::AnyObject;
-
-    #[cfg(target_pointer_width = "32")]
-    type CGFloat = f32;
-    #[cfg(target_pointer_width = "64")]
-    type CGFloat = f64;
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct CGPoint {
-        x: CGFloat,
-        y: CGFloat,
-    }
-
-    // SAFETY: Matches CoreGraphics CGPoint ABI.
-    unsafe impl Encode for CGPoint {
-        const ENCODING: Encoding =
-            Encoding::Struct("CGPoint", &[CGFloat::ENCODING, CGFloat::ENCODING]);
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct CGSize {
-        width: CGFloat,
-        height: CGFloat,
-    }
-
-    // SAFETY: Matches CoreGraphics CGSize ABI.
-    unsafe impl Encode for CGSize {
-        const ENCODING: Encoding =
-            Encoding::Struct("CGSize", &[CGFloat::ENCODING, CGFloat::ENCODING]);
-    }
-
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct CGRect {
-        origin: CGPoint,
-        size: CGSize,
-    }
-
-    // SAFETY: Matches CoreGraphics CGRect ABI.
-    unsafe impl Encode for CGRect {
-        const ENCODING: Encoding =
-            Encoding::Struct("CGRect", &[CGPoint::ENCODING, CGSize::ENCODING]);
-    }
-
-    let StoredParentWindow::Cocoa { ns_view } = parent? else {
-        return None;
-    };
-    let view = ns_view as *mut AnyObject;
-    if view.is_null() {
-        return None;
-    }
-    let frame: CGRect = unsafe { objc2::msg_send![view, frame] };
-    Some(NativeFrame {
-        width: frame.size.width as f64,
-        height: frame.size.height as f64,
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn parent_frame(_parent: Option<StoredParentWindow>) -> Option<NativeFrame> {
-    None
 }
 
 fn schedule_runtime_creation(
@@ -700,8 +608,6 @@ impl HostGuiLayout {
             limits,
             resize_policy,
             host_size_unit: AtomicU8::new(HostGuiSizeUnit::PhysicalPixels.to_u8()),
-            parent: Mutex::new(None),
-            audacity_vst3_resize_workaround: AtomicBool::new(false),
         }
     }
 
@@ -746,23 +652,6 @@ impl HostGuiLayout {
     fn resize_hints(&self) -> GuiResizeHints {
         self.resize_policy.resize_hints()
     }
-
-    fn set_parent(&self, parent: StoredParentWindow) {
-        *self.parent.lock() = Some(parent);
-    }
-
-    fn parent_frame(&self) -> Option<NativeFrame> {
-        parent_frame(*self.parent.lock())
-    }
-
-    fn set_audacity_vst3_resize_workaround(&self, enabled: bool) {
-        self.audacity_vst3_resize_workaround
-            .store(enabled, Ordering::Relaxed);
-    }
-
-    fn audacity_vst3_resize_workaround(&self) -> bool {
-        self.audacity_vst3_resize_workaround.load(Ordering::Relaxed)
-    }
 }
 
 impl WxpGuiResizeHandle {
@@ -779,36 +668,6 @@ impl WxpGuiResizeHandle {
 
     pub fn host_size_unit(&self) -> HostGuiSizeUnit {
         self.layout.host_size_unit()
-    }
-
-    pub fn sync_parent_frame_size(&self) -> Option<GuiSize> {
-        if !self.layout.audacity_vst3_resize_workaround() {
-            return None;
-        }
-        let parent_frame = self.layout.parent_frame()?;
-        let scale = *self.scale.lock();
-        let dpi = DpiConverter::with_host_size_unit(scale, self.layout.host_size_unit());
-        let parent_logical_size = LogicalSize::new(parent_frame.width, parent_frame.height);
-        // This path intentionally bypasses `GuiSizeLimits`: Audacity has already sized
-        // the host-owned parent view, and clamping here would recreate the visible
-        // parent/WebView mismatch that this workaround exists to avoid.
-        let parent_gui_size = dpi.logical_size_to_gui(parent_logical_size);
-        let previous_size = self.layout.accepted_size();
-        if parent_gui_size.width == previous_size.width
-            && parent_gui_size.height == previous_size.height
-        {
-            return None;
-        }
-
-        self.layout.store_accepted_size(parent_gui_size);
-        log::debug!(
-            "Audacity VST3 parent frame sync: parent_frame_width={} parent_frame_height={} stored_host_width={} stored_host_height={}",
-            parent_frame.width,
-            parent_frame.height,
-            parent_gui_size.width,
-            parent_gui_size.height
-        );
-        Some(parent_gui_size)
     }
 
     fn set_host_size_unit(&self, unit: HostGuiSizeUnit) {
@@ -847,8 +706,8 @@ impl WxpGuiResizeHandle {
 
         match resize_result {
             Ok(()) => {
-                // Some hosts accept the request and synchronously resize the parent without
-                // calling `set_size()`. Mirror only that host-confirmed geometry to the child.
+                // Some hosts accept the request but never call `set_size()`. In that case,
+                // update the WebView directly without waiting for an async callback.
                 // Pass `WebViewDispatch` rather than the native owner so the command handler
                 // can resize without extending the lifetime of a closing editor.
                 web_view
@@ -1081,6 +940,8 @@ impl PluginGuiExtension for WxpGuiController {
 
     fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
         let size = self.layout.clamp_size(requested_size);
+        let previous_size = self.layout.accepted_size();
+        let size_changed = previous_size.width != size.width || previous_size.height != size.height;
         let handle = {
             self.runtime
                 .lock()
@@ -1089,8 +950,15 @@ impl PluginGuiExtension for WxpGuiController {
                 .and_then(|session| session.handle.clone())
         };
 
+        // Some hosts repeatedly send the same size until the editor window settles.
+        // Re-applying identical bounds does not violate the contract but adds redundant
+        // geometry processing to the child view, making resize drags feel laggy. Size is
+        // still recorded below so re-entrant `request_resize()` detection can observe
+        // host callbacks.
         if let Some(handle) = handle {
-            handle.set_size(size)?;
+            if size_changed {
+                handle.set_size(size)?;
+            }
             if self.should_async_resync_bounds_after_set_size() {
                 // Cubase 10 on macOS can resize the host-owned editor window after
                 // delivering `set_size`, leaving the embedded child view one geometry
@@ -1168,7 +1036,6 @@ impl PluginGuiExtension for WxpGuiController {
             return Err(PluginError::InvalidState);
         }
         session.parent = Some(parent);
-        self.layout.set_parent(parent);
         // If `set_scale` arrived before `set_parent`, Cubase VST3 scale correction must
         // wait until the native parent window is known.
         session.scale = self.correct_host_scale(session.scale, Some(parent));

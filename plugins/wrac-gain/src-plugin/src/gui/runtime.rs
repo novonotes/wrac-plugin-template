@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,7 +54,7 @@ pub(crate) struct WracGainGuiRuntime {
     gui_notifier: Arc<GuiStateNotifier>,
     // WebView ownership and DPI/bounds live in the shared component; product runtime
     // remains responsible for choosing its state sync strategy.
-    webview: Rc<RefCell<WxpWebViewSession>>,
+    webview: WxpWebViewSession,
     // Host callbacks can be delayed by wrapper behavior, so this product chooses periodic
     // sync on the GUI run loop.
     gui_update_timer: Timer,
@@ -85,7 +84,6 @@ impl WracGainGuiRuntime {
 
         let command_handler = Rc::new(WxpCommandHandler::new());
         let host_size_unit = dependencies.resize_handle.host_size_unit();
-        let resize_handle = dependencies.resize_handle.clone();
         register_commands(
             command_handler.clone(),
             CommandRegistrationDependencies {
@@ -100,7 +98,7 @@ impl WracGainGuiRuntime {
             },
         );
 
-        let webview = Rc::new(RefCell::new(WxpWebViewSession::create(
+        let webview = WxpWebViewSession::create(
             WxpWebViewConfig {
                 plugin_id: dependencies.descriptor.id,
                 initial_size,
@@ -114,7 +112,7 @@ impl WracGainGuiRuntime {
                 devtools: cfg!(debug_assertions),
             },
             command_handler,
-        )?));
+        )?;
 
         // Push the current value to the GUI at ~30 Hz (33 ms). Reading shared state on
         // every tick is simpler than maintaining a dirty flag. CLAP's `request_callback()`
@@ -124,20 +122,10 @@ impl WracGainGuiRuntime {
         let gui_update_timer = Timer::new(Duration::from_millis(33), {
             let shared = dependencies.shared.clone();
             let gui_notifier = dependencies.gui_notifier.clone();
-            let webview = webview.clone();
             move || {
                 notify_gui_parameters(&shared, |parameter_id, value| {
                     gui_notifier.notify_parameter(parameter_id, value);
                 });
-                // Audacity VST3 can resize the host-owned parent view without routing
-                // that size back through VST3 `onSize`/CLAP `set_size`. The resize
-                // handle is scoped to host policy, so this poll is a no-op for normal
-                // DAWs and keeps product runtime code from learning host names directly.
-                if let Some(size) = resize_handle.sync_parent_frame_size()
-                    && let Err(error) = webview.borrow_mut().set_host_parent_size(size)
-                {
-                    log::warn!("GUI parent frame sync failed: {error:?}");
-                }
             }
         });
         gui_update_timer.start(run_loop);
@@ -155,17 +143,17 @@ impl WracGainGuiRuntime {
 impl WxpGuiRuntime for WracGainGuiRuntime {
     /// Called when the host reports a display scale factor (e.g. HiDPI).
     fn set_scale(&mut self, scale: f64) -> PluginResult<()> {
-        self.webview.borrow_mut().set_scale(scale)
+        self.webview.set_scale(scale)
     }
 
     /// Called when the host changes the window size. Clamps to the valid range before applying.
     fn set_size(&mut self, size: GuiSize) -> PluginResult<()> {
-        self.webview.borrow_mut().set_size(size)
+        self.webview.set_size(size)
     }
 
     fn show(&mut self, run_loop: &RunLoopLocal) -> PluginResult<()> {
         log::debug!("showing GUI runtime");
-        self.webview.borrow_mut().show()?;
+        self.webview.show()?;
         self.gui_update_timer.start(run_loop);
         log::debug!("showing GUI runtime completed");
         Ok(())
@@ -174,7 +162,7 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
     fn hide(&mut self) -> PluginResult<()> {
         log::debug!("hiding GUI runtime");
         self.gui_update_timer.stop();
-        self.webview.borrow_mut().hide()?;
+        self.webview.hide()?;
         log::debug!("hiding GUI runtime completed");
         Ok(())
     }
