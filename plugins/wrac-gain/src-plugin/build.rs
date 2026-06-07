@@ -567,6 +567,13 @@ fn uuid_array_literal(value: &str) -> io::Result<String> {
             )
         })?;
     }
+    // clap-wrapper applies Steinberg's COM-compatible TUID byte flip before exposing
+    // the VST3 class ID. Store the inverse form here so the host-visible CID matches
+    // the UUID written in package.metadata.wrac.plugins.vst3_component_id.
+    bytes.swap(0, 3);
+    bytes.swap(1, 2);
+    bytes.swap(4, 5);
+    bytes.swap(6, 7);
     Ok(format!("{bytes:?}"))
 }
 

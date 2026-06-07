@@ -2,7 +2,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 
 use crate::Result;
 
@@ -53,6 +53,22 @@ pub(crate) fn run(command: &mut Command) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+pub(crate) fn run_output(command: &mut Command) -> Result<Output> {
+    println!();
+    println!("========== Running command ==========");
+    println!("$ {}", format_command(command));
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(format!(
+            "command failed with status {}: {}",
+            output.status,
+            format_command(command)
+        )
+        .into());
+    }
+    Ok(output)
 }
 
 fn format_command(command: &Command) -> String {

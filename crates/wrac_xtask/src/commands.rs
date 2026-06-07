@@ -16,7 +16,7 @@ use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target, ValidateTarget};
 use crate::util::{
     common_program_files, copy_path, ensure_exists, env_value_or, home_dir, local_app_data, on_off,
-    remove_if_exists, run,
+    remove_if_exists, run, run_output,
 };
 use crate::validation::validate_wrac_rules;
 
@@ -936,6 +936,7 @@ pub(crate) fn validate_plugin_target(
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
             run(Command::new(validator).arg(&vst3).current_dir(&ctx.root))?;
+            validate_vst3_component_ids(ctx, &vst3)?;
         }
         ValidateTarget::Au => {
             ensure_no_system_au_conflict(ctx)?;
@@ -967,6 +968,52 @@ pub(crate) fn validate_plugin_target(
         }
     }
     Ok(())
+}
+
+fn validate_vst3_component_ids(ctx: &Context, vst3: &Path) -> Result<()> {
+    let moduleinfotool = ensure_vst3_moduleinfotool(ctx)?;
+    let output = run_output(
+        Command::new(moduleinfotool)
+            .args(["-create", "-version", &ctx.metadata.version, "-path"])
+            .arg(vst3)
+            .current_dir(&ctx.root),
+    )?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let actual = parse_moduleinfo_cids(&stdout);
+    let expected = ctx
+        .metadata
+        .plugins
+        .iter()
+        .map(|plugin| normalize_vst3_cid(&plugin.vst3_component_id))
+        .collect::<Vec<_>>();
+
+    if actual != expected {
+        return Err(format!(
+            "VST3 component ID mismatch for {}: metadata={expected:?}, moduleinfo={actual:?}",
+            vst3.display()
+        )
+        .into());
+    }
+
+    println!("VST3 component IDs match package.metadata.wrac.plugins.vst3_component_id");
+    Ok(())
+}
+
+fn parse_moduleinfo_cids(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter_map(|line| line.split_once("\"CID\": \""))
+        .filter_map(|(_, rest)| rest.split_once('"'))
+        .map(|(cid, _)| normalize_vst3_cid(cid))
+        .collect()
+}
+
+fn normalize_vst3_cid(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| character.is_ascii_hexdigit())
+        .flat_map(char::to_uppercase)
+        .collect()
 }
 
 fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
@@ -1593,6 +1640,43 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     }
 }
 
+fn ensure_vst3_moduleinfotool(ctx: &Context) -> Result<PathBuf> {
+    ensure_vst3_sdk_input(ctx)?;
+
+    let executable = if ctx.platform == Platform::Windows {
+        "moduleinfotool.exe"
+    } else {
+        "moduleinfotool"
+    };
+    let moduleinfotool_bin_dir = ctx.target_dir.join("vst3sdk-validator").join("bin");
+    let moduleinfotool = moduleinfotool_bin_dir.join("Debug").join(executable);
+    let moduleinfotool_without_config = moduleinfotool_bin_dir.join(executable);
+
+    if moduleinfotool.exists() {
+        return Ok(moduleinfotool);
+    }
+    if moduleinfotool_without_config.exists() {
+        return Ok(moduleinfotool_without_config);
+    }
+
+    let build_dir = ctx.target_dir.join("vst3sdk-validator");
+    run(Command::new("cmake")
+        .arg("--build")
+        .arg(&build_dir)
+        .arg("--target")
+        .arg("moduleinfotool")
+        .arg("--config")
+        .arg("Debug")
+        .current_dir(&ctx.root))?;
+
+    if moduleinfotool.exists() {
+        Ok(moduleinfotool)
+    } else {
+        ensure_exists(&moduleinfotool_without_config, "VST3 moduleinfotool")?;
+        Ok(moduleinfotool_without_config)
+    }
+}
+
 pub(crate) fn clean(ctx: &Context) -> Result<()> {
     remove_if_exists(&ctx.wrac_dir())?;
     Ok(())
@@ -1756,4 +1840,35 @@ fn codesign_nested_macos_bundle(bundle: &Path) -> Result<()> {
     }
     codesign(bundle)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_vst3_moduleinfo_cids_from_logged_output() {
+        let output = r#"
+clap-wrapper log before JSON
+{
+  "Classes": [
+    {
+      "CID": "822011CA37EC5CEF92D7EC7E67207195",
+      "Name": "WRAC Gain",
+    },
+    {
+      "CID": "ffff664c-b963-53e6-87cc-2a7ceb29674b",
+    },
+  ],
+}
+"#;
+
+        assert_eq!(
+            parse_moduleinfo_cids(output),
+            vec![
+                "822011CA37EC5CEF92D7EC7E67207195".to_string(),
+                "FFFF664CB96353E687CC2A7CEB29674B".to_string(),
+            ]
+        );
+    }
 }
