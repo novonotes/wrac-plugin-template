@@ -12,12 +12,14 @@ pub(crate) struct PluginPackage {
     pub(crate) package_name: String,
     pub(crate) artifact_namespace: String,
     pub(crate) manifest_path: PathBuf,
+    pub(crate) package_dir: PathBuf,
     pub(crate) plugin_root: PathBuf,
 }
 
 pub(crate) struct Context {
     pub(crate) root: PathBuf,
     pub(crate) package_name: String,
+    pub(crate) package_dir: PathBuf,
     pub(crate) plugin_root: PathBuf,
     pub(crate) manifest_path: PathBuf,
     pub(crate) platform: Platform,
@@ -51,6 +53,7 @@ impl Context {
         Ok(Self {
             root: config.root.clone(),
             package_name: package.package_name,
+            package_dir: package.package_dir,
             plugin_root: package.plugin_root,
             manifest_path: package.manifest_path,
             platform: Platform::detect()?,
@@ -61,7 +64,18 @@ impl Context {
     }
 
     pub(crate) fn gui_dir(&self) -> PathBuf {
-        self.plugin_root.join("src-gui")
+        let package_gui_dir = self.package_dir.join("src-gui");
+        if package_gui_dir.join("package.json").exists() {
+            return package_gui_dir;
+        }
+        let plugin_root_gui_dir = self.plugin_root.join("src-gui");
+        if plugin_root_gui_dir.join("package.json").exists() {
+            return plugin_root_gui_dir;
+        }
+        // Some product repos keep the frontend package at the plugin root while
+        // the Rust crate lives in src-plugin. Build that package so release
+        // artifacts do not depend on checked-in dist files.
+        self.plugin_root.clone()
     }
 
     pub(crate) fn plugin_manifest(&self) -> PathBuf {
@@ -110,22 +124,15 @@ impl Context {
     }
 
     pub(crate) fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
-        self.metadata
-            .plugins
-            .iter()
-            .map(|plugin| self.au_bundle(profile, plugin))
-            .collect()
+        vec![self.au_bundle(profile)]
     }
 
-    pub(crate) fn au_bundle(
-        &self,
-        profile: BuildProfile,
-        plugin: &PluginProductMetadata,
-    ) -> PathBuf {
-        // AUv2 products are installed as separate component bundles, named by
-        // product display name rather than the shared CLAP/VST3/AAX bundle name.
+    pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
+        // AUv2 keeps multiple AudioComponents inside one component bundle.
+        // The wrapper reads per-product type/subtype metadata from the CLAP
+        // factory's AUv2 extension, so xtask tracks the artifact at bundle level.
         self.plugins_dir(profile)
-            .join(self.metadata.au_bundle_name(plugin))
+            .join(self.metadata.au_bundle_name())
     }
 
     pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
@@ -171,9 +178,17 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
             continue;
         }
         let manifest_path = package.manifest_path.clone().into_std_path_buf();
-        let plugin_root = manifest_path
+        let package_dir = manifest_path
             .parent()
-            .and_then(|path| path.parent())
+            .ok_or_else(|| {
+                format!(
+                    "failed to derive package dir from manifest path: {}",
+                    manifest_path.display()
+                )
+            })?
+            .to_path_buf();
+        let plugin_root = package_dir
+            .parent()
             .ok_or_else(|| {
                 format!(
                     "failed to derive plugin root from manifest path: {}",
@@ -195,6 +210,7 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
             package_name: package.name.clone(),
             artifact_namespace,
             manifest_path,
+            package_dir,
             plugin_root,
         });
     }

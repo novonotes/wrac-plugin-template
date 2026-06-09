@@ -213,11 +213,14 @@ extern \"C\" {
 #endif
 ")
 
-# Configure bundle plugin formats to build. AUv2 is product-specific and is
-# generated in the product loop below.
+# Configure bundle plugin formats to build. CLAP, VST3, and AUv2 can expose
+# every product in one bundle through the CLAP factory descriptors.
 set(PLUGIN_FORMATS "CLAP")
 if(CLAP_WRAPPER_BUILDER_BUILD_VST3)
     list(APPEND PLUGIN_FORMATS "VST3")
+endif()
+if(APPLE AND CLAP_WRAPPER_BUILDER_BUILD_AUV2)
+    list(APPEND PLUGIN_FORMATS "AUV2")
 endif()
 if(CLAP_WRAPPER_BUILDER_BUILD_AAX)
     list(APPEND PLUGIN_FORMATS "AAX")
@@ -276,37 +279,7 @@ endif()
 
 set(AUV2_PRODUCT_TARGETS)
 if(APPLE AND CLAP_WRAPPER_BUILDER_BUILD_AUV2)
-    # AUv2 discovery is keyed by type/manufacturer/subtype metadata in each
-    # component bundle. A single multi-product component cannot represent
-    # distinct AUv2 identities, so create one module target per product.
-    foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
-        clap_wrapper_builder_product_output_name(${PRODUCT_INDEX} PRODUCT_OUTPUT_NAME)
-        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "AUV2_TYPE" PRODUCT_AUV2_TYPE)
-        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "AUV2_SUBTYPE" PRODUCT_AUV2_SUBTYPE)
-        if(NOT PRODUCT_AUV2_TYPE)
-            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_AUV2_TYPE must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
-        endif()
-        if(NOT PRODUCT_AUV2_SUBTYPE)
-            message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_AUV2_SUBTYPE must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
-        endif()
-        clap_wrapper_builder_product_target_name(${PRODUCT_INDEX} "${PRODUCT_OUTPUT_NAME}" PRODUCT_TARGET_NAME)
-        set(AUV2_TARGET "${PRODUCT_TARGET_NAME}_auv2")
-        add_library(${AUV2_TARGET} MODULE)
-        target_sources(${AUV2_TARGET} PRIVATE ${ENTRY_SOURCE_FILE})
-        target_link_libraries(${AUV2_TARGET} PRIVATE ${PLUGIN_NAME_SAFE}_impl)
-        target_add_auv2_wrapper(
-            TARGET ${AUV2_TARGET}
-            OUTPUT_NAME "${PRODUCT_OUTPUT_NAME}"
-            BUNDLE_IDENTIFIER "${BUNDLE_ID}.${PRODUCT_TARGET_NAME}.auv2"
-            BUNDLE_VERSION "${BUNDLE_VERSION}"
-            MANUFACTURER_NAME "${CLAP_WRAPPER_AUV2_MANUFACTURER_NAME}"
-            MANUFACTURER_CODE "${CLAP_WRAPPER_AUV2_MANUFACTURER_CODE}"
-            SUBTYPE_CODE "${PRODUCT_AUV2_SUBTYPE}"
-            INSTRUMENT_TYPE "${PRODUCT_AUV2_TYPE}"
-            PREFER_CMAKE_AUV2_CONFIGURATION TRUE
-        )
-        list(APPEND AUV2_PRODUCT_TARGETS "${AUV2_TARGET}")
-    endforeach()
+    set(AUV2_PRODUCT_TARGETS "${PLUGIN_NAME_SAFE}_auv2")
 endif()
 
 if(APPLE)

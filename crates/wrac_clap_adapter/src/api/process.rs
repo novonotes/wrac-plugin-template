@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use crate::PluginResult;
 use crate::events::{ProcessEvents, TransportEvent};
 use crate::process_buffer::AudioProcessBuffer;
@@ -9,6 +11,9 @@ use crate::process_buffer::AudioProcessBuffer;
 /// copied at activate time, or atomic/lock-free shared state the audio thread never
 /// waits on.
 pub trait Processor: Send {
+    /// Consumes the processor for typed recovery during deactivation. `[control-thread]`
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
+
     /// Called from CLAP `plugin.reset`. `[audio-thread]`
     fn reset(&mut self) {}
 

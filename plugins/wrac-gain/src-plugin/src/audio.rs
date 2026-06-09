@@ -5,6 +5,7 @@
 //! so the rule is to **avoid allocations and locks**. Shared state is read lock-free from
 //! [`SharedState`].
 
+use std::any::Any;
 use std::sync::Arc;
 
 use wrac_clap_adapter::{
@@ -43,6 +44,10 @@ impl WracGainAudioProcessor {
 }
 
 impl Processor for WracGainAudioProcessor {
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
     /// Processes one block. `context` contains the audio I/O, the parameter event list
     /// `events.input` for this block, and the sample count `frames_count`.
     ///

@@ -34,11 +34,19 @@ pub(crate) struct PluginMetadata {
 pub(crate) struct ValidationMetadata {
     #[serde(default)]
     pub(crate) disabled_rules: HashMap<String, DisabledValidationRule>,
+    #[serde(default)]
+    pub(crate) clap_validator: ClapValidatorMetadata,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct DisabledValidationRule {
     pub(crate) reason: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct ClapValidatorMetadata {
+    pub(crate) skip_test_filter: Option<String>,
+    pub(crate) skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -108,8 +116,8 @@ impl PluginMetadata {
         format!("{}.aaxplugin", self.bundle_name)
     }
 
-    pub(crate) fn au_bundle_name(&self, plugin: &PluginProductMetadata) -> String {
-        format!("{}.component", plugin.plugin_name)
+    pub(crate) fn au_bundle_name(&self) -> String {
+        format!("{}.component", self.bundle_name)
     }
 
     pub(crate) fn bundle_identity_plugin(&self) -> &PluginProductMetadata {
@@ -250,6 +258,21 @@ impl PluginMetadata {
             validate_required(
                 &format!("package.metadata.wrac.validation.disabled_rules.{rule_id}.reason"),
                 disabled.reason.trim(),
+            )?;
+        }
+        if let Some(filter) = self.validation.clap_validator.skip_test_filter.as_deref() {
+            validate_required(
+                "package.metadata.wrac.validation.clap_validator.skip_test_filter",
+                filter.trim(),
+            )?;
+            validate_required(
+                "package.metadata.wrac.validation.clap_validator.skip_reason",
+                self.validation
+                    .clap_validator
+                    .skip_reason
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim(),
             )?;
         }
         Ok(())

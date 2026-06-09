@@ -55,15 +55,94 @@ const AAX_VALIDATOR_TIMEOUT_SECS: u64 = 15 * 60;
 
 pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     println!("Building GUI...");
-    // build.rs embeds src-gui/dist into the plugin binary, so the frontend must be
-    // finalized here first. Reversing the order risks bundling a stale or empty dist.
-    run(Command::new(npm_command(ctx.platform))
+    let package_json = ctx.gui_dir().join("package.json");
+    if !package_json.exists() {
+        println!("No src-gui/package.json found; skipping GUI build.");
+        return Ok(());
+    }
+    if !has_package_script(&package_json, "build")? {
+        println!(
+            "No build script found in {}; skipping GUI build.",
+            package_json.display()
+        );
+        return Ok(());
+    }
+    let package = read_package_json(&package_json)?;
+    if !is_pnpm_workspace(ctx) {
+        // Standalone template projects keep the frontend package under src-gui
+        // without a repository-level package.json.
+        run(Command::new(npm_command(ctx.platform))
+            .arg("install")
+            .current_dir(ctx.gui_dir()))?;
+        run(Command::new(npm_command(ctx.platform))
+            .args(["run", "build"])
+            .current_dir(ctx.gui_dir()))?;
+        return Ok(());
+    }
+
+    let package_name = package_name(&package, &package_json)?;
+    let dependency_names = workspace_dependency_names(&package);
+    // build.rs embeds src-gui/dist into the plugin binary. Workspace packages such as
+    // @novonotes/webview-bridge also need their dist before the GUI typecheck runs.
+    run(Command::new(pnpm_command(ctx.platform))
         .arg("install")
-        .current_dir(ctx.gui_dir()))?;
-    run(Command::new(npm_command(ctx.platform))
-        .args(["run", "build"])
-        .current_dir(ctx.gui_dir()))?;
+        .current_dir(&ctx.root))?;
+    for dependency_name in dependency_names {
+        run(Command::new(pnpm_command(ctx.platform))
+            .args(["--filter", &dependency_name, "run", "--if-present", "build"])
+            .current_dir(&ctx.root))?;
+    }
+    run(Command::new(pnpm_command(ctx.platform))
+        .args(["--filter", &package_name, "run", "build"])
+        .current_dir(&ctx.root))?;
     Ok(())
+}
+
+fn is_pnpm_workspace(ctx: &Context) -> bool {
+    ctx.root.join("package.json").exists() && ctx.root.join("pnpm-workspace.yaml").exists()
+}
+
+fn has_package_script(package_json: &Path, script: &str) -> Result<bool> {
+    let json = read_package_json(package_json)?;
+    Ok(json
+        .get("scripts")
+        .and_then(Value::as_object)
+        .and_then(|scripts| scripts.get(script))
+        .and_then(Value::as_str)
+        .is_some())
+}
+
+fn read_package_json(package_json: &Path) -> Result<Value> {
+    Ok(serde_json::from_slice(&fs::read(package_json)?)?)
+}
+
+fn package_name(json: &Value, package_json: &Path) -> Result<String> {
+    json.get("name")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("package name not found in {}", package_json.display()).into())
+}
+
+fn workspace_dependency_names(json: &Value) -> Vec<String> {
+    json.get("dependencies")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|dependencies| dependencies.iter())
+        .filter(|(_, version)| {
+            version
+                .as_str()
+                .is_some_and(|version| version.starts_with("workspace:"))
+        })
+        .map(|(name, _)| name.to_owned())
+        .collect()
+}
+
+fn pnpm_command(platform: Platform) -> &'static str {
+    if platform == Platform::Windows {
+        "pnpm.cmd"
+    } else {
+        "pnpm"
+    }
 }
 
 fn npm_command(platform: Platform) -> &'static str {
@@ -381,7 +460,7 @@ pub(crate) fn configure_wrapper(
         push_cmake_arg(&mut args, generator);
     }
 
-    if cmake_configure_is_current(&build_dir, &args)? {
+    if cmake_configure_is_current(&build_dir, &args, &ctx.wrapper_dir)? {
         println!(
             "CMake configure is up to date for {} ({})",
             build.purpose(),
@@ -399,7 +478,7 @@ pub(crate) fn configure_wrapper(
         );
     }
     run(configure.current_dir(&ctx.root))?;
-    write_cmake_configure_stamp(&build_dir, &args)?;
+    write_cmake_configure_stamp(&build_dir, &args, &ctx.wrapper_dir)?;
     Ok(())
 }
 
@@ -485,18 +564,7 @@ fn cmake_wrapper_targets(ctx: &Context, build: WrapperBuild, target: WrapperTarg
     match target {
         WrapperTarget::Vst3 => vec![format!("{base}_vst3")],
         WrapperTarget::Aax => vec![format!("{base}_aax")],
-        WrapperTarget::Au => ctx
-            .metadata
-            .plugins
-            .iter()
-            .enumerate()
-            .map(|(index, plugin)| {
-                format!(
-                    "{base}_product_{index}_{}_auv2",
-                    cmake_identifier(&plugin.plugin_name)
-                )
-            })
-            .collect::<Vec<_>>(),
+        WrapperTarget::Au => vec![format!("{base}_auv2")],
         WrapperTarget::Standalone => ctx
             .metadata
             .plugins
@@ -507,31 +575,6 @@ fn cmake_wrapper_targets(ctx: &Context, build: WrapperBuild, target: WrapperTarg
     }
 }
 
-fn cmake_identifier(value: &str) -> String {
-    // CMake's string(MAKE_C_IDENTIFIER) is used by clap_wrapper_builder when it
-    // creates product-specific AU targets. Mirror the part of that contract xtask
-    // needs for --target builds; otherwise multi-product AU builds would plan a
-    // target name that CMake never generated.
-    let mut identifier = value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if !identifier
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-    {
-        identifier.insert(0, '_');
-    }
-    identifier
-}
-
 fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
     args.push(arg.into());
 }
@@ -540,14 +583,31 @@ fn cmake_configure_stamp_path(build_dir: &Path) -> PathBuf {
     build_dir.join(".wrac-configure-args")
 }
 
-fn cmake_configure_stamp(args: &[OsString]) -> String {
-    args.iter()
-        .map(|arg| arg.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("\n")
+fn cmake_configure_stamp(args: &[OsString], wrapper_dir: &Path) -> Result<String> {
+    let mut lines = args
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    for relative_path in [
+        "CMakeLists.txt",
+        "clap-wrapper/cmake/make_clapfirst.cmake",
+        "clap-wrapper/cmake/wrap_auv2.cmake",
+    ] {
+        let path = wrapper_dir.join(relative_path);
+        let modified = fs::metadata(&path)?
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        lines.push(format!("cmake-input:{relative_path}:{modified}"));
+    }
+    Ok(lines.join("\n"))
 }
 
-fn cmake_configure_is_current(build_dir: &Path, args: &[OsString]) -> Result<bool> {
+fn cmake_configure_is_current(
+    build_dir: &Path,
+    args: &[OsString],
+    wrapper_dir: &Path,
+) -> Result<bool> {
     let cache = build_dir.join("CMakeCache.txt");
     let stamp_path = cmake_configure_stamp_path(build_dir);
     if !cache.exists() || !stamp_path.exists() {
@@ -556,16 +616,20 @@ fn cmake_configure_is_current(build_dir: &Path, args: &[OsString]) -> Result<boo
 
     // Running CMake configure on every xtask invocation rewrites generated
     // wrapper entry files, which then forces Xcode/MSBuild to relink even when
-    // the selected CMake target is unchanged. The stamp tracks only xtask-owned
-    // configure inputs; CMake's ZERO_CHECK still handles changes inside the
-    // already-configured source tree during the build step.
-    Ok(fs::read_to_string(stamp_path)? == cmake_configure_stamp(args))
+    // the selected CMake target is unchanged. The stamp tracks xtask-owned
+    // configure inputs plus the wrapper CMake files that define the generated
+    // target graph.
+    Ok(fs::read_to_string(stamp_path)? == cmake_configure_stamp(args, wrapper_dir)?)
 }
 
-fn write_cmake_configure_stamp(build_dir: &Path, args: &[OsString]) -> Result<()> {
+fn write_cmake_configure_stamp(
+    build_dir: &Path,
+    args: &[OsString],
+    wrapper_dir: &Path,
+) -> Result<()> {
     fs::write(
         cmake_configure_stamp_path(build_dir),
-        cmake_configure_stamp(args),
+        cmake_configure_stamp(args, wrapper_dir)?,
     )?;
     Ok(())
 }
@@ -860,12 +924,7 @@ pub(crate) fn installed_artifacts(
         PluginTarget::Clap => vec![ctx.metadata.clap_bundle_name()],
         PluginTarget::Vst3 => vec![ctx.metadata.vst3_bundle_name()],
         PluginTarget::Aax => vec![ctx.metadata.aax_bundle_name()],
-        PluginTarget::Au => ctx
-            .metadata
-            .plugins
-            .iter()
-            .map(|plugin| ctx.metadata.au_bundle_name(plugin))
-            .collect(),
+        PluginTarget::Au => vec![ctx.metadata.au_bundle_name()],
     };
     let mut artifacts = Vec::new();
     for install_scope in uninstall_scopes(ctx.platform, scope, format)? {
@@ -925,22 +984,54 @@ pub(crate) fn validate_plugin_target(
             let clap = ctx.clap_bundle(profile);
             ensure_exists(&clap, "CLAP artifact")?;
             let validator = ensure_clap_validator(ctx)?;
-            run(Command::new(validator)
+            let mut command = Command::new(validator);
+            command
+                .env("WRAC_PLUGIN_VALIDATOR", "1")
                 .arg("validate")
                 .arg(&clap)
-                .arg("--only-failed")
-                .current_dir(&ctx.root))?;
+                .arg("--only-failed");
+            if let Some(filter) = ctx
+                .metadata
+                .validation
+                .clap_validator
+                .skip_test_filter
+                .as_deref()
+            {
+                println!(
+                    "CLAP validator skip filter: {filter} ({})",
+                    ctx.metadata
+                        .validation
+                        .clap_validator
+                        .skip_reason
+                        .as_deref()
+                        .unwrap_or("no reason provided")
+                );
+                command
+                    .arg("--test-filter")
+                    .arg(filter)
+                    .arg("--invert-filter");
+            }
+            run(command.current_dir(&ctx.root))?;
         }
         ValidateTarget::Vst3 => {
             let vst3 = ctx.vst3_bundle(profile);
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
-            run(Command::new(validator).arg(&vst3).current_dir(&ctx.root))?;
-            // The VST3 validator checks format behavior but does not prove that the
-            // host-visible class IDs match package metadata. moduleinfotool reads the built
-            // bundle metadata, so this catches build.rs/wrapper byte-order regressions at the
-            // artifact boundary instead of adding a product-policy readiness rule.
-            validate_vst3_component_ids(ctx, &vst3)?;
+            let output = run_output(
+                Command::new(validator)
+                    .env("WRAC_PLUGIN_VALIDATOR", "1")
+                    .arg(&vst3)
+                    .current_dir(&ctx.root),
+            )?;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            print!("{stdout}");
+            eprint!("{stderr}");
+            // The VST3 validator checks format behavior and prints the host-visible class IDs
+            // while scanning the built bundle. Reusing that output keeps the artifact-boundary
+            // byte-order check without running Steinberg's moduleinfotool, which can keep WRAC
+            // Windows GUI/runtime dependencies alive after validation and hang CI.
+            validate_vst3_component_ids(ctx, &vst3, &stdout, &stderr)?;
         }
         ValidateTarget::Au => {
             ensure_no_system_au_conflict(ctx)?;
@@ -974,16 +1065,16 @@ pub(crate) fn validate_plugin_target(
     Ok(())
 }
 
-fn validate_vst3_component_ids(ctx: &Context, vst3: &Path) -> Result<()> {
-    let moduleinfotool = ensure_vst3_moduleinfotool(ctx)?;
-    let output = run_output(
-        Command::new(moduleinfotool)
-            .args(["-create", "-version", &ctx.metadata.version, "-path"])
-            .arg(vst3)
-            .current_dir(&ctx.root),
-    )?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual = parse_moduleinfo_cids(&stdout);
+fn validate_vst3_component_ids(
+    ctx: &Context,
+    vst3: &Path,
+    stdout: &str,
+    stderr: &str,
+) -> Result<()> {
+    let actual = parse_vst3_validator_cids(stdout)
+        .into_iter()
+        .chain(parse_vst3_validator_cids(stderr))
+        .collect::<Vec<_>>();
     let expected = ctx
         .metadata
         .plugins
@@ -993,7 +1084,7 @@ fn validate_vst3_component_ids(ctx: &Context, vst3: &Path) -> Result<()> {
 
     if actual != expected {
         return Err(format!(
-            "VST3 component ID mismatch for {}: metadata={expected:?}, moduleinfo={actual:?}",
+            "VST3 component ID mismatch for {}: metadata={expected:?}, validator={actual:?}",
             vst3.display()
         )
         .into());
@@ -1003,12 +1094,11 @@ fn validate_vst3_component_ids(ctx: &Context, vst3: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parse_moduleinfo_cids(output: &str) -> Vec<String> {
+fn parse_vst3_validator_cids(output: &str) -> Vec<String> {
     output
         .lines()
-        .filter_map(|line| line.split_once("\"CID\": \""))
-        .filter_map(|(_, rest)| rest.split_once('"'))
-        .map(|(cid, _)| normalize_vst3_cid(cid))
+        .filter_map(|line| line.trim_start().split_once("cid = "))
+        .map(|(_, cid)| normalize_vst3_cid(cid))
         .collect()
 }
 
@@ -1577,16 +1667,14 @@ fn clap_validator_executable(platform: Platform, validator_dir: &Path) -> PathBu
 }
 
 fn ensure_no_system_au_conflict(ctx: &Context) -> Result<()> {
-    for plugin in &ctx.metadata.plugins {
-        let system_au = Path::new("/Library/Audio/Plug-Ins/Components")
-            .join(ctx.metadata.au_bundle_name(plugin));
-        if system_au.exists() {
-            return Err(format!(
-                "system-wide AU already exists at {}. auval may validate that copy instead of the freshly built user-local AU. Remove the system-wide component and run validation again.",
-                system_au.display()
-            )
-            .into());
-        }
+    let system_au =
+        Path::new("/Library/Audio/Plug-Ins/Components").join(ctx.metadata.au_bundle_name());
+    if system_au.exists() {
+        return Err(format!(
+            "system-wide AU already exists at {}. auval may validate that copy instead of the freshly built user-local AU. Remove the system-wide component and run validation again.",
+            system_au.display()
+        )
+        .into());
     }
     Ok(())
 }
@@ -1641,43 +1729,6 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     } else {
         ensure_exists(&validator_without_config, "VST3 validator")?;
         Ok(validator_without_config)
-    }
-}
-
-fn ensure_vst3_moduleinfotool(ctx: &Context) -> Result<PathBuf> {
-    ensure_vst3_sdk_input(ctx)?;
-
-    let executable = if ctx.platform == Platform::Windows {
-        "moduleinfotool.exe"
-    } else {
-        "moduleinfotool"
-    };
-    let moduleinfotool_bin_dir = ctx.target_dir.join("vst3sdk-validator").join("bin");
-    let moduleinfotool = moduleinfotool_bin_dir.join("Debug").join(executable);
-    let moduleinfotool_without_config = moduleinfotool_bin_dir.join(executable);
-
-    if moduleinfotool.exists() {
-        return Ok(moduleinfotool);
-    }
-    if moduleinfotool_without_config.exists() {
-        return Ok(moduleinfotool_without_config);
-    }
-
-    let build_dir = ctx.target_dir.join("vst3sdk-validator");
-    run(Command::new("cmake")
-        .arg("--build")
-        .arg(&build_dir)
-        .arg("--target")
-        .arg("moduleinfotool")
-        .arg("--config")
-        .arg("Debug")
-        .current_dir(&ctx.root))?;
-
-    if moduleinfotool.exists() {
-        Ok(moduleinfotool)
-    } else {
-        ensure_exists(&moduleinfotool_without_config, "VST3 moduleinfotool")?;
-        Ok(moduleinfotool_without_config)
     }
 }
 
@@ -1851,24 +1902,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_vst3_moduleinfo_cids_from_logged_output() {
+    fn parses_vst3_validator_cids_from_logged_output() {
         let output = r#"
-clap-wrapper log before JSON
-{
-  "Classes": [
-    {
-      "CID": "822011CA37EC5CEF92D7EC7E67207195",
-      "Name": "WRAC Gain",
-    },
-    {
-      "CID": "ffff664c-b963-53e6-87cc-2a7ceb29674b",
-    },
-  ],
-}
+* Scanning classes...
+  Class Info 0:
+    name = WRAC Gain
+    cid = 822011CA37EC5CEF92D7EC7E67207195
+  Class Info 1:
+    name = Companion Controller
+    cid = ffff664c-b963-53e6-87cc-2a7ceb29674b
 "#;
 
         assert_eq!(
-            parse_moduleinfo_cids(output),
+            parse_vst3_validator_cids(output),
             vec![
                 "822011CA37EC5CEF92D7EC7E67207195".to_string(),
                 "FFFF664CB96353E687CC2A7CEB29674B".to_string(),

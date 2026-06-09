@@ -35,30 +35,32 @@ pub(super) unsafe fn write_stream(stream: *const clap_ostream, bytes: &[u8]) -> 
     true
 }
 
-pub(super) unsafe fn read_stream_exact(stream: *const clap_istream, len: usize) -> Option<Vec<u8>> {
+pub(super) unsafe fn read_stream_to_end(
+    stream: *const clap_istream,
+    max_len: usize,
+) -> Option<Vec<u8>> {
     let Some(read) = (unsafe { (*stream).read }) else {
-        log::warn!("ffi.read_stream_exact: stream has no read callback byte_len={len}");
+        log::warn!("ffi.read_stream_to_end: stream has no read callback max_len={max_len}");
         return None;
     };
-    let mut bytes = vec![0_u8; len];
-    let mut offset = 0;
-    while offset < len {
-        let read_count = unsafe {
-            read(
-                stream,
-                bytes[offset..].as_mut_ptr().cast(),
-                (len - offset) as u64,
-            )
-        };
-        if read_count <= 0 {
-            log::warn!(
-                "ffi.read_stream_exact: read failed read_count={read_count} offset={offset} byte_len={len}"
-            );
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read_count = unsafe { read(stream, chunk.as_mut_ptr().cast(), chunk.len() as u64) };
+        if read_count < 0 {
+            log::warn!("ffi.read_stream_to_end: read failed read_count={read_count}");
             return None;
         }
-        offset += read_count as usize;
+        if read_count == 0 {
+            return Some(bytes);
+        }
+        let read_count = read_count as usize;
+        if bytes.len().saturating_add(read_count) > max_len {
+            log::warn!("ffi.read_stream_to_end: state too large max_len={max_len}");
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..read_count]);
     }
-    Some(bytes)
 }
 
 pub(super) fn fill_c_char_array<const N: usize>(target: &mut [c_char; N], text: &str) {

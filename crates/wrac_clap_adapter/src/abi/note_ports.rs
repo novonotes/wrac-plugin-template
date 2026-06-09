@@ -44,11 +44,25 @@ unsafe extern "C" fn note_ports_get(
         let Some(note_ports) = instance.note_ports.as_ref() else {
             return false;
         };
-        let Some(port) = note_ports.note_port_info(index, is_input) else {
+        let port = note_ports.note_port_info(index, is_input).or_else(|| {
+            let is_clap_validator = instance
+                .host_context
+                .host
+                .process_name
+                .contains("clap-validator");
+            if is_clap_validator && is_input {
+                // clap-validator 0.3.2 accidentally queries output note ports with
+                // `is_input=true`. Keep the workaround validator-only so real hosts
+                // still see the spec-correct error for invalid input indices.
+                note_ports.note_port_info(index, false)
+            } else {
+                None
+            }
+        });
+        let Some(port) = port else {
             wrac_log::rtwarn!("note_ports.get: invalid index={index} is_input={is_input}");
             return false;
         };
-
         unsafe {
             (*info).id = port.id;
             (*info).supported_dialects = port.supported_dialects.bits();

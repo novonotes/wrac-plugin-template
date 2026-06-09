@@ -20,6 +20,9 @@ const URL_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// knows how to open a URL or serve a zip under a custom scheme; frontend structure
 /// and command contracts remain product code.
 pub enum WxpFrontendSource {
+    Html {
+        html: &'static str,
+    },
     Url {
         url: &'static str,
     },
@@ -88,6 +91,15 @@ impl WxpWebViewSession {
         let bounds = dpi_converter.create_webview_bounds(logical_size);
 
         let builder = match config.frontend {
+            WxpFrontendSource::Html { html } => {
+                log::debug!("configuring wxp WebView session HTML frontend");
+                WxpWebViewBuilder::new(&mut wxp_context)
+                    .with_command_handler(command_handler.clone())
+                    .with_devtools(config.devtools)
+                    .with_visible(true)
+                    .with_bounds(bounds)
+                    .with_html(html)
+            }
             WxpFrontendSource::Url { url } => {
                 log::debug!("configuring wxp WebView session URL frontend: url={url}");
                 let builder = WxpWebViewBuilder::new(&mut wxp_context)
