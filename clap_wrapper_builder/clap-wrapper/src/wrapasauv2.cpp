@@ -3,6 +3,7 @@
 #include <set>
 #include <limits>
 #include <cassert>
+#include <cstring>
 
 extern bool fillAudioUnitCocoaView(AudioUnitCocoaViewInfo *viewInfo, std::shared_ptr<Clap::Plugin>);
 
@@ -135,14 +136,26 @@ WrapAsAUV2::WrapAsAUV2(AUV2_Type type, const std::string &clapname, const std::s
        */
 
       // pffffrzz();  // <- enable this to have a hook to attach a debugger
-      _plugin = Clap::Plugin::createInstance(_library._pluginFactory, _desc->id, this);
-      if (_plugin)
+      const auto runLoopBound = _library.bindRunLoopThread();
+      if (!runLoopBound)
       {
-        _plugin->initialize();
+        std::cout << "[clap-wrapper] ERROR: failed to bind WRAC run loop thread" << std::endl;
+        _desc = nullptr;
+        return;
+      }
+      _plugin = Clap::Plugin::createInstance(_library._pluginFactory, _desc->id, this);
+      if (_plugin && _plugin->initialize())
+      {
         _os_attached.on();
       }
       else
       {
+        if (_plugin)
+        {
+          _plugin->terminate();
+          _plugin.reset();
+        }
+        _library.unbindRunLoopThread();
         std::cout << "[clap-wrapper] ERROR: the clap did not create an instance with id " << _desc->id
                   << std::endl;
         // this will exit in WrapAsAUV2::Initialize() with an error
@@ -171,6 +184,7 @@ WrapAsAUV2::~WrapAsAUV2()
     _os_attached.off();
     _plugin->terminate();
     _plugin.reset();
+    _library.unbindRunLoopThread();
   }
   if (_current_program_name)
   {
@@ -273,6 +287,16 @@ void WrapAsAUV2::setupAudioBusses(const clap_plugin_t *plugin,
 {
   auto numAudioInputs = audioports->count(plugin, true);
   auto numAudioOutputs = audioports->count(plugin, false);
+  // AUv2 MIDI effects are still initialized through audio input/output scopes.
+  // Keep the CLAP layout audio-less, but give the AU wrapper local dummy busses
+  // so auval and hosts can complete AUBase initialization.
+  const bool useDummyMidiEffectAudioBusses =
+      _autype == AUV2_Type::aumi_noteeffect && numAudioInputs == 0 && numAudioOutputs == 0;
+  if (useDummyMidiEffectAudioBusses)
+  {
+    numAudioInputs = 1;
+    numAudioOutputs = 1;
+  }
 
   LOGINFO("[clap-wrapper] Setup Busses: audio in: {}, out: {}", (int)numAudioInputs,
           (int)numAudioOutputs);
@@ -287,6 +311,16 @@ void WrapAsAUV2::setupAudioBusses(const clap_plugin_t *plugin,
       addAudioBusFrom(i, &info, true);
     }
   }
+  if (useDummyMidiEffectAudioBusses)
+  {
+    clap_audio_port_info_t info{};
+    info.id = 1;
+    std::strncpy(info.name, "MIDI Effect In", sizeof(info.name) - 1);
+    info.flags = CLAP_AUDIO_PORT_IS_MAIN;
+    info.channel_count = 2;
+    info.port_type = CLAP_PORT_STEREO;
+    addAudioBusFrom(0, &info, true);
+  }
 
   ausdk::AUBase::GetScope(kAudioUnitScope_Output)
       .Initialize(this, kAudioUnitScope_Output, numAudioOutputs);
@@ -298,6 +332,16 @@ void WrapAsAUV2::setupAudioBusses(const clap_plugin_t *plugin,
     {
       addAudioBusFrom(i, &info, false);
     }
+  }
+  if (useDummyMidiEffectAudioBusses)
+  {
+    clap_audio_port_info_t info{};
+    info.id = 2;
+    std::strncpy(info.name, "MIDI Effect Out", sizeof(info.name) - 1);
+    info.flags = CLAP_AUDIO_PORT_IS_MAIN;
+    info.channel_count = 2;
+    info.port_type = CLAP_PORT_STEREO;
+    addAudioBusFrom(0, &info, false);
   }
 
   ausdk::AUBase::ReallocateBuffers();
@@ -1409,9 +1453,15 @@ bool WrapAsAUV2::ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
 
   auto ap = _plugin->_ext._audioports;
   auto pl = _plugin->_plugin;
+  const bool useDummyMidiEffectAudioBusses =
+      _autype == AUV2_Type::aumi_noteeffect && ap->count(pl, true) == 0 && ap->count(pl, false) == 0;
 
   if (inScope == kAudioUnitScope_Input)
   {
+    if (useDummyMidiEffectAudioBusses)
+    {
+      return inElement == 0 && inNewFormat.mChannelsPerFrame == 2;
+    }
     auto numAudioInputs = ap->count(pl, true);
     if (inElement >= numAudioInputs)
     {
@@ -1427,6 +1477,10 @@ bool WrapAsAUV2::ValidFormat(AudioUnitScope inScope, AudioUnitElement inElement,
   }
   else if (inScope == kAudioUnitScope_Output)
   {
+    if (useDummyMidiEffectAudioBusses)
+    {
+      return inElement == 0 && inNewFormat.mChannelsPerFrame == 2;
+    }
     auto numAudioOutputs = ap->count(pl, false);
     if (inElement >= numAudioOutputs)
     {
@@ -1469,6 +1523,20 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
     auto numAudioOutputs = ap->count(pl, false);
 
     std::set<int> inSets, outSets;
+
+    if (_autype == AUV2_Type::aumi_noteeffect && numAudioInputs == 0 && numAudioOutputs == 0)
+    {
+      // This mirrors setupAudioBusses(): the dummy AU busses are wrapper-local
+      // compatibility for MIDI effects and do not change the wrapped CLAP port
+      // layout.
+      cinfo.emplace_back();
+      cinfo.back().inChannels = 2;
+      cinfo.back().outChannels = 2;
+      if (!outInfo) return (UInt32)cinfo.size();
+
+      *outInfo = cinfo.data();
+      return (UInt32)cinfo.size();
+    }
 
     bool hasInMain{false};
     for (int i = 0; i < numAudioInputs; ++i)
@@ -1520,10 +1588,17 @@ void WrapAsAUV2::PostConstructor()
 
     auto numAudioInputs = ap->count(pl, true);
     auto numAudioOutputs = ap->count(pl, false);
+    const bool useDummyMidiEffectAudioBusses =
+        _autype == AUV2_Type::aumi_noteeffect && numAudioInputs == 0 && numAudioOutputs == 0;
+    if (useDummyMidiEffectAudioBusses)
+    {
+      numAudioInputs = 1;
+      numAudioOutputs = 1;
+    }
 
     SetNumberOfElements(kAudioUnitScope_Input, numAudioInputs);
     Inputs().SetNumberOfElements(numAudioInputs);
-    for (int i = 0; i < numAudioInputs; ++i)
+    for (int i = 0; i < numAudioInputs && !useDummyMidiEffectAudioBusses; ++i)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, true, &inf);
@@ -1538,10 +1613,16 @@ void WrapAsAUV2::PostConstructor()
       Inputs().GetIOElement(i)->SetAudioChannelLayout(layout);
       */
     }
+    if (useDummyMidiEffectAudioBusses)
+    {
+      auto b = CFStringCreateWithCString(nullptr, "MIDI Effect In", kCFStringEncodingUTF8);
+      Inputs().GetElement(0)->SetName(b);
+      CFRelease(b);
+    }
 
     SetNumberOfElements(kAudioUnitScope_Output, numAudioOutputs);
     Outputs().SetNumberOfElements(numAudioOutputs);
-    for (int i = 0; i < numAudioOutputs; ++i)
+    for (int i = 0; i < numAudioOutputs && !useDummyMidiEffectAudioBusses; ++i)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, false, &inf);
@@ -1555,6 +1636,12 @@ void WrapAsAUV2::PostConstructor()
       layout.mChannelLayoutTag = kAudioChannelLayoutTag_Stereo;
       Outputs().GetIOElement(i)->SetAudioChannelLayout(layout);
       */
+    }
+    if (useDummyMidiEffectAudioBusses)
+    {
+      auto b = CFStringCreateWithCString(nullptr, "MIDI Effect Out", kCFStringEncodingUTF8);
+      Outputs().GetElement(0)->SetName(b);
+      CFRelease(b);
     }
     LOGINFO("[clap-wrapper] PostConstructor: Ins={} Outs={}", numAudioInputs, numAudioOutputs);
   }

@@ -3,7 +3,7 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::stream::{clap_istream, clap_ostream};
 
 use super::PluginInstance;
-use super::ffi::{ffi_bool, read_stream_exact, write_stream};
+use super::ffi::{ffi_bool, read_stream_to_end, write_stream};
 use crate::State;
 
 pub(super) static STATE: clap_plugin_state = clap_plugin_state {
@@ -37,10 +37,7 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
                 return false;
             }
         };
-        let len = state.bytes.len() as u32;
-        let ok = unsafe {
-            write_stream(stream, &len.to_le_bytes()) && write_stream(stream, &state.bytes)
-        };
+        let ok = unsafe { write_stream(stream, &state.bytes) };
         if !ok {
             log::warn!(
                 "state.save: writing state stream failed byte_len={}",
@@ -63,24 +60,8 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: missing plugin instance");
             return false;
         };
-        let Some(len_bytes) = (unsafe { read_stream_exact(stream, 4) }) else {
-            log::warn!("state.load: failed to read state length");
-            return false;
-        };
-        let len_bytes: [u8; 4] = match len_bytes.try_into() {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                log::warn!("state.load: invalid state length prefix");
-                return false;
-            }
-        };
-        let len = u32::from_le_bytes(len_bytes) as usize;
-        if len > MAX_STATE_BYTES {
-            log::warn!("state.load: state too large byte_len={len}");
-            return false;
-        }
-        let Some(bytes) = (unsafe { read_stream_exact(stream, len) }) else {
-            log::warn!("state.load: failed to read state payload byte_len={len}");
+        let Some(bytes) = (unsafe { read_stream_to_end(stream, MAX_STATE_BYTES) }) else {
+            log::warn!("state.load: failed to read state stream");
             return false;
         };
 
@@ -88,12 +69,13 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::debug!("state.load: plugin has no state support");
             return false;
         };
+        let byte_len = bytes.len();
         if let Err(error) = state_support.restore_state(State { bytes }) {
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }
         instance.parameter_edits.rescan_values();
-        log::debug!("state.load: restored byte_len={len}");
+        log::debug!("state.load: restored byte_len={byte_len}");
         true
     })
 }

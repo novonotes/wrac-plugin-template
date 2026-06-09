@@ -146,6 +146,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
     , _os_attached([this] { os::attach(this); }, [this] { os::detach(this); })
   {
   }
+  ~ClapAsVst3() override;
 
   //---from IComponent-----------------------
   tresult PLUGIN_API initialize(FUnknown *context) override;
@@ -378,6 +379,10 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   bool checkMIDIDialectSupport();
 
  private:
+  bool bindRunLoopThreadIfNeeded();
+  bool createPluginInFactoryContext();
+  void unbindRunLoopThreadIfNeeded();
+
   // helper functions
   void addAudioBusFrom(const clap_audio_port_info_t *info, bool is_input);
   void addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input);
@@ -389,6 +394,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   Clap::Library *_library = nullptr;
   int _libraryIndex = 0;
   std::shared_ptr<Clap::Plugin> _plugin;
+  bool _runLoopThreadBound = false;
   clap_plugin_as_vst3_t *_vst3specifics = nullptr;
   Clap::ProcessAdapter *_processAdapter = nullptr;
   WrappedView *_wrappedview = nullptr;

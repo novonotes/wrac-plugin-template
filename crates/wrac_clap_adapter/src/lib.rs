@@ -15,6 +15,7 @@ mod host_gui;
 mod host_state;
 mod params;
 mod process_buffer;
+mod run_loop_factory;
 
 pub use api::{
     ActivateContext, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,

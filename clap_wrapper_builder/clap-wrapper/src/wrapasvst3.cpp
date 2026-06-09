@@ -146,17 +146,90 @@ void utf8_to_utf16l(const char *utf8string, uint16_t *target, size_t targetsize)
   target[targetpos] = 0;
 }
 
+bool ClapAsVst3::createPluginInFactoryContext()
+{
+  if (_plugin)
+  {
+    return true;
+  }
+
+  if (!bindRunLoopThreadIfNeeded())
+  {
+    return false;
+  }
+
+  _plugin = Clap::Plugin::createInstance(*_library, _libraryIndex, this);
+  if (!_plugin) return false;
+
+  return true;
+}
+
+bool ClapAsVst3::bindRunLoopThreadIfNeeded()
+{
+  if (_runLoopThreadBound)
+  {
+    return true;
+  }
+
+  if (!_library->bindRunLoopThread())
+  {
+    return false;
+  }
+
+  _runLoopThreadBound = true;
+  return true;
+}
+
+void ClapAsVst3::unbindRunLoopThreadIfNeeded()
+{
+  if (_runLoopThreadBound)
+  {
+    _library->unbindRunLoopThread();
+    _runLoopThreadBound = false;
+  }
+}
+
+ClapAsVst3::~ClapAsVst3()
+{
+  if (_plugin)
+  {
+    _os_attached.off();
+    if (_active)
+    {
+      _plugin->deactivate();
+      _active = false;
+    }
+    _plugin->terminate();
+    _plugin.reset();
+  }
+
+  unbindRunLoopThreadIfNeeded();
+}
+
 tresult PLUGIN_API ClapAsVst3::initialize(FUnknown *context)
 {
   auto result = super::initialize(context);
   context->queryInterface(Vst::IHostApplication::iid, (void **)&vst3HostApplication);
   if (result == kResultOk)
   {
-    if (!_plugin)
+    // Some validators and hosts call initialize() again on the same VST3
+    // wrapper object after terminate(). terminate() releases the CLAP instance,
+    // so recreate it in the same factory/run-loop context before forwarding
+    // CLAP plugin initialization.
+    if (!_plugin && !createPluginInFactoryContext())
     {
-      _plugin = Clap::Plugin::createInstance(*_library, _libraryIndex, this);
+      return kResultFalse;
     }
     result = (_plugin && _plugin->initialize()) ? kResultOk : kResultFalse;
+    if (result != kResultOk)
+    {
+      if (_plugin)
+      {
+        _plugin->terminate();
+        _plugin.reset();
+      }
+      unbindRunLoopThreadIfNeeded();
+    }
   }
 
   return result;
@@ -178,6 +251,10 @@ tresult PLUGIN_API ClapAsVst3::terminate()
     _plugin.reset();
   }
 
+  // Keep the WRAC RunLoop binding until the VST3 wrapper object is destroyed.
+  // JUCE keeps ScopedRunLoop as a component/controller member, so a validator's
+  // terminate/initialize cycle must not rebind the UI/run-loop thread from
+  // initialize().
   return super::terminate();
 }
 
@@ -614,13 +691,21 @@ tresult PLUGIN_API ClapAsVst3::getMidiControllerAssignment(int32 busIndex, int16
                                                            Vst::CtrlNumber midiControllerNumber,
                                                            Vst::ParamID &id /*out*/)
 {
-  // for my first Event bus and for MIDI channel 0 and for MIDI CC Volume only
-  if (busIndex == 0)  // && channel == 0) // && midiControllerNumber == Vst::kCtrlVolume)
+  // Only report mappings that were actually materialized as VST3 parameters.
+  // Some CLAP plugins expose a MIDI note input but no automatable parameters;
+  // returning the zero-initialized table value makes hosts/validators see an
+  // invalid ParamID 0 assignment.
+  id = Vst::kNoParamId;
+  if (busIndex == 0 && channel >= 0 && channel < 16)
   {
     if (midiControllerNumber < Vst::kCountCtrlNumber)  // with program change
     {
-      id = _IMidiMappingIDs[channel][midiControllerNumber];
-      return kResultTrue;
+      auto mappedId = _IMidiMappingIDs[channel][midiControllerNumber];
+      if (mappedId != 0)
+      {
+        id = mappedId;
+        return kResultTrue;
+      }
     }
   }
   return kResultFalse;

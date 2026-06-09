@@ -36,6 +36,12 @@ pub(crate) unsafe fn read_clap_schemas(
     profile: BuildProfile,
     clap_bundle: &Path,
 ) -> Result<Vec<PluginSchema>> {
+    // The schema mini-host creates real plugin instances. Some plugins build services that are
+    // intentionally main-thread/run-loop-affine, so the mini-host must provide the same basic
+    // run-loop capability that a wrapper host would provide before constructing the plugin.
+    let _run_loop_guard = novonotes_run_loop::RunLoop::init()
+        .map_err(|error| format!("failed to initialize RunLoop for CLAP schema checks: {error}"))?;
+
     // The checks need the host-visible schema, so query the built CLAP through its public
     // entry points instead of trusting source-side metadata that wrappers or adapters may alter.
     let library_path = clap_library_path(ctx, profile);

@@ -401,10 +401,10 @@ int main(int argc, char **argv)
         }
         cppf << "," << args << ", ci) {}"
              << "};\n";
-        // AUMusicDeviceFactory assumes the MusicDevice selector surface. Effect
-        // and note-effect components should use AUBaseFactory so auval and
-        // hosts see a factory that matches the advertised AudioComponent type.
-        if (u.type == "aumu")
+        // MIDI-capable AUv2 types need the MusicDevice selector surface. JUCE uses
+        // the same factory boundary for MIDI effects, and auval initializes `aumi`
+        // components through these selectors.
+        if (u.type == "aumu" || u.type == "aumi")
         {
           cppf << "AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, " << on << ");\n";
         }

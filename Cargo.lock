@@ -3063,6 +3063,7 @@ version = "0.1.0"
 dependencies = [
  "clap-sys",
  "log",
+ "novonotes_run_loop",
  "parking_lot",
  "wrac_host_context",
  "wrac_log",
@@ -3131,6 +3132,7 @@ dependencies = [
  "clap-sys",
  "dotenvy",
  "libloading",
+ "novonotes_run_loop",
  "petgraph",
  "serde",
  "serde_json",

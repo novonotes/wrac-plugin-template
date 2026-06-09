@@ -245,6 +245,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
  protected:
   Clap::Library *_library = nullptr;
   std::shared_ptr<Clap::Plugin> _plugin;
+  bool _runLoopThreadBound = false;
 
   void *_creationcontext = nullptr;  // context from the CLAP library
   os::State _os_attached;
@@ -287,6 +288,9 @@ class ClapAsAAX : public AAX_CEffectParameters,
   ParamChangeQueue _paramsToProcess;
 
  private:
+  bool bindRunLoopThreadIfNeeded();
+  void unbindRunLoopThreadIfNeeded();
+
   std::string _predetermined_effectid;
   int _predetermined_busconfig = 0;
 

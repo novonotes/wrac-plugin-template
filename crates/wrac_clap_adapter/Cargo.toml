@@ -11,6 +11,7 @@ publish = false
 [dependencies]
 clap-sys = { workspace = true }
 log = "0.4"
+novonotes_run_loop = { workspace = true }
 parking_lot = "0.12"
 wrac_host_context = { workspace = true }
 wrac_log = { workspace = true }

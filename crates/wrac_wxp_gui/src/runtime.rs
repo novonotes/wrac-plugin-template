@@ -266,14 +266,29 @@ impl GuiThreadLease {
         }
 
         if gui_thread.ref_count == 0 {
-            let guard = RunLoop::init().map_err(|_| {
-                log::debug!("wxp GUI thread lease: RunLoop::init failed");
-                PluginError::UnsupportedHostGuiThreadingModel
-            })?;
-            GUI_RUN_LOOP_GUARD.with(|stored_guard| {
-                debug_assert!(stored_guard.borrow().is_none());
-                *stored_guard.borrow_mut() = Some(guard);
-            });
+            if RunLoop::is_initialized() {
+                if !RunLoop::is_run_loop_thread() {
+                    log::debug!("wxp GUI thread lease: existing RunLoop belongs to another thread");
+                    return Err(PluginError::UnsupportedHostGuiThreadingModel);
+                }
+                // Format wrappers may bind the process RunLoop before plugin instance creation
+                // so composite/pulsus plugins can construct backend services at the same
+                // lifecycle point as JUCE. In that case the wrapper owns the guard and the GUI
+                // lease only records the thread affinity; dropping the GUI must not release the
+                // wrapper's process-wide RunLoop reference.
+                GUI_RUN_LOOP_GUARD.with(|stored_guard| {
+                    debug_assert!(stored_guard.borrow().is_none());
+                });
+            } else {
+                let guard = RunLoop::init().map_err(|_| {
+                    log::debug!("wxp GUI thread lease: RunLoop::init failed");
+                    PluginError::UnsupportedHostGuiThreadingModel
+                })?;
+                GUI_RUN_LOOP_GUARD.with(|stored_guard| {
+                    debug_assert!(stored_guard.borrow().is_none());
+                    *stored_guard.borrow_mut() = Some(guard);
+                });
+            }
         }
 
         // Advance the owner only after `RunLoop::init()` succeeds.
@@ -335,7 +350,6 @@ fn release_gui_thread_lease() {
     if should_drop_guard {
         GUI_RUN_LOOP_GUARD.with(|stored_guard| {
             let guard = stored_guard.borrow_mut().take();
-            debug_assert!(guard.is_some());
             drop(guard);
         });
     }

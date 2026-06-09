@@ -400,7 +400,13 @@ FUnknown *ClapAsVst3::createInstance(void *context)
     if (ctx->lib->hasEntryPoint())
     {
       // MessageBoxA(NULL, "create ClapAsVst3", "create", MB_OK);
-      return (IAudioProcessor *)new ClapAsVst3(ctx->lib, ctx->index, context);
+      auto *wrapper = new ClapAsVst3(ctx->lib, ctx->index, context);
+      if (!wrapper->createPluginInFactoryContext())
+      {
+        delete wrapper;
+        return nullptr;
+      }
+      return (IAudioProcessor *)wrapper;
     }
   }
 

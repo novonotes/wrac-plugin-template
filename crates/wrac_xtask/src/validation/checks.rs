@@ -732,7 +732,10 @@ mod tests {
                 reason: "not a supported host workflow".to_string(),
             },
         );
-        let validation = ValidationMetadata { disabled_rules };
+        let validation = ValidationMetadata {
+            disabled_rules,
+            ..ValidationMetadata::default()
+        };
         let results = evaluate_checks(
             &schema(vec![param(0, 0), param(1, CLAP_PARAM_IS_BYPASS)]),
             &[ValidateTarget::Clap],

@@ -42,6 +42,7 @@ mod params_extension;
 mod render_extension;
 mod state_extension;
 mod tail_extension;
+mod vst3_extension;
 
 use self::audio_buffers::audio_buffers;
 use self::ffi::{ffi_bool, ffi_ptr, ffi_status, ffi_unit, four_char_code};
@@ -72,6 +73,7 @@ const CLAP_PLUGIN_FACTORY_INFO_AUV2: &CStr = c"clap.plugin-factory-info-as-auv2.
 // clap-wrapper can infer VST3 metadata from CLAP descriptors, but commercial products
 // need stable VST3 class IDs and explicit host browser categories across wrapper updates.
 const CLAP_PLUGIN_FACTORY_INFO_VST3: &CStr = c"clap.plugin-factory-info-as-vst3/0";
+const CLAP_PLUGIN_AS_VST3: &CStr = c"clap.plugin-info-as-vst3/0";
 // AAX declares manufacturer/product/stem IDs at factory time, so commercial
 // products must provide this extension rather than relying on wrapper-generated IDs.
 const CLAP_PLUGIN_FACTORY_INFO_AAX: &CStr = c"clap.plugin-factory-info-as-aax/1";
@@ -435,6 +437,10 @@ pub(crate) unsafe extern "C" fn entry_get_factory(
                 .any(|descriptor| descriptor.descriptor().aax.is_some())
         {
             aax_factory_ptr(storage)
+        } else if factory_id.to_bytes_with_nul()
+            == crate::run_loop_factory::WRAC_PLUGIN_FACTORY_RUN_LOOP
+        {
+            crate::run_loop_factory::factory_ptr()
         } else {
             ptr::null()
         }
@@ -828,6 +834,8 @@ unsafe extern "C" fn plugin_get_extension(
             // zero-latency fallback keeps optional product support from becoming a null
             // extension pointer at the wrapper boundary.
             &latency_extension::LATENCY as *const _ as *const c_void
+        } else if id == CLAP_PLUGIN_AS_VST3 {
+            &vst3_extension::VST3 as *const _ as *const c_void
         } else {
             ptr::null()
         }

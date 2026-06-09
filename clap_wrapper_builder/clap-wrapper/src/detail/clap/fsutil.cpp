@@ -249,6 +249,23 @@ const clap_plugin_info_as_aax_t *Library::get_aax_info(uint32_t index) const
   return nullptr;
 }
 
+bool Library::bindRunLoopThread() const
+{
+  if (!_wracRunLoopFactory || !_wracRunLoopFactory->bind_current_thread)
+  {
+    return true;
+  }
+  return _wracRunLoopFactory->bind_current_thread(_wracRunLoopFactory);
+}
+
+void Library::unbindRunLoopThread() const
+{
+  if (_wracRunLoopFactory && _wracRunLoopFactory->unbind_current_thread)
+  {
+    _wracRunLoopFactory->unbind_current_thread(_wracRunLoopFactory);
+  }
+}
+
 #if WIN
 bool Library::getEntryFunction(HMODULE handle, const char *path)
 {
@@ -278,6 +295,8 @@ void Library::setupPluginsFromPluginEntry(const char *path)
           _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AUV2));
       _pluginFactoryAAXInfo = static_cast<decltype(_pluginFactoryAAXInfo)>(
           _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AAX));
+      _wracRunLoopFactory = static_cast<decltype(_wracRunLoopFactory)>(
+          _pluginEntry->get_factory(WRAC_PLUGIN_FACTORY_RUN_LOOP));
       _pluginFactoryARAInfo =
           static_cast<const clap_ara_factory_t *>(_pluginEntry->get_factory(CLAP_EXT_ARA_FACTORY));
 
