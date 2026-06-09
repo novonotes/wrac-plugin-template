@@ -47,6 +47,16 @@ pub(crate) static PLUGIN_ENTRY: WracGainEntry = WracGainEntry;
 pub(crate) struct WracGainEntry;
 
 impl PluginEntry for WracGainEntry {
+    fn attach_main_thread(&self) {
+        if let Err(error) = wrac_wxp_gui::attach_main_thread() {
+            log::warn!("failed to attach wxp main thread: {error}");
+        }
+    }
+
+    fn detach_main_thread(&self) {
+        wrac_wxp_gui::detach_main_thread();
+    }
+
     fn plugin_factory(&self) -> Option<&dyn PluginFactory> {
         Some(&WRAC_GAIN_FACTORY)
     }

@@ -13,9 +13,9 @@ thread_local! {
     // Native GUI objects such as WebViews are typically bound to the thread that created them.
     // `WxpGuiController` lives inside a Send/Sync `PluginCore`, so runtimes are confined to TLS.
     static GUI_RUNTIMES: RefCell<HashMap<u64, GuiRuntimeEntry>> = RefCell::new(HashMap::new());
-    // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
-    // cross-thread token; it releases this guard by dispatching back to the owner thread.
-    static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const { RefCell::new(None) };
+    // The main-thread hook is allowed to arrive before any GUI runtime exists. Keep
+    // RunLoop guards on that same thread so detach can release them on the correct owner.
+    static MAIN_THREAD_HOOK_GUARDS: RefCell<Vec<RunLoopGuard>> = const { RefCell::new(Vec::new()) };
 }
 
 static NEXT_GUI_ID: AtomicU64 = AtomicU64::new(1);
@@ -26,27 +26,33 @@ static GUI_THREAD_STATE: Mutex<GuiThreadState> = Mutex::new(GuiThreadState {
     owner: None,
     ref_count: 0,
 });
+static MAIN_THREAD_HOOK_STATE: Mutex<MainThreadHookState> = Mutex::new(MainThreadHookState {
+    owner: None,
+    ref_count: 0,
+});
 
 struct GuiThreadState {
     owner: Option<ThreadId>,
     ref_count: usize,
 }
 
+struct MainThreadHookState {
+    owner: Option<ThreadId>,
+    ref_count: usize,
+}
+
 struct GuiRuntimeEntry {
     runtime: Box<dyn WxpGuiRuntime>,
-    // Keep the run loop alive until the runtime is removed from TLS. Releasing the lease
-    // manually from the handle side is error-prone when timer teardown or WebView cleanup
-    // still needs the run loop during the runtime's drop, so tie the lease lifetime to
-    // the entry's.
+    // Tie GUI-thread ownership to the runtime entry so teardown still runs on the same
+    // thread that created native GUI objects.
     _lease: GuiThreadLease,
 }
 
 /// RAII token representing a reference to the GUI thread's run loop.
 ///
 /// The token is `Send + Sync` because `WxpGuiController` is shared with host callbacks,
-/// but the `!Send` [`RunLoopGuard`] itself stays in GUI-thread TLS. Dropping this token
-/// from another host thread blocks until the reference has been released on the owning
-/// GUI thread.
+/// but the actual GUI runtime remains in GUI-thread TLS. Dropping this token from another
+/// host thread blocks until the reference has been released on the owning GUI thread.
 pub(crate) struct GuiThreadLease {
     owner: ThreadId,
     is_active: bool,
@@ -254,6 +260,10 @@ impl GuiThreadLease {
     pub(crate) fn acquire() -> PluginResult<Self> {
         let current_thread = std::thread::current().id();
         log::debug!("wxp GUI thread lease: acquire requested on thread {current_thread:?}");
+        if !RunLoop::is_run_loop_thread() {
+            log::debug!("wxp GUI thread lease: current thread is not the run loop thread");
+            return Err(PluginError::UnsupportedHostGuiThreadingModel);
+        }
         let mut gui_thread = GUI_THREAD_STATE.lock();
         match gui_thread.owner {
             Some(owner_thread) if owner_thread != current_thread => {
@@ -265,18 +275,6 @@ impl GuiThreadLease {
             Some(_) | None => {}
         }
 
-        if gui_thread.ref_count == 0 {
-            let guard = RunLoop::init().map_err(|_| {
-                log::debug!("wxp GUI thread lease: RunLoop::init failed");
-                PluginError::UnsupportedHostGuiThreadingModel
-            })?;
-            GUI_RUN_LOOP_GUARD.with(|stored_guard| {
-                debug_assert!(stored_guard.borrow().is_none());
-                *stored_guard.borrow_mut() = Some(guard);
-            });
-        }
-
-        // Advance the owner only after `RunLoop::init()` succeeds.
         gui_thread.owner = Some(current_thread);
         gui_thread.ref_count += 1;
         log::debug!(
@@ -314,31 +312,77 @@ impl Drop for GuiThreadLease {
 
 fn release_gui_thread_lease() {
     let current_thread = std::thread::current().id();
-    let should_drop_guard = {
-        let mut gui_thread = GUI_THREAD_STATE.lock();
-        debug_assert!(gui_thread.ref_count > 0);
-        gui_thread.ref_count = gui_thread.ref_count.saturating_sub(1);
-        log::debug!(
-            "wxp GUI thread lease: released on thread {current_thread:?}; ref_count={}",
-            gui_thread.ref_count
-        );
-        if gui_thread.ref_count == 0 {
-            // Once both the last runtime and the thread affinity acquired via `set_parent()`
-            // are released, allow the next GUI session to arrive from a different host window.
-            gui_thread.owner = None;
-            log::debug!("wxp GUI thread lease: owner cleared");
-            true
-        } else {
-            false
-        }
-    };
-    if should_drop_guard {
-        GUI_RUN_LOOP_GUARD.with(|stored_guard| {
-            let guard = stored_guard.borrow_mut().take();
-            debug_assert!(guard.is_some());
-            drop(guard);
-        });
+    let mut gui_thread = GUI_THREAD_STATE.lock();
+    debug_assert!(gui_thread.ref_count > 0);
+    gui_thread.ref_count = gui_thread.ref_count.saturating_sub(1);
+    log::debug!(
+        "wxp GUI thread lease: released on thread {current_thread:?}; ref_count={}",
+        gui_thread.ref_count
+    );
+    if gui_thread.ref_count == 0 {
+        // Once the last runtime is released, allow the next GUI session to arrive from
+        // a different host window as long as the hook also attaches that thread.
+        gui_thread.owner = None;
+        log::debug!("wxp GUI thread lease: owner cleared");
     }
+}
+
+pub fn attach_main_thread() -> PluginResult<()> {
+    let current_thread = std::thread::current().id();
+    log::debug!("wxp main thread hook: attach requested on thread {current_thread:?}");
+    let mut hook_state = MAIN_THREAD_HOOK_STATE.lock();
+    if let Some(owner_thread) = hook_state.owner
+        && owner_thread != current_thread
+    {
+        log::debug!(
+            "wxp main thread hook: rejecting thread {current_thread:?}; owner is {owner_thread:?}"
+        );
+        return Err(PluginError::UnsupportedHostGuiThreadingModel);
+    }
+    let guard = RunLoop::init().map_err(|error| {
+        log::debug!("wxp main thread hook: RunLoop::init failed: {error}");
+        PluginError::UnsupportedHostGuiThreadingModel
+    })?;
+    MAIN_THREAD_HOOK_GUARDS.with(|guards| guards.borrow_mut().push(guard));
+    hook_state.owner = Some(current_thread);
+    hook_state.ref_count += 1;
+    log::debug!(
+        "wxp main thread hook: attached on thread {current_thread:?}; ref_count={}",
+        hook_state.ref_count
+    );
+    Ok(())
+}
+
+pub fn detach_main_thread() {
+    let current_thread = std::thread::current().id();
+    log::debug!("wxp main thread hook: detach requested on thread {current_thread:?}");
+    if RunLoop::is_run_loop_thread() {
+        release_main_thread_hook_guard();
+    } else if let Err(error) = RunLoop::call(move |_| release_main_thread_hook_guard()) {
+        log::error!("wxp main thread hook: failed to detach on owner thread: {error}");
+    }
+}
+
+fn release_main_thread_hook_guard() {
+    let current_thread = std::thread::current().id();
+    let guard = MAIN_THREAD_HOOK_GUARDS.with(|guards| guards.borrow_mut().pop());
+    let Some(guard) = guard else {
+        log::warn!("wxp main thread hook: detach requested without a matching attach");
+        return;
+    };
+    {
+        let mut hook_state = MAIN_THREAD_HOOK_STATE.lock();
+        debug_assert!(hook_state.ref_count > 0);
+        hook_state.ref_count = hook_state.ref_count.saturating_sub(1);
+        log::debug!(
+            "wxp main thread hook: detached on thread {current_thread:?}; ref_count={}",
+            hook_state.ref_count
+        );
+        if hook_state.ref_count == 0 {
+            hook_state.owner = None;
+        }
+    }
+    drop(guard);
 }
 
 pub(crate) fn is_gui_thread() -> bool {

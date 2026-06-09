@@ -17,6 +17,6 @@ pub use commands::{register_native_cursor_bridge_commands, register_resize_comma
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
 pub use dpi::HostGuiSizeUnit;
 pub use resize_drag::WxpNativeResizeDrag;
-pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
+pub use runtime::{WxpGuiFactory, WxpGuiRuntime, attach_main_thread, detach_main_thread};
 pub use session::{WxpFrontendSource, WxpWebViewConfig, WxpWebViewSession};
 pub use window::ParentWindowHandle;
