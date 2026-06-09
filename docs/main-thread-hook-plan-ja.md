@@ -127,6 +127,7 @@ format API の method / callback 名を指す。
 ## 差分を小さくする方針
 
 - `clap-wrapper` に入れるのは generic extension lookup と wrapper lifecycle での attach/detach だけにする。
+- `clap-wrapper` の format 別 class には状態管理を散らさず、共通の RAII helper で attach/detach の対を管理する。
 - extension 名・型名から `RunLoop` を消し、外部プロジェクト側の差分を WRAC 固有 runtime から切り離す。
 - `wrac_clap_adapter` 側は `PluginEntry` hook と extension forwarding に限定する。
 - `wrac_clap_adapter` / `clap-wrapper` に `novonotes_run_loop` 依存を持ち込まない。

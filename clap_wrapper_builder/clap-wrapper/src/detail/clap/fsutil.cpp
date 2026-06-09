@@ -327,6 +327,38 @@ void Library::detachMainThread() const
   }
 }
 
+void MainThreadAttachment::attach(const Library *library)
+{
+  if (_library == library)
+  {
+    return;
+  }
+
+  detach();
+  if (library)
+  {
+    // Store the library only after the callback returns, so detach is paired with
+    // an attach notification that actually completed.
+    library->attachMainThread();
+    _library = library;
+  }
+}
+
+void MainThreadAttachment::detach()
+{
+  const auto *library = _library;
+  _library = nullptr;
+  if (library)
+  {
+    library->detachMainThread();
+  }
+}
+
+MainThreadAttachment::~MainThreadAttachment()
+{
+  detach();
+}
+
 #if WIN || LIN
 // This is a small stub to resolve the self dll. MacOs uses a different approach
 // in sharedLibraryBundlePath

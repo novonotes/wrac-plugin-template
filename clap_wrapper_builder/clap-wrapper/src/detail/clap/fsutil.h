@@ -96,4 +96,21 @@ class Library
   bool _selfcontained = false;
 };
 
+class MainThreadAttachment
+{
+ public:
+  // Keeps WRAC's main-thread hook paired without teaching each wrapper format about
+  // hook state. This keeps wrapper-format diffs small when rebasing the vendored
+  // clap-wrapper subtree.
+  MainThreadAttachment() = default;
+  MainThreadAttachment(const MainThreadAttachment &) = delete;
+  MainThreadAttachment &operator=(const MainThreadAttachment &) = delete;
+  void attach(const Library *library);
+  void detach();
+  ~MainThreadAttachment();
+
+ private:
+  const Library *_library = nullptr;
+};
+
 }  // namespace Clap

@@ -401,7 +401,9 @@ FUnknown *ClapAsVst3::createInstance(void *context)
     {
       // MessageBoxA(NULL, "create ClapAsVst3", "create", MB_OK);
       auto *wrapper = new ClapAsVst3(ctx->lib, ctx->index, context);
-      wrapper->attachMainThreadHookIfNeeded();
+      // Match JUCE's plugin-object creation context for main-thread attachment.
+      // The CLAP plugin instance itself still belongs to initialize()/terminate().
+      wrapper->_mainThreadAttachment.attach(ctx->lib);
       return (IAudioProcessor *)wrapper;
     }
   }
