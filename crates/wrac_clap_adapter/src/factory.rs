@@ -9,6 +9,7 @@ use crate::entry::EntryRegistration;
 
 pub(crate) struct PluginRegistrationStorage {
     pub clap_factory: ClapFactoryState,
+    pub main_thread_hook: MainThreadHookState,
     pub auv2_factory: Auv2FactoryState,
     pub vst3_factory: Vst3FactoryState,
     pub aax_factory: AaxFactoryState,
@@ -39,6 +40,13 @@ impl PluginRegistrationStorage {
                     get_plugin_count: Some(crate::abi::factory_get_plugin_count),
                     get_plugin_descriptor: Some(crate::abi::factory_get_plugin_descriptor),
                     create_plugin: Some(crate::abi::factory_create_plugin),
+                },
+                registration,
+            },
+            main_thread_hook: MainThreadHookState {
+                hook: WracPluginMainThreadHook {
+                    attach_main_thread: Some(crate::abi::main_thread_hook_attach),
+                    detach_main_thread: Some(crate::abi::main_thread_hook_detach),
                 },
                 registration,
             },
@@ -111,6 +119,15 @@ pub(crate) struct ClapFactoryState {
 
 unsafe impl Sync for ClapFactoryState {}
 unsafe impl Send for ClapFactoryState {}
+
+#[repr(C)]
+pub(crate) struct MainThreadHookState {
+    pub hook: WracPluginMainThreadHook,
+    pub registration: &'static EntryRegistration,
+}
+
+unsafe impl Sync for MainThreadHookState {}
+unsafe impl Send for MainThreadHookState {}
 
 #[repr(C)]
 pub(crate) struct Auv2FactoryState {
@@ -232,6 +249,15 @@ pub(crate) struct ClapPluginFactoryAsAax {
 unsafe impl Sync for ClapPluginFactoryAsAax {}
 unsafe impl Send for ClapPluginFactoryAsAax {}
 
+#[repr(C)]
+pub(crate) struct WracPluginMainThreadHook {
+    pub attach_main_thread: Option<unsafe extern "C" fn(hook: *const WracPluginMainThreadHook)>,
+    pub detach_main_thread: Option<unsafe extern "C" fn(hook: *const WracPluginMainThreadHook)>,
+}
+
+unsafe impl Sync for WracPluginMainThreadHook {}
+unsafe impl Send for WracPluginMainThreadHook {}
+
 pub(crate) fn clap_factory_state(
     factory: *const clap_plugin_factory,
 ) -> Option<&'static ClapFactoryState> {
@@ -239,6 +265,15 @@ pub(crate) fn clap_factory_state(
         return None;
     }
     Some(unsafe { &*(factory as *const ClapFactoryState) })
+}
+
+pub(crate) fn main_thread_hook_state(
+    hook: *const WracPluginMainThreadHook,
+) -> Option<&'static MainThreadHookState> {
+    if hook.is_null() {
+        return None;
+    }
+    Some(unsafe { &*(hook as *const MainThreadHookState) })
 }
 
 pub(crate) fn auv2_factory_state(
@@ -270,6 +305,10 @@ pub(crate) fn aax_factory_state(
 
 pub(crate) fn factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
     &storage.clap_factory.factory as *const clap_plugin_factory as *const c_void
+}
+
+pub(crate) fn main_thread_hook_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
+    &storage.main_thread_hook.hook as *const WracPluginMainThreadHook as *const c_void
 }
 
 pub(crate) fn auv2_factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {

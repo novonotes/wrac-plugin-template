@@ -481,6 +481,8 @@ ClapAsAAX::ClapAsAAX()
   , os::IPlugObject()
   , _os_attached([this] { os::attach(this); }, [this] { os::detach(this); })
 {
+  _library = CLAPAAX::guarantee_clap();
+  attachMainThreadHookIfNeeded();
   ClapAsAAXRegistry::Register(this);
   _activated = false;
 }
@@ -494,6 +496,8 @@ ClapAsAAX::ClapAsAAX(const char *effectid, int busconfig)
   , _predetermined_effectid(effectid)
   , _predetermined_busconfig(busconfig)
 {
+  _library = CLAPAAX::guarantee_clap();
+  attachMainThreadHookIfNeeded();
   ClapAsAAXRegistry::Register(this);
   _activated = false;
 }
@@ -508,7 +512,26 @@ ClapAsAAX::~ClapAsAAX()
     this->stopProcessing();
     this->deactivatePlugin();
   }
+  detachMainThreadHookIfNeeded();
   ClapAsAAXRegistry::Unregister(this);
+}
+
+void ClapAsAAX::attachMainThreadHookIfNeeded()
+{
+  if (!_mainThreadAttached && _library)
+  {
+    _library->attachMainThread();
+    _mainThreadAttached = true;
+  }
+}
+
+void ClapAsAAX::detachMainThreadHookIfNeeded()
+{
+  if (_mainThreadAttached && _library)
+  {
+    _library->detachMainThread();
+    _mainThreadAttached = false;
+  }
 }
 
 static void build_config_request(clap_audio_port_configuration_request *req, uint32_t numchannels,

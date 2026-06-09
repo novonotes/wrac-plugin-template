@@ -147,6 +147,8 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   {
   }
 
+  ~ClapAsVst3() override;
+
   //---from IComponent-----------------------
   tresult PLUGIN_API initialize(FUnknown *context) override;
   tresult PLUGIN_API terminate() override;
@@ -411,6 +413,10 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   std::atomic_bool _requestUICallback = false;
   std::atomic_bool _requestRestart = false;
   bool _missedLatencyRequest = false;
+  bool _mainThreadAttached = false;
+
+  void attachMainThreadHookIfNeeded();
+  void detachMainThreadHookIfNeeded();
 
   std::thread::id _main_thread_id{};
   static const uint32_t _gui_invalid_size = 0xffffffff;

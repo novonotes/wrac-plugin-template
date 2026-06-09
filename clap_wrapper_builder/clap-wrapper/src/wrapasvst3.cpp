@@ -146,6 +146,29 @@ void utf8_to_utf16l(const char *utf8string, uint16_t *target, size_t targetsize)
   target[targetpos] = 0;
 }
 
+ClapAsVst3::~ClapAsVst3()
+{
+  detachMainThreadHookIfNeeded();
+}
+
+void ClapAsVst3::attachMainThreadHookIfNeeded()
+{
+  if (!_mainThreadAttached && _library)
+  {
+    _library->attachMainThread();
+    _mainThreadAttached = true;
+  }
+}
+
+void ClapAsVst3::detachMainThreadHookIfNeeded()
+{
+  if (_mainThreadAttached && _library)
+  {
+    _library->detachMainThread();
+    _mainThreadAttached = false;
+  }
+}
+
 tresult PLUGIN_API ClapAsVst3::initialize(FUnknown *context)
 {
   auto result = super::initialize(context);

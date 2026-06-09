@@ -525,6 +525,8 @@ class WrapAsAUV2 : public ausdk::AUBase,
   void deactivateCLAP();
   bool IsBypassEffect();
   void SetBypassEffect(bool bypass);
+  void attachMainThreadHookIfNeeded();
+  void detachMainThreadHookIfNeeded();
 
   // --------------- internals
 
@@ -533,6 +535,7 @@ class WrapAsAUV2 : public ausdk::AUBase,
   std::string _clapid;
   int _idx;
   os::State _os_attached;
+  bool _mainThreadAttached = false;
 
   const clap_plugin_descriptor_t *_desc{nullptr};
   std::shared_ptr<Clap::Plugin> _plugin = nullptr;

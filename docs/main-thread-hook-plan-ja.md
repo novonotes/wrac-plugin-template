@@ -72,12 +72,12 @@ pub trait PluginEntry: Sync {
 extension として公開する。名前は RunLoop 固有にしない。
 
 ```c
-#define WRAC_PLUGIN_FACTORY_MAIN_THREAD_HOOK "com.novonotes.wrac.plugin-main-thread-hook/0"
+#define WRAC_PLUGIN_MAIN_THREAD_HOOK "com.novonotes.wrac.plugin-main-thread-hook/0"
 
-typedef struct wrac_plugin_factory_main_thread_hook {
-    void (*attach_main_thread)(const struct wrac_plugin_factory_main_thread_hook *factory);
-    void (*detach_main_thread)(const struct wrac_plugin_factory_main_thread_hook *factory);
-} wrac_plugin_factory_main_thread_hook_t;
+typedef struct wrac_plugin_main_thread_hook {
+    void (*attach_main_thread)(const struct wrac_plugin_main_thread_hook *hook);
+    void (*detach_main_thread)(const struct wrac_plugin_main_thread_hook *hook);
+} wrac_plugin_main_thread_hook_t;
 ```
 
 adapter 側はこの extension を `PluginEntry::attach_main_thread()` /

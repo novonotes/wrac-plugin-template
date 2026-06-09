@@ -14,6 +14,10 @@ pub trait PluginEntry: Send + Sync + 'static {
 
     fn deinit(&self) {}
 
+    fn attach_main_thread(&self) {}
+
+    fn detach_main_thread(&self) {}
+
     fn plugin_factory(&self) -> Option<&dyn PluginFactory>;
 }
 

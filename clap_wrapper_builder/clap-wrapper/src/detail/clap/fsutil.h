@@ -20,6 +20,7 @@
 #include "clapwrapper/vst3.h"
 #include "clapwrapper/auv2.h"
 #include "clapwrapper/aax.h"
+#include "clapwrapper/wrac.h"
 #include "../ara/ara.h"
 #include "detail/os/fs.h"
 
@@ -47,10 +48,13 @@ class Library
   const clap_plugin_factory_as_auv2 *_pluginFactoryAUv2Info = nullptr;
   const clap_plugin_factory_as_aax_t *_pluginFactoryAAXInfo = nullptr;
   const clap_ara_factory_t *_pluginFactoryARAInfo = nullptr;
+  const wrac_plugin_main_thread_hook_t *_wracMainThreadHook = nullptr;
   std::vector<const clap_plugin_descriptor_t *> plugins;
 
   const clap_plugin_info_as_vst3_t *get_vst3_info(uint32_t index) const;
   const clap_plugin_info_as_aax_t *get_aax_info(uint32_t index) const;
+  void attachMainThread() const;
+  void detachMainThread() const;
 
 #if MAC
   CFBundleRef getBundleRef()

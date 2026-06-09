@@ -280,6 +280,8 @@ void Library::setupPluginsFromPluginEntry(const char *path)
           _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AAX));
       _pluginFactoryARAInfo =
           static_cast<const clap_ara_factory_t *>(_pluginEntry->get_factory(CLAP_EXT_ARA_FACTORY));
+      _wracMainThreadHook = static_cast<decltype(_wracMainThreadHook)>(
+          _pluginEntry->get_factory(WRAC_PLUGIN_MAIN_THREAD_HOOK));
 
       // detect plugins that do not check the CLAP_PLUGIN_FACTORY_ID
       if ((void *)_pluginFactory == (void *)_pluginFactoryVst3Info)
@@ -288,6 +290,7 @@ void Library::setupPluginsFromPluginEntry(const char *path)
         _pluginFactoryVst3Info = nullptr;
         _pluginFactoryAUv2Info = nullptr;
         _pluginFactoryARAInfo = nullptr;
+        _wracMainThreadHook = nullptr;
       }
 
       auto count = _pluginFactory->get_plugin_count(_pluginFactory);
@@ -305,6 +308,22 @@ void Library::setupPluginsFromPluginEntry(const char *path)
         }
       }
     }
+  }
+}
+
+void Library::attachMainThread() const
+{
+  if (_wracMainThreadHook && _wracMainThreadHook->attach_main_thread)
+  {
+    _wracMainThreadHook->attach_main_thread(_wracMainThreadHook);
+  }
+}
+
+void Library::detachMainThread() const
+{
+  if (_wracMainThreadHook && _wracMainThreadHook->detach_main_thread)
+  {
+    _wracMainThreadHook->detach_main_thread(_wracMainThreadHook);
   }
 }
 
