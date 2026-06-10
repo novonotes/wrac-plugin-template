@@ -21,6 +21,14 @@ impl HostContext {
             plugin_format: PluginFormat::detect(clap_host_name.unwrap_or_default()),
         }
     }
+
+    /// Keeps validation / scanner process classification as the WRAC-owned source of truth.
+    ///
+    /// Product code should consume this result from the `PluginCoreContext::host_context`
+    /// passed during plugin instance creation instead of duplicating process-name checks.
+    pub fn is_validation_or_scan_host(&self) -> bool {
+        self.host.is_validation_or_scan_host()
+    }
 }
 
 /// Parsed host identity from the process executable.
@@ -135,6 +143,22 @@ pub enum HostFamily {
     ViennaEnsemblePro,
     WaveBurner,
     Unknown,
+}
+
+impl DetectedHost {
+    /// Hosts that represent descriptor scans or validators, not regular DAW sessions.
+    pub fn is_validation_or_scan_host(&self) -> bool {
+        matches!(
+            self.family,
+            HostFamily::AppleAuval
+                | HostFamily::Pluginval
+                | HostFamily::SteinbergTestHost
+                | HostFamily::VbVstScanner
+        ) || contains_ignore_case(&self.process_name, "xtask")
+            || contains_ignore_case(&self.process_name, "validator")
+            || contains_ignore_case(&self.process_name, "clap-validator")
+            || starts_with_ignore_case(&self.process_name, "aaxval_")
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
