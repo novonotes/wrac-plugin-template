@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-pub(crate) enum Target {
+pub enum Target {
     Clap,
     Vst3,
     Au,
@@ -14,7 +14,7 @@ pub(crate) enum Target {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub(crate) enum PluginFormat {
+pub enum PluginFormat {
     Clap,
     Vst3,
     Au,
@@ -64,7 +64,7 @@ impl Target {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-pub(crate) enum PluginTarget {
+pub enum PluginTarget {
     Clap,
     Vst3,
     Au,
@@ -96,7 +96,7 @@ impl PluginTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
-pub(crate) enum ValidateTarget {
+pub enum ValidateTarget {
     Clap,
     Vst3,
     Au,
