@@ -564,8 +564,7 @@ mod tests {
     use std::path::Path;
 
     use crate::metadata::{
-        AaxStemConfigMetadata, DisabledValidationRule, PluginMetadata, PluginProductMetadata,
-        ValidationMetadata,
+        DisabledValidationRule, PluginMetadata, PluginProductMetadata, ValidationMetadata,
     };
     use crate::targets::{PluginFormat, ValidateTarget};
 
