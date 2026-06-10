@@ -2,6 +2,8 @@ use std::env;
 use std::error::Error;
 use std::path::PathBuf;
 
+use clap::Parser;
+
 mod cli;
 mod commands;
 mod context;
@@ -19,6 +21,15 @@ use profile::BuildProfile;
 use targets::{PluginTarget, Target, ValidateTarget};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+/// Parses the standard WRAC xtask CLI into a typed command.
+///
+/// Repository-local xtasks can provide only workspace wiring and delegate the
+/// WRAC command surface to this crate, which keeps help text and behavior from
+/// drifting between the template and downstream product repositories.
+pub fn command_from_args() -> WracCommand {
+    cli::Cli::parse().command.into()
+}
 
 #[derive(Debug, Clone)]
 pub struct XtaskConfig {
@@ -296,6 +307,56 @@ impl WracWorkspace {
     }
 }
 
+impl From<cli::Commands> for WracCommand {
+    fn from(command: cli::Commands) -> Self {
+        match command {
+            cli::Commands::Build(args) => Self::Build(BuildOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                clean: args.clean,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+            }),
+            cli::Commands::Install(args) => Self::Install(InstallOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                scope: args.scope.into(),
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+            }),
+            cli::Commands::Uninstall(args) => Self::Uninstall(UninstallOptions {
+                package: args.package,
+                all: args.all,
+                scope: args.scope.into(),
+                target: args.target,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+            }),
+            cli::Commands::Validate(args) => Self::Validate(ValidateOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+            }),
+            cli::Commands::Launch(args) => Self::Launch(LaunchOptions {
+                package: args.package,
+                release: args.release,
+                plugin_id: args.plugin_id,
+            }),
+            cli::Commands::Clean(args) => Self::Clean(CleanOptions {
+                package: args.package,
+                all: args.all,
+            }),
+        }
+    }
+}
+
 fn load_workspace_dotenv(config: &XtaskConfig) -> Result<()> {
     let path = config.root.join(".env");
     if !path.exists() {
@@ -389,12 +450,32 @@ impl From<WracInstallScope> for InstallScope {
     }
 }
 
+impl From<InstallScope> for WracInstallScope {
+    fn from(scope: InstallScope) -> Self {
+        match scope {
+            InstallScope::Default => Self::Default,
+            InstallScope::User => Self::User,
+            InstallScope::System => Self::System,
+        }
+    }
+}
+
 impl From<WracUninstallScope> for UninstallScope {
     fn from(scope: WracUninstallScope) -> Self {
         match scope {
             WracUninstallScope::All => Self::All,
             WracUninstallScope::User => Self::User,
             WracUninstallScope::System => Self::System,
+        }
+    }
+}
+
+impl From<UninstallScope> for WracUninstallScope {
+    fn from(scope: UninstallScope) -> Self {
+        match scope {
+            UninstallScope::All => Self::All,
+            UninstallScope::User => Self::User,
+            UninstallScope::System => Self::System,
         }
     }
 }

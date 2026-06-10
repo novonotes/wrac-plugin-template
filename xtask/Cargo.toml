@@ -8,5 +8,4 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
-clap = { version = "4.5.38", features = ["derive"] }
 wrac_xtask = { path = "../crates/wrac_xtask" }

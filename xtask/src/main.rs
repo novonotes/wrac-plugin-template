@@ -2,8 +2,6 @@ use std::path::Path;
 
 use wrac_xtask::{WracWorkspace, XtaskConfig};
 
-mod cli;
-
 fn main() -> wrac_xtask::Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -15,5 +13,5 @@ fn main() -> wrac_xtask::Result<()> {
         target_namespace: "wrac-plugins".to_string(),
         root,
     })?;
-    workspace.run(cli::command())
+    workspace.run(wrac_xtask::command_from_args())
 }
