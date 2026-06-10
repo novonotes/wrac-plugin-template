@@ -269,14 +269,16 @@ fn template_placeholder_violations(
         &metadata.auv2_manufacturer_code,
         "YrCo",
     );
-    check_template_placeholder(
-        &mut violations,
-        &subject,
-        location,
-        "package.metadata.wrac.aax_manufacturer_id",
-        &metadata.aax_manufacturer_id,
-        "YrCo",
-    );
+    if let Some(aax_manufacturer_id) = metadata.aax_manufacturer_id.as_ref() {
+        check_template_placeholder(
+            &mut violations,
+            &subject,
+            location,
+            "package.metadata.wrac.aax_manufacturer_id",
+            aax_manufacturer_id,
+            "YrCo",
+        );
+    }
     check_template_placeholder(
         &mut violations,
         &subject,
@@ -358,14 +360,16 @@ fn template_placeholder_violations(
             &plugin.auv2_subtype,
             "WtGn",
         );
-        check_template_placeholder(
-            &mut violations,
-            &subject,
-            location,
-            "package.metadata.wrac.plugins.aax_product_id",
-            &plugin.aax_product_id,
-            "WtGn",
-        );
+        if let Some(aax_product_id) = plugin.aax_product_id.as_ref() {
+            check_template_placeholder(
+                &mut violations,
+                &subject,
+                location,
+                "package.metadata.wrac.plugins.aax_product_id",
+                aax_product_id,
+                "WtGn",
+            );
+        }
         for stem_config in &plugin.aax_stem_configs {
             check_template_placeholder(
                 &mut violations,
@@ -560,8 +564,7 @@ mod tests {
     use std::path::Path;
 
     use crate::metadata::{
-        AaxStemConfigMetadata, DisabledValidationRule, PluginMetadata, PluginProductMetadata,
-        ValidationMetadata,
+        DisabledValidationRule, PluginMetadata, PluginProductMetadata, ValidationMetadata,
     };
     use crate::targets::{PluginFormat, ValidateTarget};
 
@@ -583,7 +586,7 @@ mod tests {
             repository: Some("https://github.com/example/test-plugin".to_string()),
             company_name: "Example".to_string(),
             auv2_manufacturer_code: "ExCo".to_string(),
-            aax_manufacturer_id: "ExCo".to_string(),
+            aax_manufacturer_id: None,
             bundle_name: "Test Plugin".to_string(),
             bundle_identifier: "com.example.test-plugin".to_string(),
             homepage_url: "https://example.com/test-plugin".to_string(),
@@ -605,14 +608,9 @@ mod tests {
                 standalone_name: "Test Plugin Standalone".to_string(),
                 auv2_type: "aufx".to_string(),
                 auv2_subtype: "TstP".to_string(),
-                aax_categories: vec!["effect".to_string()],
-                aax_product_id: "TstP".to_string(),
-                aax_stem_configs: vec![AaxStemConfigMetadata {
-                    name: "Stereo".to_string(),
-                    input: "stereo".to_string(),
-                    output: "stereo".to_string(),
-                    plugin_id: "TstS".to_string(),
-                }],
+                aax_categories: None,
+                aax_product_id: None,
+                aax_stem_configs: Vec::new(),
             }],
             validation: ValidationMetadata::default(),
         }

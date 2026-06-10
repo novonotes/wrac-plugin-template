@@ -1,8 +1,11 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use crate::Result;
 
@@ -53,6 +56,92 @@ pub(crate) fn run(command: &mut Command) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+pub(crate) fn run_with_optional_xcbeautify(command: &mut Command) -> Result<()> {
+    if !command_exists("xcbeautify") {
+        return run(command);
+    }
+
+    println!();
+    println!("========== Running command ==========");
+    println!("$ {} 2>&1 | xcbeautify", format_command(command));
+
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("failed to capture command stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("failed to capture command stderr")?;
+
+    let mut formatter = Command::new("xcbeautify").stdin(Stdio::piped()).spawn()?;
+    let formatter_stdin = formatter
+        .stdin
+        .take()
+        .ok_or("failed to open xcbeautify stdin")?;
+    let formatter_stdin = Arc::new(Mutex::new(formatter_stdin));
+
+    let stdout_thread = pipe_to_formatter(stdout, Arc::clone(&formatter_stdin));
+    let stderr_thread = pipe_to_formatter(stderr, Arc::clone(&formatter_stdin));
+
+    let status = child.wait()?;
+    stdout_thread
+        .join()
+        .map_err(|_| "stdout pipe thread panicked")??;
+    stderr_thread
+        .join()
+        .map_err(|_| "stderr pipe thread panicked")??;
+    drop(formatter_stdin);
+
+    let formatter_status = formatter.wait()?;
+    if !status.success() {
+        return Err(format!(
+            "command failed with status {status}: {}",
+            format_command(command)
+        )
+        .into());
+    }
+    if !formatter_status.success() {
+        return Err(format!("xcbeautify failed with status {formatter_status}").into());
+    }
+    Ok(())
+}
+
+fn command_exists(command: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", &format!("command -v {command} >/dev/null 2>&1")])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn pipe_to_formatter<R>(
+    mut reader: R,
+    formatter_stdin: Arc<Mutex<std::process::ChildStdin>>,
+) -> thread::JoinHandle<io::Result<()>>
+where
+    R: io::Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0; 8192];
+        loop {
+            let bytes_read = io::Read::read(&mut reader, &mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            let mut writer = formatter_stdin
+                .lock()
+                .map_err(|_| io::Error::other("xcbeautify stdin lock poisoned"))?;
+            writer.write_all(&buffer[..bytes_read])?;
+        }
+        Ok(())
+    })
 }
 
 pub(crate) fn run_output(command: &mut Command) -> Result<Output> {

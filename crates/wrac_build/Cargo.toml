@@ -1,14 +1,14 @@
 [package]
-name = "wrac_host_context"
+name = "wrac_build"
 version = "0.1.0"
 edition = "2024"
-description = "Host and wrapper-format detection for WRAC plugins"
+description = "Build script helpers for WRAC plugins"
 license = "MIT"
 repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
-plist = "1.9.0"
+zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [lints.rust]
 unreachable_pub = "deny"

@@ -2,6 +2,7 @@
 members = [
     "plugins/wrac-gain/src-plugin",
     "xtask",
+    "crates/wrac_build",
     "crates/wrac_clap_adapter",
     "crates/wrac_host_context",
     "crates/wrac_log",

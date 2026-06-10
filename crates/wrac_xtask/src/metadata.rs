@@ -14,7 +14,7 @@ pub(crate) struct PluginMetadata {
     pub(crate) repository: Option<String>,
     pub(crate) company_name: String,
     pub(crate) auv2_manufacturer_code: String,
-    pub(crate) aax_manufacturer_id: String,
+    pub(crate) aax_manufacturer_id: Option<String>,
     pub(crate) bundle_name: String,
     pub(crate) bundle_identifier: String,
     pub(crate) homepage_url: String,
@@ -59,8 +59,9 @@ pub(crate) struct PluginProductMetadata {
     pub(crate) standalone_name: String,
     pub(crate) auv2_type: String,
     pub(crate) auv2_subtype: String,
-    pub(crate) aax_categories: Vec<String>,
-    pub(crate) aax_product_id: String,
+    pub(crate) aax_categories: Option<Vec<String>>,
+    pub(crate) aax_product_id: Option<String>,
+    #[serde(default)]
     pub(crate) aax_stem_configs: Vec<AaxStemConfigMetadata>,
 }
 
@@ -135,7 +136,6 @@ impl PluginMetadata {
         validate_required("package.version", &self.version)?;
         validate_required("package.metadata.wrac.company_name", &self.company_name)?;
         validate_four_ascii("auv2_manufacturer_code", &self.auv2_manufacturer_code)?;
-        validate_four_ascii("aax_manufacturer_id", &self.aax_manufacturer_id)?;
         validate_required("package.metadata.wrac.bundle_name", &self.bundle_name)?;
         validate_required(
             "package.metadata.wrac.bundle_identifier",
@@ -161,6 +161,13 @@ impl PluginMetadata {
                 )
                 .into());
             }
+        }
+        let supports_aax = supported_formats.contains(&PluginFormat::Aax);
+        if supports_aax {
+            let Some(aax_manufacturer_id) = self.aax_manufacturer_id.as_ref() else {
+                return Err("package.metadata.wrac.aax_manufacturer_id is required when supported_formats contains aax".into());
+            };
+            validate_four_ascii("aax_manufacturer_id", aax_manufacturer_id)?;
         }
         if self.plugins.is_empty() {
             return Err("package.metadata.wrac.plugins must contain at least one plugin".into());
@@ -195,41 +202,52 @@ impl PluginMetadata {
             )?;
             validate_four_ascii("auv2_type", &plugin.auv2_type)?;
             validate_four_ascii("auv2_subtype", &plugin.auv2_subtype)?;
-            if plugin.aax_categories.is_empty() {
-                return Err(
-                    "package.metadata.wrac.plugins.aax_categories must not be empty".into(),
-                );
-            }
-            for category in &plugin.aax_categories {
-                validate_aax_category(category)?;
-            }
-            validate_four_ascii("plugins.aax_product_id", &plugin.aax_product_id)?;
-            if plugin.aax_stem_configs.is_empty() {
-                return Err(
-                    "package.metadata.wrac.plugins.aax_stem_configs must not be empty".into(),
-                );
-            }
-            let mut aax_plugin_ids = HashSet::new();
-            for stem_config in &plugin.aax_stem_configs {
-                validate_required(
-                    "package.metadata.wrac.plugins.aax_stem_configs.name",
-                    &stem_config.name,
-                )?;
-                validate_aax_stem_format(
-                    "package.metadata.wrac.plugins.aax_stem_configs.input",
-                    &stem_config.input,
-                )?;
-                validate_aax_stem_format(
-                    "package.metadata.wrac.plugins.aax_stem_configs.output",
-                    &stem_config.output,
-                )?;
-                validate_four_ascii("plugins.aax_stem_configs.plugin_id", &stem_config.plugin_id)?;
-                if !aax_plugin_ids.insert(stem_config.plugin_id.as_str()) {
-                    return Err(format!(
-                        "duplicate package.metadata.wrac.plugins.aax_stem_configs plugin_id: {}",
-                        stem_config.plugin_id
-                    )
-                    .into());
+            if supports_aax {
+                let Some(aax_categories) = plugin.aax_categories.as_ref() else {
+                    return Err("package.metadata.wrac.plugins.aax_categories is required when supported_formats contains aax".into());
+                };
+                if aax_categories.is_empty() {
+                    return Err(
+                        "package.metadata.wrac.plugins.aax_categories must not be empty".into(),
+                    );
+                }
+                for category in aax_categories {
+                    validate_aax_category(category)?;
+                }
+                let Some(aax_product_id) = plugin.aax_product_id.as_ref() else {
+                    return Err("package.metadata.wrac.plugins.aax_product_id is required when supported_formats contains aax".into());
+                };
+                validate_four_ascii("plugins.aax_product_id", aax_product_id)?;
+                if plugin.aax_stem_configs.is_empty() {
+                    return Err(
+                        "package.metadata.wrac.plugins.aax_stem_configs must not be empty".into(),
+                    );
+                }
+                let mut aax_plugin_ids = HashSet::new();
+                for stem_config in &plugin.aax_stem_configs {
+                    validate_required(
+                        "package.metadata.wrac.plugins.aax_stem_configs.name",
+                        &stem_config.name,
+                    )?;
+                    validate_aax_stem_format(
+                        "package.metadata.wrac.plugins.aax_stem_configs.input",
+                        &stem_config.input,
+                    )?;
+                    validate_aax_stem_format(
+                        "package.metadata.wrac.plugins.aax_stem_configs.output",
+                        &stem_config.output,
+                    )?;
+                    validate_four_ascii(
+                        "plugins.aax_stem_configs.plugin_id",
+                        &stem_config.plugin_id,
+                    )?;
+                    if !aax_plugin_ids.insert(stem_config.plugin_id.as_str()) {
+                        return Err(format!(
+                            "duplicate package.metadata.wrac.plugins.aax_stem_configs plugin_id: {}",
+                            stem_config.plugin_id
+                        )
+                        .into());
+                    }
                 }
             }
             if !plugin_ids.insert(plugin.plugin_id.as_str()) {
@@ -362,7 +380,7 @@ struct PackageMetadata {
 struct WracMetadata {
     company_name: String,
     auv2_manufacturer_code: String,
-    aax_manufacturer_id: String,
+    aax_manufacturer_id: Option<String>,
     bundle_name: String,
     bundle_identifier: String,
     homepage_url: String,

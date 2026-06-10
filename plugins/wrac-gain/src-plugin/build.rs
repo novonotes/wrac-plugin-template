@@ -7,21 +7,14 @@
 
 use std::collections::HashSet;
 use std::env;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use zip::CompressionMethod;
-use zip::ZipWriter;
-use zip::write::SimpleFileOptions;
+use wrac_build::{FrontendBundleConfig, build_frontend_bundle};
 
 fn main() {
-    // Tell Cargo to rebuild (regenerate the zip) whenever frontend source files change.
-    println!("cargo:rerun-if-changed=../src-gui/index.html");
-    println!("cargo:rerun-if-changed=../src-gui/src");
-    println!("cargo:rerun-if-changed=../src-gui/package.json");
-    println!("cargo:rerun-if-changed=../src-gui/vite.config.ts");
     println!("cargo:rerun-if-changed=Cargo.toml");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -33,28 +26,25 @@ fn main() {
     let metadata = read_wrac_metadata(&manifest_path).expect("failed to read WRAC metadata");
     write_plugin_products(&metadata, &out_dir)
         .expect("failed to write WRAC plugin product metadata");
-    // Skip zip creation for debug builds (the Vite dev server is used instead).
-    if env::var("PROFILE").ok().as_deref() != Some("release") {
-        return;
-    }
 
     let gui_dist_dir = manifest_dir
         .parent()
         .expect("src-plugin must have a parent directory")
         .join("src-gui")
         .join("dist");
-    let out_zip =
-        PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("wrac_gain_plugin_gui.zip");
-
-    // Fail early if `npm run build` was not run before the release build.
-    if !gui_dist_dir.exists() {
-        panic!(
-            "frontend build output was not found at {}. Run `npm install && npm run build` in src-gui before release builds.",
-            gui_dist_dir.display()
-        );
-    }
-
-    create_zip(&gui_dist_dir, &out_zip).expect("failed to create frontend zip");
+    build_frontend_bundle(FrontendBundleConfig {
+        dist_dir: gui_dist_dir,
+        output_file_name: "wrac_gain_plugin_gui.zip",
+        rerun_if_changed: &[
+            "../src-gui/index.html",
+            "../src-gui/src",
+            "../src-gui/package.json",
+            "../src-gui/vite.config.ts",
+        ],
+        missing_dist_build_command:
+            "Run `npm install && npm run build` in src-gui before release builds.",
+    })
+    .expect("failed to create frontend zip");
 }
 
 fn write_plugin_products(metadata: &WracMetadata, out_dir: &Path) -> io::Result<()> {
@@ -586,50 +576,4 @@ fn validate_unique<'a>(key: &str, value: &'a str, seen: &mut HashSet<&'a str>) -
             format!("package.metadata.wrac.plugins.{key} must be unique: {value}"),
         ))
     }
-}
-
-/// Compresses everything under `src_dir` into a deflate-compressed zip and writes it to `out_zip`.
-fn create_zip(src_dir: &Path, out_zip: &Path) -> io::Result<()> {
-    let file = File::create(out_zip)?;
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-
-    add_directory_contents(src_dir, src_dir, &mut zip, options)?;
-    zip.finish()?;
-    Ok(())
-}
-
-/// Recursively walks a directory and adds its contents to the zip.
-///
-/// Entries are sorted by path before processing to make the build deterministic
-/// (same inputs always produce the same output).
-fn add_directory_contents(
-    root: &Path,
-    current: &Path,
-    zip: &mut ZipWriter<File>,
-    options: SimpleFileOptions,
-) -> io::Result<()> {
-    let mut entries = fs::read_dir(current)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-
-    for entry in entries {
-        let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .expect("walked path must be inside root");
-        // Normalise internal zip paths to the OS-independent `/` separator (Windows fix).
-        let zip_path = relative.to_string_lossy().replace('\\', "/");
-
-        if path.is_dir() {
-            zip.add_directory(format!("{zip_path}/"), options)?;
-            add_directory_contents(root, &path, zip, options)?;
-            continue;
-        }
-
-        zip.start_file(zip_path, options)?;
-        let bytes = fs::read(&path)?;
-        zip.write_all(&bytes)?;
-    }
-
-    Ok(())
 }

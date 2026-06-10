@@ -16,7 +16,7 @@ use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target, ValidateTarget};
 use crate::util::{
     common_program_files, copy_path, ensure_exists, env_value_or, home_dir, local_app_data, on_off,
-    remove_if_exists, run, run_output,
+    remove_if_exists, run, run_output, run_with_optional_xcbeautify,
 };
 use crate::validation::validate_wrac_rules;
 
@@ -507,11 +507,17 @@ pub(crate) fn build_wrapper_target(
             // Suppress them here so template users are not pulled into wrapper SDK warnings.
             build_cmd.args([
                 "--",
+                "-quiet",
                 "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-unknown-warning-option -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32 -Wno-perf-constraint-implies-noexcept",
             ]);
         }
 
-        run(build_cmd.current_dir(&ctx.root))?;
+        let build_cmd = build_cmd.current_dir(&ctx.root);
+        if ctx.platform == Platform::Macos {
+            run_with_optional_xcbeautify(build_cmd)?;
+        } else {
+            run(build_cmd)?;
+        }
     }
 
     match target {
