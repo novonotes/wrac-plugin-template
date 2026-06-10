@@ -1221,6 +1221,7 @@ mod tests {
                     version: None,
                 },
                 plugin_format,
+                system: wrac_host_context::SystemContext::detect(),
             };
 
             let expected = if cfg!(target_os = "macos") {

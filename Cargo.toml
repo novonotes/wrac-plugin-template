@@ -13,6 +13,7 @@ resolver = "2"
 [workspace.dependencies]
 clap-sys = "0.5.0"
 novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
+plist = "1.9.0"
 run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
 wrac_clap_adapter = { path = "crates/wrac_clap_adapter" }
 wrac_host_context = { path = "crates/wrac_host_context" }

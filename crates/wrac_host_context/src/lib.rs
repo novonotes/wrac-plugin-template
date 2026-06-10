@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;
@@ -12,6 +12,7 @@ use std::ffi::CStr;
 pub struct HostContext {
     pub host: DetectedHost,
     pub plugin_format: PluginFormat,
+    pub system: SystemContext,
 }
 
 impl HostContext {
@@ -19,6 +20,7 @@ impl HostContext {
         Self {
             host: detect_host(),
             plugin_format: PluginFormat::detect(clap_host_name.unwrap_or_default()),
+            system: SystemContext::detect(),
         }
     }
 
@@ -28,6 +30,28 @@ impl HostContext {
     /// passed during plugin instance creation instead of duplicating process-name checks.
     pub fn is_validation_or_scan_host(&self) -> bool {
         self.host.is_validation_or_scan_host()
+    }
+}
+
+/// Operating-system context captured outside the plugin entry DSO lifecycle.
+///
+/// Products use this for diagnostics and support bundles. Keeping it in `HostContext`
+/// lets plugin entry init stay lightweight while preserving the environment details
+/// that are useful once a real plugin instance is created.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SystemContext {
+    pub os: &'static str,
+    pub arch: &'static str,
+    pub os_version: Option<String>,
+}
+
+impl SystemContext {
+    pub fn detect() -> Self {
+        Self {
+            os: std::env::consts::OS,
+            arch: std::env::consts::ARCH,
+            os_version: cached_os_version(),
+        }
     }
 }
 
@@ -221,6 +245,101 @@ fn file_name_or_empty(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+fn cached_os_version() -> Option<String> {
+    static OS_VERSION: OnceLock<Option<String>> = OnceLock::new();
+    OS_VERSION.get_or_init(detect_os_version).clone()
+}
+
+fn detect_os_version() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        detect_macos_version()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        detect_windows_version()
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        detect_unix_version()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn detect_macos_version() -> Option<String> {
+    let plist = plist::Value::from_file("/System/Library/CoreServices/SystemVersion.plist").ok()?;
+    plist_string_for_key(&plist, "ProductVersion")
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn plist_string_for_key(plist: &plist::Value, key: &str) -> Option<String> {
+    let value = plist
+        .as_dictionary()
+        .and_then(|dictionary| dictionary.get(key))
+        .and_then(plist::Value::as_string)?;
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+#[cfg(target_os = "windows")]
+#[repr(C)]
+struct RtlOsVersionInfoW {
+    os_version_info_size: u32,
+    major_version: u32,
+    minor_version: u32,
+    build_number: u32,
+    platform_id: u32,
+    csd_version: [u16; 128],
+}
+
+#[cfg(target_os = "windows")]
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn RtlGetVersion(version_info: *mut RtlOsVersionInfoW) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_version() -> Option<String> {
+    let mut info = RtlOsVersionInfoW {
+        os_version_info_size: std::mem::size_of::<RtlOsVersionInfoW>() as u32,
+        major_version: 0,
+        minor_version: 0,
+        build_number: 0,
+        platform_id: 0,
+        csd_version: [0; 128],
+    };
+    let status = unsafe { RtlGetVersion(&mut info) };
+    (status >= 0).then(|| {
+        format!(
+            "{}.{}.{}",
+            info.major_version, info.minor_version, info.build_number
+        )
+    })
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn detect_unix_version() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    os_release_value(&os_release, "PRETTY_NAME")
+        .or_else(|| os_release_value(&os_release, "VERSION_ID"))
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn os_release_value(source: &str, key: &str) -> Option<String> {
+    for line in source.lines() {
+        let Some((candidate_key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if candidate_key != key {
+            continue;
+        }
+        let value = value.trim().trim_matches('"').to_string();
+        return (!value.is_empty()).then_some(value);
+    }
+    None
 }
 
 fn contains_ignore_case(value: &str, pattern: &str) -> bool {
@@ -895,5 +1014,30 @@ mod tests {
         let detected = detect_host_from_path("/Applications/SomeHost.app/Contents/MacOS/SomeHost");
         assert_eq!(detected.display_name, "Unknown");
         assert_eq!(detected.family, HostFamily::Unknown);
+    }
+
+    #[test]
+    fn reads_os_version_from_plist_value() {
+        let plist = plist::Value::Dictionary(plist::Dictionary::from_iter([(
+            "ProductVersion".to_string(),
+            plist::Value::String("26.4.1".to_string()),
+        )]));
+
+        assert_eq!(
+            plist_string_for_key(&plist, "ProductVersion"),
+            Some("26.4.1".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_or_empty_os_version_is_unknown() {
+        let missing = plist::Value::Dictionary(plist::Dictionary::new());
+        assert_eq!(plist_string_for_key(&missing, "ProductVersion"), None);
+
+        let empty = plist::Value::Dictionary(plist::Dictionary::from_iter([(
+            "ProductVersion".to_string(),
+            plist::Value::String(String::new()),
+        )]));
+        assert_eq!(plist_string_for_key(&empty, "ProductVersion"), None);
     }
 }

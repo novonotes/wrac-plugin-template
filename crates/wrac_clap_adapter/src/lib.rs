@@ -25,7 +25,7 @@ pub use api::{
     PluginCoreContext, PluginError, PluginFormat, PluginGuiExtension, PluginLatencyExtension,
     PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension, PluginRenderMode,
     PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus,
-    Processor, State,
+    Processor, State, SystemContext,
 };
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,

@@ -41,4 +41,6 @@ pub use types::{
     GuiResizeHints, GuiSize, HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo,
     ParamValueEvent, PluginRenderMode, State,
 };
-pub use wrac_host_context::{DetectedHost, HostContext, HostFamily, HostVersion, PluginFormat};
+pub use wrac_host_context::{
+    DetectedHost, HostContext, HostFamily, HostVersion, PluginFormat, SystemContext,
+};
