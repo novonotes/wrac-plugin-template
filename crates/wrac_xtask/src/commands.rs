@@ -1096,7 +1096,7 @@ fn validate_vst3_component_ids(
         .into());
     }
 
-    println!("VST3 component IDs match package.metadata.wrac.plugins.vst3_component_id");
+    println!("VST3 component IDs match plugins.vst3_component_id");
     Ok(())
 }
 

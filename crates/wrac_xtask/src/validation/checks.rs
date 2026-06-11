@@ -257,7 +257,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.company_name",
+        "bundle.company_name",
         &metadata.company_name,
         "Your Company",
     );
@@ -265,7 +265,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.auv2_manufacturer_code",
+        "bundle.auv2_manufacturer_code",
         &metadata.auv2_manufacturer_code,
         "YrCo",
     );
@@ -274,7 +274,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.aax_manufacturer_id",
+            "bundle.aax_manufacturer_id",
             aax_manufacturer_id,
             "YrCo",
         );
@@ -283,7 +283,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.bundle_identifier",
+        "bundle.bundle_identifier",
         &metadata.bundle_identifier,
         "com.your-company",
     );
@@ -291,7 +291,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.homepage_url",
+        "bundle.homepage_url",
         &metadata.homepage_url,
         "example.com",
     );
@@ -299,7 +299,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.manual_url",
+        "bundle.manual_url",
         &metadata.manual_url,
         "example.com",
     );
@@ -307,7 +307,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.support_url",
+        "bundle.support_url",
         &metadata.support_url,
         "example.com",
     );
@@ -315,7 +315,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.copyright",
+        "bundle.copyright",
         &metadata.copyright,
         "Your Company",
     );
@@ -323,7 +323,7 @@ fn template_placeholder_violations(
         &mut violations,
         &subject,
         location,
-        "package.metadata.wrac.bundle_name",
+        "bundle.bundle_name",
         &metadata.bundle_name,
         "WRAC Gain",
     );
@@ -332,7 +332,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.plugin_id",
+            "plugins.plugin_id",
             &plugin.plugin_id,
             "com.your-company",
         );
@@ -340,7 +340,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.plugin_name",
+            "plugins.plugin_name",
             &plugin.plugin_name,
             "WRAC Gain",
         );
@@ -348,7 +348,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.standalone_name",
+            "plugins.standalone_name",
             &plugin.standalone_name,
             "WRAC Gain",
         );
@@ -356,7 +356,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.auv2_subtype",
+            "plugins.auv2_subtype",
             &plugin.auv2_subtype,
             "WtGn",
         );
@@ -365,7 +365,7 @@ fn template_placeholder_violations(
                 &mut violations,
                 &subject,
                 location,
-                "package.metadata.wrac.plugins.aax_product_id",
+                "plugins.aax_product_id",
                 aax_product_id,
                 "WtGn",
             );
@@ -375,7 +375,7 @@ fn template_placeholder_violations(
                 &mut violations,
                 &subject,
                 location,
-                "package.metadata.wrac.plugins.aax_stem_configs.plugin_id",
+                "plugins.aax_stem_configs.plugin_id",
                 &stem_config.plugin_id,
                 "WtG",
             );
@@ -384,7 +384,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.vst3_component_id",
+            "plugins.vst3_component_id",
             &plugin.vst3_component_id,
             "822011ca-37ec-5cef-92d7-ec7e67207195",
         );
@@ -392,7 +392,7 @@ fn template_placeholder_violations(
             &mut violations,
             &subject,
             location,
-            "package.metadata.wrac.plugins.vst3_component_id",
+            "plugins.vst3_component_id",
             &plugin.vst3_component_id,
             "ffff664c-b963-53e6-87cc-2a7ceb29674b",
         );
@@ -563,10 +563,9 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use crate::metadata::{
-        DisabledValidationRule, PluginMetadata, PluginProductMetadata, ValidationMetadata,
-    };
+    use crate::metadata::{PluginMetadata, PluginProductMetadata, ValidationMetadata};
     use crate::targets::{PluginFormat, ValidateTarget};
+    use wrac_manifest::DisabledValidationRule;
 
     use super::super::clap_schema::{ParameterSchema, PluginSchema};
     use super::*;

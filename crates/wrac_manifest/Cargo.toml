@@ -1,15 +1,15 @@
 [package]
-name = "wrac_build"
+name = "wrac_manifest"
 version = "0.1.0"
 edition = "2024"
-description = "Build script helpers for WRAC plugins"
+description = "Manifest parser and conversion helpers for WRAC plugins"
 license = "MIT"
 repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
-wrac_manifest = { workspace = true }
-zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [lints.rust]
 unreachable_pub = "deny"

@@ -37,7 +37,7 @@ use crate::audio::WracGainAudioProcessor;
 use crate::gui::create_gui_integration;
 use crate::state::{ProjectStateStore, SharedState};
 
-// Generated from [package.metadata.wrac] in src-plugin/Cargo.toml. The manifest is
+// Generated from wrac-plugin.toml. The manifest is
 // the single source of truth for product identity across descriptors, GUI metadata,
 // wrapper arguments, AUv2 registration, WebView data dirs, and logs.
 include!(concat!(env!("OUT_DIR"), "/wrac_plugin_products.rs"));

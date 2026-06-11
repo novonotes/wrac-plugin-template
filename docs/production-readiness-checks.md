@@ -11,7 +11,7 @@ These checks are opinionated NovoNotes release-policy checks for commercial plug
 Rules can be disabled by rule ID in the plugin crate manifest. Every disabled rule must include a non-empty `reason`.
 
 ```toml
-[package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
+[validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "This product does not support Fender Studio Pro generic editor workflows."
 ```
 

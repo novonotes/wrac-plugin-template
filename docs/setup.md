@@ -52,8 +52,8 @@ AAX builds additionally require the private AAX SDK. Put local AAX paths in `.en
 
 ### 2. Configure Plugin Identity
 
-Plugin identity is centralized in the plugin package manifest, initially `plugins/wrac-gain/src-plugin/Cargo.toml`.
-Edit the commented `[package.metadata.wrac]` and `[[package.metadata.wrac.plugins]]` sections there instead of copying a separate manifest sample from this guide.
+Plugin identity is centralized in `plugins/wrac-gain/src-plugin/wrac-plugin.toml`.
+Edit that manifest instead of duplicating host-visible IDs in Rust code or Cargo metadata.
 
 > **Important:** The plugin ID must be globally unique. It cannot be changed once published.
 > AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
@@ -108,7 +108,7 @@ cargo xtask install
 
 `cargo xtask install` expands the selected plugin formats into a task graph before installing them.
 Use `-p/--package` with the Cargo package name when the workspace contains multiple WRAC plugin packages.
-Default plugin formats come from `package.metadata.wrac.supported_formats`.
+Default plugin formats come from `wrac-plugin.toml` `supported_formats`.
 `cargo xtask build` uses the same plugin-format defaults and also builds the development standalone app.
 `cargo xtask validate` uses the same plugin-format defaults and builds any artifacts required by the selected validators.
 `cargo xtask install --scope=default` installs CLAP/VST3/AU to user-local paths and AAX to the system-wide Avid plugin folder.
