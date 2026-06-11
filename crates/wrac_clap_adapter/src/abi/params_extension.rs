@@ -203,7 +203,7 @@ unsafe extern "C" fn params_flush(
         let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             return;
         };
-        let events = unsafe { crate::ProcessEvents::from_raw(in_events, out_events) };
+        let events = unsafe { crate::EventLists::from_raw(in_events, out_events) };
         let Some(result) = instance.with_processor_mut(|active| {
             if let Some(active) = active {
                 return active.flush_params(crate::ParamFlushContext { events });

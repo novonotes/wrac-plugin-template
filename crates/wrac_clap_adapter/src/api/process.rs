@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crate::PluginResult;
-use crate::events::{ProcessEvents, TransportEvent};
+use crate::events::{EventLists, TransportEvent};
 use crate::process_buffer::AudioProcessBuffer;
 
 /// Processing object used while the CLAP plugin is active.
@@ -36,12 +36,12 @@ pub trait InactiveProcessor: Send {
 pub struct ProcessContext<'a> {
     pub frames_count: u32,
     pub audio: AudioProcessBuffer<'a>,
-    pub events: ProcessEvents<'a>,
+    pub events: EventLists<'a>,
     pub transport: Option<TransportEvent>,
 }
 
 pub struct ParamFlushContext<'a> {
-    pub events: ProcessEvents<'a>,
+    pub events: EventLists<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]

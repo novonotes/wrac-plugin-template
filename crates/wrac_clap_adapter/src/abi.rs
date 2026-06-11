@@ -858,8 +858,7 @@ unsafe extern "C" fn plugin_process(
             return CLAP_PROCESS_SLEEP;
         }
         let process = unsafe { &*process };
-        let events =
-            unsafe { crate::ProcessEvents::from_raw(process.in_events, process.out_events) };
+        let events = unsafe { crate::EventLists::from_raw(process.in_events, process.out_events) };
         let audio = match unsafe { audio_buffers(process) } {
             Ok(audio) => audio,
             Err(error) => {
