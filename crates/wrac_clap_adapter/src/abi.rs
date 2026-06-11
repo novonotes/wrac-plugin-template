@@ -285,6 +285,29 @@ impl PluginInstanceState {
         self.with_processor_mut(|_| unsafe { &mut *self.inactive_processor.get() }.take())
     }
 
+    fn with_inactive_processor_mut<R>(
+        &self,
+        f: impl FnOnce(Option<&mut Box<dyn InactiveProcessor>>) -> R,
+    ) -> Option<R> {
+        if self
+            .processor_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return None;
+        }
+
+        struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+        impl Drop for ProcessorBusyGuard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+
+        let _guard = ProcessorBusyGuard(&self.processor_busy);
+        Some(f(unsafe { &mut *self.inactive_processor.get() }.as_mut()))
+    }
+
     fn put_processor_blocking(&self, processor: Box<dyn ActiveProcessor>) {
         let mut processor = Some(processor);
         loop {
@@ -332,31 +355,6 @@ impl PluginInstanceState {
                 drop(old);
                 return;
             }
-            std::thread::yield_now();
-        }
-    }
-
-    fn with_inactive_processor_mut_blocking<R>(
-        &self,
-        f: impl FnOnce(Option<&mut Box<dyn InactiveProcessor>>) -> R,
-    ) -> R {
-        loop {
-            if self
-                .processor_busy
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_ok()
-            {
-                struct ProcessorBusyGuard<'a>(&'a AtomicBool);
-                impl Drop for ProcessorBusyGuard<'_> {
-                    fn drop(&mut self) {
-                        self.0.store(false, Ordering::Release);
-                    }
-                }
-                let _guard = ProcessorBusyGuard(&self.processor_busy);
-                return f(unsafe { &mut *self.inactive_processor.get() }.as_mut());
-            }
-            // Inactive params.flush is a control-thread callback. Waiting here prevents
-            // a concurrent inactive flush from dropping host-provided parameter events.
             std::thread::yield_now();
         }
     }
