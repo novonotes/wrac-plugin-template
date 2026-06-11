@@ -197,7 +197,11 @@ pub(crate) struct BuildArgs {
     )]
     pub(crate) target: Vec<Target>,
 
-    #[arg(skip)]
+    #[arg(
+        long = "plugin-id",
+        value_name = "PLUGIN_ID",
+        help = "Standalone plugin ID to build when --target includes standalone."
+    )]
     pub(crate) standalone_plugin_id: Option<String>,
 }
 
