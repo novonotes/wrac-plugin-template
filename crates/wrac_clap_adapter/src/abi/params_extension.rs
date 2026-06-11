@@ -204,19 +204,44 @@ unsafe extern "C" fn params_flush(
             return;
         };
         let events = unsafe { crate::EventLists::from_raw(in_events, out_events) };
-        let Some(result) = instance.with_processor_mut(|active| {
-            if let Some(active) = active {
-                return active.flush_params(crate::ParamFlushContext { events });
-            }
-            let inactive = unsafe { &mut *instance.inactive_processor.get() };
-            let Some(inactive) = inactive.as_mut() else {
-                wrac_log::rtwarn!("params.flush: no active or inactive processor is available");
-                return Ok(());
+        let result = if instance.is_processor_active() {
+            let Some(result) = instance.with_processor_mut(|active| {
+                let Some(active) = active else {
+                    wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
+                    return Ok(());
+                };
+                active.flush_params(crate::ParamFlushContext { events })
+            }) else {
+                wrac_log::rtwarn!("params.flush: active processor is busy");
+                return;
             };
-            inactive.flush_params(crate::ParamFlushContext { events })
-        }) else {
-            wrac_log::rtwarn!("params.flush: processor is busy");
-            return;
+            result
+        } else {
+            let _guard = instance.enter_lifecycle_blocking();
+            if instance.is_processor_active() {
+                drop(_guard);
+                let Some(result) = instance.with_processor_mut(|active| {
+                    let Some(active) = active else {
+                        wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
+                        return Ok(());
+                    };
+                    active.flush_params(crate::ParamFlushContext { events })
+                }) else {
+                    wrac_log::rtwarn!("params.flush: active processor is busy");
+                    return;
+                };
+                result
+            } else {
+                instance.with_inactive_processor_mut_blocking(|inactive| {
+                    let Some(inactive) = inactive else {
+                        wrac_log::rtwarn!(
+                            "params.flush: no active or inactive processor is available"
+                        );
+                        return Ok(());
+                    };
+                    inactive.flush_params(crate::ParamFlushContext { events })
+                })
+            }
         };
         if let Err(error) = result {
             wrac_log::rtwarn!("params.flush: processor failed: {error}");

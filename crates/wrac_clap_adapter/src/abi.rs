@@ -117,6 +117,7 @@ pub(crate) struct PluginInstanceState {
     inactive_processor: UnsafeCell<Option<Box<dyn InactiveProcessor>>>,
     processor: UnsafeCell<Option<Box<dyn ActiveProcessor>>>,
     processor_busy: AtomicBool,
+    processor_active: AtomicBool,
     lifecycle_busy: AtomicBool,
 }
 
@@ -231,6 +232,7 @@ impl PluginInstanceState {
             inactive_processor: UnsafeCell::new(Some(inactive_processor)),
             processor: UnsafeCell::new(None),
             processor_busy: AtomicBool::new(false),
+            processor_active: AtomicBool::new(false),
             lifecycle_busy: AtomicBool::new(false),
         }))
     }
@@ -270,7 +272,13 @@ impl PluginInstanceState {
     }
 
     fn try_take_processor(&self) -> Option<Option<Box<dyn ActiveProcessor>>> {
-        self.with_processor_mut(|_| unsafe { &mut *self.processor.get() }.take())
+        self.with_processor_mut(|_| {
+            let processor = unsafe { &mut *self.processor.get() }.take();
+            if processor.is_some() {
+                self.processor_active.store(false, Ordering::Release);
+            }
+            processor
+        })
     }
 
     fn try_take_inactive_processor(&self) -> Option<Option<Box<dyn InactiveProcessor>>> {
@@ -294,6 +302,7 @@ impl PluginInstanceState {
                 let _guard = ProcessorBusyGuard(&self.processor_busy);
                 let storage = unsafe { &mut *self.processor.get() };
                 let old = storage.replace(processor.take().expect("stored once"));
+                self.processor_active.store(true, Ordering::Release);
                 drop(old);
                 return;
             }
@@ -325,6 +334,35 @@ impl PluginInstanceState {
             }
             std::thread::yield_now();
         }
+    }
+
+    fn with_inactive_processor_mut_blocking<R>(
+        &self,
+        f: impl FnOnce(Option<&mut Box<dyn InactiveProcessor>>) -> R,
+    ) -> R {
+        loop {
+            if self
+                .processor_busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+                impl Drop for ProcessorBusyGuard<'_> {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::Release);
+                    }
+                }
+                let _guard = ProcessorBusyGuard(&self.processor_busy);
+                return f(unsafe { &mut *self.inactive_processor.get() }.as_mut());
+            }
+            // Inactive params.flush is a control-thread callback. Waiting here prevents
+            // a concurrent inactive flush from dropping host-provided parameter events.
+            std::thread::yield_now();
+        }
+    }
+
+    pub(crate) fn is_processor_active(&self) -> bool {
+        self.processor_active.load(Ordering::Acquire)
     }
 
     fn take_processor_blocking(&self) -> Option<Box<dyn ActiveProcessor>> {
