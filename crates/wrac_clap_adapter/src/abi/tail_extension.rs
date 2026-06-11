@@ -1,7 +1,7 @@
 use clap_sys::ext::tail::clap_plugin_tail;
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::ffi_u32;
 
 pub(super) static TAIL: clap_plugin_tail = clap_plugin_tail {
@@ -10,7 +10,7 @@ pub(super) static TAIL: clap_plugin_tail = clap_plugin_tail {
 
 unsafe extern "C" fn tail_get(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!("tail.get: missing plugin instance");
             return 0;
         };

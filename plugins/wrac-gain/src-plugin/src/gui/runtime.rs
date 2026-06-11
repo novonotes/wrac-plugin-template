@@ -5,8 +5,8 @@ use std::time::Duration;
 use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, HostParamsEditNotifier,
-    PluginDescriptor, PluginError, PluginResult,
+    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, PluginDescriptor, PluginError,
+    PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
@@ -16,7 +16,7 @@ use wxp::WxpCommandHandler;
 
 use crate::commands::{CommandRegistrationDependencies, register_commands};
 use crate::gui::GuiStateNotifier;
-use crate::plugin::notify_gui_parameters;
+use crate::plugin::{WracGainParamOutputQueue, notify_gui_parameters};
 use crate::state::{ProjectStateStore, SharedState};
 
 // GUI window size bounds (pixels). The host opens at the default; resize is clamped to min..=max.
@@ -43,7 +43,7 @@ pub(super) struct GuiRuntimeDependencies {
     pub(super) project_state: Arc<ProjectStateStore>,
     pub(super) shared: Arc<SharedState>,
     pub(super) gui_notifier: Arc<GuiStateNotifier>,
-    pub(super) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
+    pub(super) param_output_queue: Arc<WracGainParamOutputQueue>,
     pub(super) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     pub(super) resize_handle: WxpGuiResizeHandle,
     pub(super) host_context: HostContext,
@@ -91,7 +91,7 @@ impl WracGainGuiRuntime {
                 shared: dependencies.shared.clone(),
                 gui_notifier: dependencies.gui_notifier.clone(),
                 descriptor: dependencies.descriptor,
-                host_parameter_edit_notifier: dependencies.host_parameter_edit_notifier,
+                param_output_queue: dependencies.param_output_queue,
                 host_gui_resize_requester: dependencies.host_gui_resize_requester,
                 gui_resize_handle: dependencies.resize_handle,
                 host_context: dependencies.host_context,

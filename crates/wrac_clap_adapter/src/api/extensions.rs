@@ -13,7 +13,7 @@ pub use configurable_audio_ports::PluginConfigurableAudioPortsExtension;
 pub use gui::PluginGuiExtension;
 pub use latency::PluginLatencyExtension;
 pub use note_ports::PluginNotePortsExtension;
-pub use params::PluginParamsExtension;
+pub use params::PluginParamsQuery;
 pub use render::PluginRenderExtension;
 pub use state::PluginStateExtension;
 pub use tail::PluginTailExtension;

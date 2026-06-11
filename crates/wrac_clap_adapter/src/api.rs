@@ -1,5 +1,15 @@
 //! Safe interface between product implementations and the adapter.
 //!
+//! This public API is a thin, safe facade over the CLAP C ABI. Its traits
+//! should express existing CLAP entry points, factories, lifecycle callbacks,
+//! extensions, event/buffer views, and host callbacks with Rust ownership and
+//! defensive thread/call-order handling. Do not add extra abstraction,
+//! high-level plugin APIs, or product/domain meaning here. Format conversion is
+//! delegated to CLAP plus `clap-wrapper`; this crate must not become a
+//! VST3/AU/AAX abstraction layer or plugin framework.
+//! The API follows CLAP closely, but may choose pragmatic Rust surfaces over a
+//! strict one-to-one mapping when that keeps the adapter thinner and harder to misuse.
+//!
 //! Method docs use thread annotations for the Rust trait call contract:
 //! - `[main-thread]`: native CLAP/UI main thread. Non-realtime and serialized.
 //! - `[control-thread]`: non-realtime host/adapter control work. This includes the
@@ -27,15 +37,17 @@ mod host;
 mod process;
 mod types;
 
-pub use core::{ActivateContext, PluginCore, PluginCoreContext};
+pub use core::{ActivateContext, PluginInstance, PluginInstanceContext};
 pub use error::{PluginError, PluginResult};
 pub use extensions::{
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiExtension,
-    PluginLatencyExtension, PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension,
+    PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension,
     PluginStateExtension, PluginTailExtension,
 };
-pub use host::{HostGuiResizeRequester, HostParamsEditNotifier, HostStateDirtyNotifier};
-pub use process::{ProcessContext, ProcessStatus, Processor};
+pub use host::{HostGuiResizeRequester, HostParamsFlushRequester, HostStateDirtyNotifier};
+pub use process::{
+    ActiveProcessor, InactiveProcessor, ParamFlushContext, ProcessContext, ProcessStatus,
+};
 pub use types::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, GuiApi, GuiConfig,
     GuiResizeHints, GuiSize, HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo,

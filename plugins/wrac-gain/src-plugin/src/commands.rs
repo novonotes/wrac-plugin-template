@@ -9,16 +9,16 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::{
-    HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
-};
+use wrac_clap_adapter::{HostContext, HostFamily, HostGuiResizeRequester, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };
 use wxp::{Channel, WxpCommandHandler};
 
 use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload};
-use crate::plugin::{parameter_default_value, parameter_host_value, parameter_text_value};
+use crate::plugin::{
+    WracGainParamOutputQueue, parameter_default_value, parameter_host_value, parameter_text_value,
+};
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
 #[derive(Debug, Deserialize)]
@@ -44,7 +44,7 @@ pub(crate) struct CommandRegistrationDependencies {
     pub(crate) shared: Arc<SharedState>,
     pub(crate) gui_notifier: Arc<GuiStateNotifier>,
     pub(crate) descriptor: PluginDescriptor,
-    pub(crate) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
+    pub(crate) param_output_queue: Arc<WracGainParamOutputQueue>,
     pub(crate) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     pub(crate) gui_resize_handle: WxpGuiResizeHandle,
     pub(crate) host_context: HostContext,
@@ -63,7 +63,7 @@ pub(crate) fn register_commands(
         shared,
         gui_notifier,
         descriptor,
-        host_parameter_edit_notifier,
+        param_output_queue,
         host_gui_resize_requester,
         gui_resize_handle,
         host_context,
@@ -134,22 +134,22 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("set_parameter_text", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let text = ctx.arg::<String>("text").map_err(|e| e.to_string())?;
             let value = parameter_text_value(parameter_id, &text).map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             let applied = shared
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
             );
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(parameter_payload(parameter_id, applied))
         });
     }
@@ -158,31 +158,31 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("reset_parameter_to_default", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let value = parameter_default_value(parameter_id).map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             let applied = shared
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
             );
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(parameter_payload(parameter_id, applied))
         });
     }
 
     // Called when the user first touches a control. Signals the start of an undo unit to the host.
     {
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("begin_parameter_gesture", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             Ok::<_, String>(json!({ "ok": true }))
         });
     }
@@ -191,7 +191,7 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("set_parameter_value", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let value = ctx.arg::<f64>("value").map_err(|e| e.to_string())?;
@@ -199,7 +199,7 @@ pub(crate) fn register_commands(
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
@@ -210,10 +210,10 @@ pub(crate) fn register_commands(
 
     // Called when the user releases the control. Signals the end of the undo unit to the host.
     {
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("end_parameter_gesture", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(json!({ "ok": true }))
         });
     }

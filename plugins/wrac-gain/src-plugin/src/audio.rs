@@ -1,7 +1,7 @@
 //! DSP running on the audio thread.
 //!
 //! This sample simply multiplies the input by a gain and writes it back.
-//! [`Processor::process`] is a realtime function called repeatedly for each small buffer,
+//! [`ActiveProcessor::process`] is a realtime function called repeatedly for each small buffer,
 //! so the rule is to **avoid allocations and locks**. Shared state is read lock-free from
 //! [`SharedState`].
 
@@ -9,11 +9,14 @@ use std::any::Any;
 use std::sync::Arc;
 
 use wrac_clap_adapter::{
-    AudioPairedChannels, AudioPortChannels, AudioProcessBuffer, InputEvent, PluginResult,
-    ProcessContext, ProcessStatus, Processor,
+    ActiveProcessor, AudioPairedChannels, AudioPortChannels, AudioProcessBuffer, InactiveProcessor,
+    InputEvent, ParamFlushContext, PluginResult, ProcessContext, ProcessStatus,
 };
 
-use crate::plugin::{PARAM_BYPASS_ID, PARAM_GAIN_ID, parameter_host_input_to_plain};
+use crate::plugin::{
+    PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue, apply_param_input_events,
+    parameter_host_input_to_plain,
+};
 use crate::state::SharedState;
 
 /// The DSP instance created at `activate()` and owned by the host's audio thread.
@@ -23,11 +26,12 @@ use crate::state::SharedState;
 /// `shared` uses atomics and is safe to read during `process()`.
 /// `audio_channel_count` is a snapshot copied from the plugin's audio layout store at
 /// activate time. Because the adapter rejects layout changes while active, the running
-/// Processor's contract cannot change mid-flight. Even when a product's DSP must vary
+/// active processor's contract cannot change mid-flight. Even when a product's DSP must vary
 /// with layout, it is safer to convert the needed settings at activate time and pass them
 /// in rather than storing an `Arc<RwLock<Layout>>`.
 pub(crate) struct WracGainAudioProcessor {
     shared: Arc<SharedState>,
+    param_output_queue: Arc<WracGainParamOutputQueue>,
     // Gain itself does not use channel count, but this field demonstrates the pattern
     // "snapshot layout at activate time and store it as a field."
     // In debug builds, the actual buffer is verified to match this snapshot.
@@ -35,15 +39,20 @@ pub(crate) struct WracGainAudioProcessor {
 }
 
 impl WracGainAudioProcessor {
-    pub(crate) fn new(shared: Arc<SharedState>, audio_channel_count: u32) -> Self {
+    pub(crate) fn new(
+        shared: Arc<SharedState>,
+        param_output_queue: Arc<WracGainParamOutputQueue>,
+        audio_channel_count: u32,
+    ) -> Self {
         Self {
             shared,
+            param_output_queue,
             audio_channel_count,
         }
     }
 }
 
-impl Processor for WracGainAudioProcessor {
+impl ActiveProcessor for WracGainAudioProcessor {
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
         self
     }
@@ -67,6 +76,12 @@ impl Processor for WracGainAudioProcessor {
             self.process_no_alloc(context)
         }
     }
+
+    fn flush_params(&mut self, mut context: ParamFlushContext<'_>) -> PluginResult<()> {
+        apply_param_input_events(&self.shared, &context.events.input);
+        self.param_output_queue.drain(&mut context.events.output);
+        Ok(())
+    }
 }
 
 impl WracGainAudioProcessor {
@@ -76,6 +91,8 @@ impl WracGainAudioProcessor {
             &mut context.audio,
             self.audio_channel_count,
         );
+
+        self.param_output_queue.drain(&mut context.events.output);
 
         // Gain at the start of this block; updated each time a parameter event arrives.
         let mut gain = self.shared.gain();
@@ -124,6 +141,35 @@ impl WracGainAudioProcessor {
         // Signal that processing should continue for the next block unless the input is silent.
         // Returning `Quiet` lets the host use it as a hint for optimisation.
         Ok(ProcessStatus::ContinueIfNotQuiet)
+    }
+}
+
+pub(crate) struct WracGainInactiveProcessor {
+    shared: Arc<SharedState>,
+    param_output_queue: Arc<WracGainParamOutputQueue>,
+}
+
+impl WracGainInactiveProcessor {
+    pub(crate) fn new(
+        shared: Arc<SharedState>,
+        param_output_queue: Arc<WracGainParamOutputQueue>,
+    ) -> Self {
+        Self {
+            shared,
+            param_output_queue,
+        }
+    }
+}
+
+impl InactiveProcessor for WracGainInactiveProcessor {
+    fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+        self
+    }
+
+    fn flush_params(&mut self, mut context: ParamFlushContext<'_>) -> PluginResult<()> {
+        apply_param_input_events(&self.shared, &context.events.input);
+        self.param_output_queue.drain(&mut context.events.output);
+        Ok(())
     }
 }
 
