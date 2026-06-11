@@ -184,7 +184,7 @@ pub(crate) fn create_plugin_core(
 // PluginInstance: plugin lifecycle and the extension capabilities offered
 // ---------------------------------------------------------------------------
 impl PluginInstance for WracGainPlugin {
-    fn create_inactive_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>> {
+    fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>> {
         Ok(Box::new(crate::audio::WracGainInactiveProcessor::new(
             self.shared.clone(),
             self.param_output_queue.clone(),
@@ -227,7 +227,7 @@ impl PluginInstance for WracGainPlugin {
         _processor: Box<dyn ActiveProcessor>,
     ) -> PluginResult<Box<dyn InactiveProcessor>> {
         log::debug!("deactivating audio processor");
-        self.create_inactive_processor()
+        self.initialize_processor()
     }
 
     // Extension declarations. Some = implemented, None = unsupported. Implementations live in separate modules.

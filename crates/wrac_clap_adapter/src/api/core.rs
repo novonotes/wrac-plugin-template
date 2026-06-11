@@ -33,9 +33,17 @@ pub struct PluginInstanceContext {
 /// it impossible to answer one while the other is running. Split each capability into
 /// its own thread-safe store and return it as `Arc<dyn ...>` from this trait.
 pub trait PluginInstance: Send + 'static {
-    /// Creates the inactive processing state held before the first activation.
+    /// Initializes the processor lifecycle in its inactive state.
+    ///
+    /// The adapter calls this once during plugin instance creation. It may call
+    /// it again after `activate` returns an error, because `activate` consumes
+    /// the previous inactive processor before attempting to create an active one.
+    /// Implementations must therefore return a fresh inactive processor each time.
+    ///
+    /// The returned processor may receive `params.flush` while the plugin is
+    /// inactive, and is later consumed by `activate`.
     /// `[control-thread]`
-    fn create_inactive_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>>;
+    fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>>;
 
     /// Called from the plugin activation callback. `[control-thread]`
     fn activate(

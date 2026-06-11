@@ -175,7 +175,7 @@ impl PluginInstanceState {
         let configurable_audio_ports = core.configurable_audio_ports();
         let note_ports = core.note_ports();
         let parameters = core.params();
-        let inactive_processor = match core.create_inactive_processor() {
+        let inactive_processor = match core.initialize_processor() {
             Ok(processor) => processor,
             Err(error) => {
                 log::warn!("factory.create_plugin: inactive processor creation failed: {error}");
@@ -766,7 +766,7 @@ unsafe extern "C" fn plugin_activate(
             Ok(processor) => processor,
             Err(error) => {
                 log::warn!("plugin.activate: plugin activate failed: {error}");
-                match core.create_inactive_processor() {
+                match core.initialize_processor() {
                     Ok(inactive) => instance.put_inactive_processor_blocking(inactive),
                     Err(error) => log::warn!(
                         "plugin.activate: inactive processor recreation failed after activation error: {error}"
