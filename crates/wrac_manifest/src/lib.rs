@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ManifestPackageInfo {
     pub package_name: Option<String>,
     pub version: Option<String>,
@@ -543,16 +543,6 @@ struct DedicatedBundle {
     description: String,
     copyright: String,
     supported_formats: Vec<PluginFormat>,
-}
-
-impl Default for ManifestPackageInfo {
-    fn default() -> Self {
-        Self {
-            package_name: None,
-            version: None,
-            repository: None,
-        }
-    }
 }
 
 impl<'de> Deserialize<'de> for ManifestPackageInfo {
