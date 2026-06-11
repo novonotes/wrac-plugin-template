@@ -83,7 +83,9 @@ enum TaskKind {
     BuildVst3Bundle,
     BuildAuBundle,
     BuildAaxBundle,
-    BuildStandaloneBundle,
+    BuildStandaloneBundle {
+        plugin_id: Option<String>,
+    },
     CheckInstallScope {
         target: PluginTarget,
         scope: crate::cli::InstallScope,
@@ -128,7 +130,10 @@ impl TaskKind {
             Self::BuildVst3Bundle => "build VST3 bundle".to_string(),
             Self::BuildAuBundle => "build AU bundle".to_string(),
             Self::BuildAaxBundle => "build AAX bundle".to_string(),
-            Self::BuildStandaloneBundle => "build standalone artifact".to_string(),
+            Self::BuildStandaloneBundle { plugin_id } => match plugin_id {
+                Some(plugin_id) => format!("build standalone artifact ({plugin_id})"),
+                None => "build standalone artifact".to_string(),
+            },
             Self::CheckInstallScope { target, scope } => {
                 format!("check install scope for {} ({scope:?})", target.display())
             }
@@ -251,7 +256,14 @@ pub(crate) fn run_build(ctx: &Context, args: &BuildArgs) -> Result<()> {
     let targets = resolve_build_targets_from_metadata(ctx, &args.target)?;
     // The command only chooses terminal build tasks. The graph builder expands
     // those into Rust, wrapper-configure, and format-specific build tasks.
-    let graph = build_graph(ctx, CommandKind::Build, &targets, args.clean, None)?;
+    let graph = build_graph(
+        ctx,
+        CommandKind::Build,
+        &targets,
+        args.clean,
+        None,
+        args.standalone_plugin_id.clone(),
+    )?;
     execute_plan(
         ctx,
         profile,
@@ -260,7 +272,7 @@ pub(crate) fn run_build(ctx: &Context, args: &BuildArgs) -> Result<()> {
         failure_policy(args.continue_on_error),
     )?;
     if !args.dry_run {
-        print_outputs(ctx, profile, &targets);
+        print_outputs(ctx, profile, &targets, args.standalone_plugin_id.as_deref())?;
     }
     Ok(())
 }
@@ -281,6 +293,7 @@ pub(crate) fn run_install(ctx: &Context, args: &InstallArgs) -> Result<()> {
             targets,
             scope: args.scope,
         }),
+        None,
     )?;
     execute_plan(
         ctx,
@@ -340,6 +353,7 @@ pub(crate) fn run_validate(ctx: &Context, args: &ValidateArgs) -> Result<()> {
                 .collect(),
             scope: crate::cli::InstallScope::Default,
         }),
+        None,
     )?;
     execute_plan(
         ctx,
@@ -362,6 +376,7 @@ fn build_graph(
     targets: &[Target],
     clean_first: bool,
     install_selection: Option<InstallSelection>,
+    standalone_plugin_id: Option<String>,
 ) -> Result<TaskGraph> {
     let mut graph = TaskGraph::new();
     // Install scope validation is modeled as a task, not an upfront global
@@ -534,7 +549,9 @@ fn build_graph(
         );
         let standalone = graph.task(
             package_task_id(ctx, "build-standalone"),
-            TaskKind::BuildStandaloneBundle,
+            TaskKind::BuildStandaloneBundle {
+                plugin_id: standalone_plugin_id,
+            },
         );
         graph.depends_on(standalone, configure);
         build_by_target.insert(Target::Standalone, standalone);
@@ -708,6 +725,7 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
                 au: false,
             },
             WrapperTarget::Vst3,
+            None,
         ),
         TaskKind::BuildAuBundle => build_wrapper_target(
             ctx,
@@ -717,15 +735,17 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
                 au: true,
             },
             WrapperTarget::Au,
+            None,
         ),
         TaskKind::BuildAaxBundle => {
-            build_wrapper_target(ctx, profile, WrapperBuild::Aax, WrapperTarget::Aax)
+            build_wrapper_target(ctx, profile, WrapperBuild::Aax, WrapperTarget::Aax, None)
         }
-        TaskKind::BuildStandaloneBundle => build_wrapper_target(
+        TaskKind::BuildStandaloneBundle { plugin_id } => build_wrapper_target(
             ctx,
             profile,
             WrapperBuild::Standalone,
             WrapperTarget::Standalone,
+            plugin_id.as_deref(),
         ),
         TaskKind::CheckInstallScope { target, scope } => {
             install_dir(ctx, *scope, target.format()).map(|_| ())

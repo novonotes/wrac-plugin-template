@@ -180,6 +180,7 @@ impl WracWorkspace {
             dry_run: options.dry_run,
             continue_on_error: options.continue_on_error,
             target: options.target,
+            standalone_plugin_id: None,
         };
         // Keep build/install logic scoped to one plugin package at a time. A package may
         // export multiple plugin products; the shared Context is still the correct unit for
@@ -444,6 +445,7 @@ fn args_for_launch_build(args: &cli::LaunchArgs) -> cli::BuildArgs {
         dry_run: false,
         continue_on_error: false,
         target: vec![targets::Target::Standalone],
+        standalone_plugin_id: args.plugin_id.clone(),
     }
 }
 

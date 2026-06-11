@@ -136,14 +136,6 @@ impl Context {
             .join(self.metadata.au_bundle_name())
     }
 
-    pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
-        self.metadata
-            .plugins
-            .iter()
-            .map(|plugin| self.standalone_artifact_for(profile, plugin))
-            .collect()
-    }
-
     pub(crate) fn standalone_artifact_for(
         &self,
         profile: BuildProfile,
