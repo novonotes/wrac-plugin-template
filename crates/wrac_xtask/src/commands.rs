@@ -1693,7 +1693,12 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     } else {
         "validator"
     };
-    let validator_bin_dir = ctx.target_dir.join("vst3sdk-validator").join("bin");
+    let shared_validator_dir = ctx
+        .target_dir
+        .parent()
+        .map(|path| path.join("vst3sdk-validator"))
+        .unwrap_or_else(|| ctx.target_dir.join("vst3sdk-validator"));
+    let validator_bin_dir = shared_validator_dir.join("bin");
     let validator = validator_bin_dir.join("Debug").join(executable);
     let validator_without_config = validator_bin_dir.join(executable);
 
@@ -1705,8 +1710,9 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     }
 
     // The validator is a verification tool, not a shipping artifact.
-    // It is independent of the plugin's release/debug profile, so a single Debug build is reused for both profiles.
-    let build_dir = ctx.target_dir.join("vst3sdk-validator");
+    // It is independent of the plugin and release/debug profile, so one Debug build is
+    // shared by all plugin validations in the same target namespace.
+    let build_dir = shared_validator_dir;
     let mut configure = Command::new("cmake");
     configure
         .arg("-S")
@@ -1721,14 +1727,28 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     }
     run(configure.current_dir(&ctx.root))?;
 
-    run(Command::new("cmake")
+    let mut build = Command::new("cmake");
+    build
         .arg("--build")
         .arg(&build_dir)
         .arg("--target")
         .arg("validator")
         .arg("--config")
-        .arg("Debug")
-        .current_dir(&ctx.root))?;
+        .arg("Debug");
+    if ctx.platform == Platform::Macos {
+        build.args([
+            "--",
+            "-quiet",
+            "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-unknown-warning-option -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32 -Wno-perf-constraint-implies-noexcept",
+        ]);
+    }
+
+    let build = build.current_dir(&ctx.root);
+    if ctx.platform == Platform::Macos {
+        run_with_optional_xcbeautify(build)?;
+    } else {
+        run(build)?;
+    }
 
     if validator.exists() {
         Ok(validator)
