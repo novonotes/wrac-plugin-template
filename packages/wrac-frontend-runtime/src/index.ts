@@ -13,3 +13,12 @@ export {
   type RuntimeOkResponse,
   type WracFrontendRuntime,
 } from "./runtime";
+export {
+  createResizeController,
+  type ResizeController,
+} from "./resizeController";
+export {
+  installResizeBridge,
+  type ResizeBridge,
+  type ResizeBridgeOptions,
+} from "./resizeDomBridge";
