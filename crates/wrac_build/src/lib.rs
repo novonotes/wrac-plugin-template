@@ -348,3 +348,100 @@ fn add_directory_contents(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::Mutex,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn plugin_descriptor_codegen_preserves_host_visible_ids() {
+        let _env_lock = ENV_LOCK.lock().expect("env lock must not be poisoned");
+        let temp_dir = unique_temp_dir();
+        fs::create_dir_all(&temp_dir).unwrap();
+        let manifest_path = temp_dir.join("wrac-plugin.toml");
+        let output_path = temp_dir.join("wrac_plugin_products.rs");
+        fs::write(&manifest_path, FIXTURE_MANIFEST).unwrap();
+
+        unsafe {
+            std::env::set_var("CARGO_PKG_VERSION_MAJOR", "1");
+            std::env::set_var("CARGO_PKG_VERSION_MINOR", "2");
+            std::env::set_var("CARGO_PKG_VERSION_PATCH", "3");
+        }
+
+        let manifest = wrac_manifest::read_dedicated_manifest(&manifest_path).unwrap();
+        super::write_plugin_products(&manifest, &output_path).unwrap();
+        let generated = fs::read_to_string(&output_path).unwrap();
+
+        assert!(
+            generated
+                .contains("pub(crate) const AUV2_MANUFACTURER_CODE: [u8; 4] = [89, 114, 67, 111];")
+        );
+        assert!(generated.contains("pub(crate) const AAX_MANUFACTURER_ID: u32 = 0x5972436F;"));
+        assert!(generated.contains("pub(crate) const AAX_PACKAGE_VERSION: u32 = 0x01020300;"));
+        assert!(generated.contains("component_id: [202, 17, 32, 130, 236, 55, 239, 92, 146, 215, 236, 126, 103, 32, 113, 149],"));
+        assert!(generated.contains("product_id: 0x5774476E,"));
+        assert!(generated.contains("plugin_id: 0x5774474D"));
+        assert!(generated.contains("plugin_id: 0x57744753"));
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    fn unique_temp_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("wrac-build-test-{}-{nanos}", std::process::id()))
+    }
+
+    const FIXTURE_MANIFEST: &str = r#"
+schema_version = 1
+
+[package]
+version_source = "cargo"
+
+[bundle]
+company_name = "Your Company"
+auv2_manufacturer_code = "YrCo"
+aax_manufacturer_id = "YrCo"
+bundle_name = "WRAC Gain"
+bundle_identifier = "com.your-company.wrac-gain"
+homepage_url = "https://example.com/wrac-gain"
+manual_url = "https://example.com/wrac-gain/manual"
+support_url = "https://example.com/support"
+description = "Simple gain plugin"
+copyright = "Copyright 2026 Your Company"
+supported_formats = ["clap", "vst3", "au", "aax"]
+
+[[plugins]]
+plugin_id = "com.your-company.wrac-gain"
+plugin_name = "WRAC Gain"
+clap_features = ["audio-effect", "utility", "stereo"]
+vst3_subcategories = "Fx|Tools"
+vst3_component_id = "822011ca-37ec-5cef-92d7-ec7e67207195"
+standalone_name = "WRAC Gain Standalone"
+auv2_type = "aufx"
+auv2_subtype = "WtGn"
+aax_categories = ["effect"]
+aax_product_id = "WtGn"
+
+[[plugins.aax_stem_configs]]
+name = "Mono"
+input = "mono"
+output = "mono"
+plugin_id = "WtGM"
+
+[[plugins.aax_stem_configs]]
+name = "Stereo"
+input = "stereo"
+output = "stereo"
+plugin_id = "WtGS"
+"#;
+}
