@@ -9,7 +9,7 @@ use crate::process_buffer::AudioProcessBuffer;
 /// State passed in must be either an immutable snapshot copied at activate time, or
 /// atomic/lock-free shared state the audio thread never waits on.
 pub trait ActiveProcessor: Send {
-    /// Consumes the processor for typed recovery during deactivation. `[control-thread]`
+    /// Converts to `Any` so `deactivate` can recover owned state. `[control-thread]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
     /// Called from CLAP `plugin.reset`. `[audio-thread]`
@@ -26,7 +26,7 @@ pub trait ActiveProcessor: Send {
 
 /// Processing state used while the CLAP plugin is inactive.
 pub trait InactiveProcessor: Send {
-    /// Consumes the processor for typed recovery during activation. `[control-thread]`
+    /// Converts to `Any` so `activate` can recover owned state. `[control-thread]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
     /// Called from CLAP `params.flush` while inactive. `[control-thread]`
