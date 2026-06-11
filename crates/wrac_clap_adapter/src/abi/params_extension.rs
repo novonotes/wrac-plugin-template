@@ -204,7 +204,6 @@ unsafe extern "C" fn params_flush(
             return;
         };
         let events = unsafe { crate::EventLists::from_raw(in_events, out_events) };
-        let input_events = events.input;
         let result = if instance.is_processor_active() {
             let Some(result) = instance.with_processor_mut(|active| {
                 let Some(active) = active else {
@@ -214,14 +213,12 @@ unsafe extern "C" fn params_flush(
                 active.flush_params(crate::ParamFlushContext { events })
             }) else {
                 wrac_log::rtwarn!("params.flush: active processor is busy");
-                flush_input_events(instance, &input_events);
                 return;
             };
             result
         } else {
             let Some(_guard) = instance.try_enter_lifecycle() else {
                 wrac_log::rtwarn!("params.flush: lifecycle is busy");
-                flush_input_events(instance, &input_events);
                 return;
             };
             if instance.is_processor_active() {
@@ -234,7 +231,6 @@ unsafe extern "C" fn params_flush(
                     active.flush_params(crate::ParamFlushContext { events })
                 }) else {
                     wrac_log::rtwarn!("params.flush: active processor is busy");
-                    flush_input_events(instance, &input_events);
                     return;
                 };
                 result
@@ -249,7 +245,6 @@ unsafe extern "C" fn params_flush(
                     inactive.flush_params(crate::ParamFlushContext { events })
                 }) else {
                     wrac_log::rtwarn!("params.flush: inactive processor is busy");
-                    flush_input_events(instance, &input_events);
                     return;
                 };
                 result
@@ -259,12 +254,6 @@ unsafe extern "C" fn params_flush(
             wrac_log::rtwarn!("params.flush: processor failed: {error}");
         }
     });
-}
-
-fn flush_input_events(instance: &PluginInstanceState, events: &crate::InputEvents<'_>) {
-    if let Err(error) = instance.parameters.flush_input_events(events) {
-        wrac_log::rtwarn!("params.flush: input fallback failed: {error}");
-    }
 }
 
 fn parameter_flags(flags: ParamFlags) -> u32 {

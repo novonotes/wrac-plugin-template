@@ -1,4 +1,4 @@
-use crate::{InputEvents, ParamInfo, PluginResult};
+use crate::{ParamInfo, PluginResult};
 
 /// Host-queryable parameter metadata, values, and text conversion.
 ///
@@ -7,10 +7,9 @@ use crate::{InputEvents, ParamInfo, PluginResult};
 /// `flush_params`. Plugins without parameters return `0` from `count` and make param
 /// flush no-op.
 ///
-/// Host-to-plugin changes flow as CLAP events through `ProcessContext` and
-/// `ParamFlushContext`; `flush_input_events` is the RT-safe fallback when the
-/// processor cannot be borrowed. Keep GUI workflows, smoothing, automation
-/// policy, and product-domain abstractions out of this trait.
+/// This trait has no setter: parameter changes flow as CLAP events through
+/// `ProcessContext` and `ParamFlushContext`. Keep GUI workflows, smoothing,
+/// automation policy, and product-domain abstractions out of this trait.
 pub trait PluginParamsQuery: Send + Sync + 'static {
     /// Called from CLAP `params.count`. `[thread-safe]`
     fn count(&self) -> u32;
@@ -26,7 +25,4 @@ pub trait PluginParamsQuery: Send + Sync + 'static {
 
     /// Called from CLAP `params.text_to_value`. `[thread-safe & control-thread]`
     fn text_to_value(&self, param_id: u32, text: &str) -> PluginResult<f64>;
-
-    /// Applies CLAP `params.flush` input events without borrowing the processor. `[thread-safe]`
-    fn flush_input_events(&self, events: &InputEvents<'_>) -> PluginResult<()>;
 }

@@ -155,11 +155,6 @@ impl PluginParamsQuery for WracGainParamsExtension {
         let plain_value = text_to_plain(spec, text)?;
         Ok(plain_to_host(spec, plain_value as f32))
     }
-
-    fn flush_input_events(&self, events: &InputEvents<'_>) -> PluginResult<()> {
-        apply_param_input_events(&self.shared, events);
-        Ok(())
-    }
 }
 
 /// Product-owned queue for GUI-originated parameter events.
