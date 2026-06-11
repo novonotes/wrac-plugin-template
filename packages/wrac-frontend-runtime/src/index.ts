@@ -30,7 +30,9 @@ export {
 } from "./nativeCursorBridge";
 export {
   createHostFocusRestorer,
-  isEditableElement,
+  defaultIsEditableElement,
+  type EditableElementPredicate,
   type HostFocusRestorer,
+  type HostFocusRestorerOptions,
 } from "./hostFocus";
 export { installConsoleLogPipe } from "./consoleLogPipe";
