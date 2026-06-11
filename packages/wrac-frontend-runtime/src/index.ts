@@ -22,3 +22,9 @@ export {
   type ResizeBridge,
   type ResizeBridgeOptions,
 } from "./resizeDomBridge";
+export {
+  defaultShouldEnableNativeCursorBridge,
+  installNativeCursorBridge,
+  type NativeCursorBridge,
+  type NativeCursorBridgeOptions,
+} from "./nativeCursorBridge";
