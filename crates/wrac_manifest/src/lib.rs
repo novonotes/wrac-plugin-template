@@ -1,3 +1,10 @@
+//! Parser and validator for WRAC plugin manifests.
+//!
+//! `wrac-plugin.toml` is the product-owned manifest for host-visible metadata:
+//! bundle identifiers, plugin IDs, wrapper descriptors, supported formats, and
+//! validation exceptions. This crate reads that file into typed Rust structures
+//! for build scripts and xtask code; it does not perform plugin builds itself.
+
 use std::{
     collections::{HashMap, HashSet},
     error::Error,

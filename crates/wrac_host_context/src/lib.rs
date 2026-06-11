@@ -1,3 +1,10 @@
+//! Host and wrapper-format detection for WRAC plugins.
+//!
+//! This crate keeps process-name, operating-system, and CLAP-wrapper format
+//! detection in one place so product code can receive a typed [`HostContext`]
+//! instead of duplicating host-specific checks. The result is diagnostic context;
+//! each caller still owns the policy decision for any workaround.
+
 use std::{path::Path, sync::OnceLock};
 
 #[cfg(target_os = "macos")]

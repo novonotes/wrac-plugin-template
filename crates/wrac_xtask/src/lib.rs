@@ -1,3 +1,10 @@
+//! Shared implementation of the standard WRAC `cargo xtask` command surface.
+//!
+//! Repository-local `xtask` crates provide workspace paths and wrapper settings,
+//! then delegate build, install, launch, validate, uninstall, and clean behavior
+//! to this crate. Keeping the command implementation here prevents template and
+//! product repositories from drifting apart.
+
 use std::env;
 use std::error::Error;
 use std::path::PathBuf;

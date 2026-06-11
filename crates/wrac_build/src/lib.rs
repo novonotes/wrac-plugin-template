@@ -1,3 +1,10 @@
+//! Build-script helpers for WRAC plugin crates.
+//!
+//! Product crates call this crate from `build.rs` to turn `wrac-plugin.toml`
+//! into generated Rust descriptors and, for release builds, to package the
+//! frontend `dist` directory into an embedded bundle. Runtime plugin code should
+//! not depend on this crate.
+
 use std::{
     env,
     fs::{self, File},

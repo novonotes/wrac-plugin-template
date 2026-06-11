@@ -1,3 +1,10 @@
+# Product-owned WRAC manifest for the example plugin.
+#
+# This file is the source of truth for host-visible metadata and wrapper
+# descriptors. Build scripts and xtask read it through the `wrac_manifest` crate
+# to generate CLAP/VST3/AU/AAX descriptors and decide the default build targets.
+# Keep public IDs stable after release; changing them can break host project
+# recall.
 schema_version = 1
 
 [package]

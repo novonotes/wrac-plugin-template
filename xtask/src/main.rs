@@ -1,3 +1,8 @@
+//! Repository-local entry point for `cargo xtask`.
+//!
+//! This binary only wires the WRAC template's root paths into `wrac_xtask`; the
+//! reusable command behavior lives in the `wrac_xtask` crate.
+
 use std::path::Path;
 
 use wrac_xtask::{WracWorkspace, XtaskConfig};
