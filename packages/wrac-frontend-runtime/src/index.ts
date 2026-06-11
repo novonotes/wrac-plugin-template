@@ -28,3 +28,9 @@ export {
   type NativeCursorBridge,
   type NativeCursorBridgeOptions,
 } from "./nativeCursorBridge";
+export {
+  createHostFocusRestorer,
+  isEditableElement,
+  type HostFocusRestorer,
+} from "./hostFocus";
+export { installConsoleLogPipe } from "./consoleLogPipe";
