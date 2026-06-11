@@ -37,15 +37,7 @@ auv2_type = "aufx"
 auv2_subtype = "WtGn"
 aax_categories = ["effect"]
 aax_product_id = "WtGn"
-
-[[plugins.aax_stem_configs]]
-name = "Mono"
-input = "mono"
-output = "mono"
-plugin_id = "WtGM"
-
-[[plugins.aax_stem_configs]]
-name = "Stereo"
-input = "stereo"
-output = "stereo"
-plugin_id = "WtGS"
+aax_stem_configs = [
+  { name = "Mono", input = "mono", output = "mono", plugin_id = "WtGM" },
+  { name = "Stereo", input = "stereo", output = "stereo", plugin_id = "WtGS" },
+]
