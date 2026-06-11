@@ -1,63 +1,26 @@
-import { invoke } from "@novonotes/webview-bridge";
+import type {
+  FrontendRuntimeContext,
+  NativeCursorIntent,
+  WracFrontendRuntime,
+} from "./runtime";
 
-// Cubase VST3 on macOS can fail to propagate WKWebView's CSS cursor to the
-// host-owned Cocoa parent. Keep this bridge CSS-driven so template users only
-// need to set `cursor` in styles for new hover targets.
-export type FrontendRuntimeContext = {
-  os?: string;
-  pluginFormat?: string;
-  hostFamily?: string;
-  hostName?: string;
-  processName?: string;
-};
-
-type NativeCursorIntent =
-  | "alias"
-  | "all-scroll"
-  | "arrow"
-  | "cell"
-  | "col-resize"
-  | "context-menu"
-  | "copy"
-  | "crosshair"
-  | "e-resize"
-  | "ew-resize"
-  | "grab"
-  | "grabbing"
-  | "help"
-  | "move"
-  | "n-resize"
-  | "ne-resize"
-  | "nesw-resize"
-  | "no-drop"
-  | "none"
-  | "not-allowed"
-  | "ns-resize"
-  | "nw-resize"
-  | "nwse-resize"
-  | "pointer"
-  | "progress"
-  | "row-resize"
-  | "s-resize"
-  | "se-resize"
-  | "sw-resize"
-  | "text"
-  | "vertical-text"
-  | "w-resize"
-  | "wait"
-  | "zoom-in"
-  | "zoom-out"
-  | "unsupported";
-
-type NativeCursorBridge = {
+export type NativeCursorBridge = {
   dispose: () => void;
   refresh: (reason?: string) => void;
 };
 
-export function installNativeCursorBridge(
-  context: FrontendRuntimeContext,
-): NativeCursorBridge | undefined {
-  if (!shouldUseNativeCursorBridge(context)) {
+export type NativeCursorBridgeOptions = {
+  runtime: WracFrontendRuntime;
+  context: FrontendRuntimeContext;
+  shouldEnable?: (context: FrontendRuntimeContext) => boolean;
+};
+
+export function installNativeCursorBridge({
+  runtime,
+  context,
+  shouldEnable = defaultShouldEnableNativeCursorBridge,
+}: NativeCursorBridgeOptions): NativeCursorBridge | undefined {
+  if (!shouldEnable(context)) {
     return undefined;
   }
 
@@ -68,10 +31,7 @@ export function installNativeCursorBridge(
     cursorIntent: NativeCursorIntent,
     reason: string,
   ): void => {
-    void invoke("apply_native_cursor", {
-      cursorIntent,
-      reason,
-    }).catch(() => undefined);
+    void runtime.applyNativeCursor(cursorIntent, reason).catch(() => undefined);
   };
 
   const applyCursorAtPoint = (
@@ -90,7 +50,10 @@ export function installNativeCursorBridge(
     applyNativeCursor(nativeCursorIntentFromCss(hitCursor), reason);
   };
 
-  const handlePointerCursor = (event: PointerEvent | MouseEvent): void => {
+  const handlePointerCursor: EventListener = (event): void => {
+    if (!(event instanceof MouseEvent)) {
+      return;
+    }
     lastPointer = {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -148,11 +111,14 @@ export function installNativeCursorBridge(
   };
 }
 
-function shouldUseNativeCursorBridge(context: FrontendRuntimeContext): boolean {
+export function defaultShouldEnableNativeCursorBridge(
+  context: FrontendRuntimeContext,
+): boolean {
   return (
     context.os === "macos" &&
     context.pluginFormat === "vst3" &&
-    context.hostFamily === "steinberg-cubase"
+    (context.hostFamily === "steinberg-cubase" ||
+      context.hostFamily === "steinberg-cubase-bridged")
   );
 }
 
