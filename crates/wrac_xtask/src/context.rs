@@ -46,9 +46,10 @@ impl Context {
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.wrapper_dir.clone());
-        // Plugin identity is sourced from [package.metadata.wrac] in src-plugin/Cargo.toml.
-        // Maintaining separate bundle names or wrapper arguments in xtask risks stale build artifacts on rename.
-        let metadata = PluginMetadata::read(&package.manifest_path)?;
+        // Plugin identity is sourced from wrac-plugin.toml, with legacy Cargo
+        // metadata supported only as a migration fallback.
+        let metadata =
+            PluginMetadata::read_discovered(&package.manifest_path, &package.plugin_root)?;
 
         Ok(Self {
             root: config.root.clone(),
@@ -174,9 +175,6 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
 
     let mut packages = Vec::new();
     for package in metadata.workspace_packages() {
-        if package.metadata.get("wrac").is_none() {
-            continue;
-        }
         let manifest_path = package.manifest_path.clone().into_std_path_buf();
         let package_dir = manifest_path
             .parent()
@@ -206,6 +204,17 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
             })?
             .to_string_lossy()
             .into_owned();
+        let has_manifest = wrac_manifest::discover_manifest(&manifest_path, &plugin_root)
+            .map(|source| match source {
+                wrac_manifest::ManifestSource::Dedicated(path) => path.exists(),
+                wrac_manifest::ManifestSource::LegacyCargoMetadata(_) => {
+                    package.metadata.get("wrac").is_some()
+                }
+            })
+            .unwrap_or(false);
+        if !has_manifest {
+            continue;
+        }
         packages.push(PluginPackage {
             package_name: package.name.clone(),
             artifact_namespace,

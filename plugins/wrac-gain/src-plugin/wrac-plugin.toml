@@ -1,0 +1,44 @@
+schema_version = 1
+
+[package]
+version_source = "cargo"
+
+[bundle]
+company_name = "Your Company"
+auv2_manufacturer_code = "YrCo"
+aax_manufacturer_id = "YrCo"
+bundle_name = "WRAC Gain"
+bundle_identifier = "com.your-company.wrac-gain"
+homepage_url = "https://example.com/wrac-gain"
+manual_url = "https://example.com/wrac-gain/manual"
+support_url = "https://example.com/support"
+description = "Simple gain plugin"
+copyright = "Copyright 2026 Your Company"
+supported_formats = ["clap", "vst3", "au", "aax"]
+
+[validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
+reason = "WRAC Gain is a minimal one-knob starter example. Products that support Fender Studio Pro should add a second real visible control instead of shipping this exception."
+
+[[plugins]]
+plugin_id = "com.your-company.wrac-gain"
+plugin_name = "WRAC Gain"
+clap_features = ["audio-effect", "utility", "stereo"]
+vst3_subcategories = "Fx|Tools"
+vst3_component_id = "822011ca-37ec-5cef-92d7-ec7e67207195"
+standalone_name = "WRAC Gain Standalone"
+auv2_type = "aufx"
+auv2_subtype = "WtGn"
+aax_categories = ["effect"]
+aax_product_id = "WtGn"
+
+[[plugins.aax_stem_configs]]
+name = "Mono"
+input = "mono"
+output = "mono"
+plugin_id = "WtGM"
+
+[[plugins.aax_stem_configs]]
+name = "Stereo"
+input = "stereo"
+output = "stereo"
+plugin_id = "WtGS"

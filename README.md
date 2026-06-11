@@ -116,7 +116,7 @@ Supported plugin formats:
 | Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
 
-Default build, install, and validate targets come from `package.metadata.wrac.supported_formats`.
+Default build, install, and validate targets come from `wrac-plugin.toml` `supported_formats`.
 Use `--target` to request a specific subset; explicit plugin-format targets must be listed in `supported_formats`.
 `cargo xtask build` also builds the development standalone app by default, and the build command accepts `standalone` as a development-only target.
 Use `--dry-run` on build/install/validate commands to inspect the task graph before running it.

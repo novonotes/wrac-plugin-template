@@ -961,7 +961,7 @@ fn validate_plugin_format_support(
         // supported subset.
         if explicit && !supported.contains(format) {
             return Err(format!(
-                "{} is not listed in package.metadata.wrac.supported_formats for {}",
+                "{} is not listed in bundle.supported_formats for {}",
                 format.display(),
                 ctx.package_name
             )

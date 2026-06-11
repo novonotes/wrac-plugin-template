@@ -8,70 +8,8 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 build = "build.rs"
 
-# WRAC metadata is the single source of truth for host-visible descriptors,
-# GUI About metadata, bundle names, wrapper arguments, AUv2 registration,
-# WebView data dirs, and logs. Set these explicitly before shipping; changing
-# public IDs or FourCC values after release can break host project recall.
 [package.metadata.wrac]
-# User-visible vendor name shown by hosts and the template GUI.
-company_name = "Your Company"
-# AUv2 manufacturer code. Use the same 4-byte ASCII code across your AUv2 plugin catalog.
-auv2_manufacturer_code = "YrCo"
-# AAX manufacturer ID registered with Avid. Keep it stable across the AAX product catalog.
-aax_manufacturer_id = "YrCo"
-# Shared CLAP/VST3/AAX bundle name. Product-specific AU bundles use plugin_name below.
-bundle_name = "WRAC Gain"
-# Reverse-DNS bundle identifier used by macOS bundles. Keep it stable.
-bundle_identifier = "com.your-company.wrac-gain"
-# Commercial metadata shown by hosts and About views where supported.
-homepage_url = "https://example.com/wrac-gain"
-manual_url = "https://example.com/wrac-gain/manual"
-support_url = "https://example.com/support"
-description = "Simple gain plugin"
-copyright = "Copyright 2026 Your Company"
-# Product policy for plugin formats. xtask defaults use this list, while
-# explicit --target requests fail if the requested format is not declared here.
-supported_formats = ["clap", "vst3", "au", "aax"]
-
-[package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
-reason = "WRAC Gain is a minimal one-knob starter example. Products that support Fender Studio Pro should add a second real visible control instead of shipping this exception."
-
-[[package.metadata.wrac.plugins]]
-# Reverse-DNS identifier. Use your own domain or another namespace you control.
-plugin_id = "com.your-company.wrac-gain"
-# User-visible plugin name shown by hosts and the template GUI.
-plugin_name = "WRAC Gain"
-# CLAP feature identifiers used in the generated CLAP descriptor.
-clap_features = ["audio-effect", "utility", "stereo"]
-# VST3 PClassInfo2 subCategories string. Keep this explicit because CLAP
-# features do not always map cleanly to commercial host browser categories.
-vst3_subcategories = "Fx|Tools"
-# VST3 component ID. Generate a UUID once before release and keep it stable;
-# changing it makes hosts treat the plugin as a different VST3.
-vst3_component_id = "822011ca-37ec-5cef-92d7-ec7e67207195"
-# User-visible standalone app name.
-standalone_name = "WRAC Gain Standalone"
-# AUv2 component type. Audio effects usually use "aufx"; instruments usually use "aumu".
-auv2_type = "aufx"
-# AUv2 subtype. Pick a unique 4-byte ASCII code for each plugin from the same vendor.
-auv2_subtype = "WtGn"
-# AAX category names are converted to AAX_EPlugInCategory bits.
-aax_categories = ["effect"]
-# AAX product ID registered with Avid. Usually stable per product.
-aax_product_id = "WtGn"
-
-[[package.metadata.wrac.plugins.aax_stem_configs]]
-# Each AAX stem config needs a unique PlugInID_Native for Pro Tools recall.
-name = "Mono"
-input = "mono"
-output = "mono"
-plugin_id = "WtGM"
-
-[[package.metadata.wrac.plugins.aax_stem_configs]]
-name = "Stereo"
-input = "stereo"
-output = "stereo"
-plugin_id = "WtGS"
+manifest = "wrac-plugin.toml"
 
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
@@ -94,6 +32,4 @@ wxp = { workspace = true }
 unreachable_pub = "deny"
 
 [build-dependencies]
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
 wrac_build = { path = "../../../crates/wrac_build" }

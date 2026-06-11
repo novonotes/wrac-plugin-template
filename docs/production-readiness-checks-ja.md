@@ -11,7 +11,7 @@ Production-readiness check は、`cargo xtask validate` の中で実行される
 ルールはプラグイン crate の manifest で rule ID ごとに無効化できます。無効化する場合は、空ではない `reason` が必須です。
 
 ```toml
-[package.metadata.wrac.validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
+[validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
 reason = "This product does not support Fender Studio Pro generic editor workflows."
 ```
 
