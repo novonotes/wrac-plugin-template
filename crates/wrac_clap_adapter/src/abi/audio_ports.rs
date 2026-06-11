@@ -8,7 +8,7 @@ use clap_sys::ext::audio_ports::{
 };
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_u32, fill_c_char_array};
 use crate::{AudioPortFlags, AudioPortType};
 
@@ -19,7 +19,7 @@ pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports
 
 unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: bool) -> u32 {
     ffi_u32(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
@@ -44,7 +44,7 @@ unsafe extern "C" fn audio_ports_get(
             );
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!(
                 "audio_ports.get: missing plugin instance index={index} is_input={is_input}"
             );

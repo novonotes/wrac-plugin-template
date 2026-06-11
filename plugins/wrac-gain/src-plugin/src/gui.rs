@@ -23,14 +23,13 @@ use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, HostParamsEditNotifier, PluginResult,
-};
+use wrac_clap_adapter::{GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, PluginResult};
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
     WxpGuiRuntime,
 };
 
+use crate::plugin::WracGainParamOutputQueue;
 use crate::state::{ProjectStateStore, SharedState};
 
 pub(crate) struct GuiIntegration {
@@ -67,7 +66,7 @@ pub(crate) fn create_gui_integration(
     descriptor: wrac_clap_adapter::PluginDescriptor,
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
-    host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
+    param_output_queue: Arc<WracGainParamOutputQueue>,
     host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
     host_context: HostContext,
 ) -> GuiIntegration {
@@ -84,7 +83,7 @@ pub(crate) fn create_gui_integration(
         project_state,
         shared,
         gui_notifier: notifier.clone(),
-        host_parameter_edit_notifier,
+        param_output_queue,
         host_gui_resize_requester,
         resize_handle: resize_handle.clone(),
         host_context: host_context.clone(),

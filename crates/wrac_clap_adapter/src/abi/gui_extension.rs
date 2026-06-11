@@ -9,7 +9,7 @@ use clap_sys::ext::gui::{
 use clap_sys::plugin::clap_plugin;
 use parking_lot::MutexGuard;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_unit};
 use crate::{GuiApi, GuiConfig, GuiSize, HostWindow, PluginGuiExtension};
 
@@ -324,7 +324,7 @@ unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
 }
 
 unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginGuiExtension>> {
-    let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+    let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
         log::warn!("gui.query: missing plugin instance");
         return None;
     };
@@ -352,7 +352,7 @@ unsafe fn plugin_gui_mutation(
     plugin: *const clap_plugin,
     callback_name: &'static str,
 ) -> Option<GuiMutationAccess> {
-    let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+    let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
         log::warn!("gui.{callback_name}: missing plugin instance");
         return None;
     };
@@ -361,7 +361,7 @@ unsafe fn plugin_gui_mutation(
         return None;
     };
     // Extract only the capability handle to avoid coupling GUI callbacks to the
-    // `PluginCore` lifecycle/state lock (the GUI runtime has its own thread rules).
+    // `PluginInstance` lifecycle/state lock (the GUI runtime has its own thread rules).
     instance
         .gui
         .clone()

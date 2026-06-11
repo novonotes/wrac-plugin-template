@@ -33,7 +33,7 @@ impl HostContext {
 
     /// Keeps validation / scanner process classification as the WRAC-owned source of truth.
     ///
-    /// Product code should consume this result from the `PluginCoreContext::host_context`
+    /// Product code should consume this result from the `PluginInstanceContext::host_context`
     /// passed during plugin instance creation instead of duplicating process-name checks.
     pub fn is_validation_or_scan_host(&self) -> bool {
         self.host.is_validation_or_scan_host()

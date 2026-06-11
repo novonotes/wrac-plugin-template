@@ -9,7 +9,7 @@ use wrac_clap_adapter::{
 /// Source of truth for the audio layout negotiated with the host.
 ///
 /// Host port queries and configurable-audio-ports apply operations read/write this store,
-/// and wrappers may issue those queries from audio/render workers. `Processor::process()`
+/// and wrappers may issue those queries from audio/render workers. `ActiveProcessor::process()`
 /// still uses the snapshot captured at `activate()`, so layout changes cannot alter the
 /// running processor's buffer contract.
 pub(super) struct AudioLayoutStore {
@@ -84,7 +84,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
 /// Mutation via `&self` is intentional: the adapter calls this without acquiring the
 /// `&mut self` lock (see [`WracGainPlugin`](super::WracGainPlugin)). This does not mean
 /// changes are allowed while active — the adapter enforces that this is only called when
-/// no `Processor` exists (inactive).
+/// no active processor exists.
 pub(super) struct WracGainConfigurableAudioPorts {
     layout: Arc<AudioLayoutStore>,
 }
@@ -107,7 +107,7 @@ impl PluginConfigurableAudioPortsExtension for WracGainConfigurableAudioPorts {
         &self,
         requests: &[AudioPortConfigRequest],
     ) -> PluginResult<()> {
-        // The adapter rejects configuration apply while a Processor exists. This updates
+        // The adapter rejects configuration apply while an active processor exists. This updates
         // only the non-RT query store; the audio thread uses the snapshot captured at activate.
         let previous_channel_count = self.layout.channel_count();
         let channel_count =

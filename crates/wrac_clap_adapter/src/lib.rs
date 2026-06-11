@@ -17,24 +17,24 @@ mod params;
 mod process_buffer;
 
 pub use api::{
-    ActivateContext, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
-    DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext, HostFamily,
-    HostGuiResizeRequester, HostParamsEditNotifier, HostStateDirtyNotifier, HostVersion,
-    HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo, ParamValueEvent,
-    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
-    PluginCoreContext, PluginError, PluginFormat, PluginGuiExtension, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension, PluginRenderMode,
-    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus,
-    Processor, State, SystemContext,
+    ActivateContext, ActiveProcessor, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo,
+    AudioPortType, DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext,
+    HostFamily, HostGuiResizeRequester, HostParamsFlushRequester, HostStateDirtyNotifier,
+    HostVersion, HostWindow, InactiveProcessor, NoteDialects, NotePortInfo, ParamFlags,
+    ParamFlushContext, ParamInfo, ParamValueEvent, PluginAudioPortsExtension,
+    PluginConfigurableAudioPortsExtension, PluginError, PluginFormat, PluginGuiExtension,
+    PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension,
+    PluginParamsQuery, PluginRenderExtension, PluginRenderMode, PluginResult, PluginStateExtension,
+    PluginTailExtension, ProcessContext, ProcessStatus, State, SystemContext,
 };
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
 };
 pub use entry::{EntryContext, PluginEntry, PluginFactory};
 pub use events::{
-    InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent, NoteExpressionEvent,
-    OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents, ParamModEvent, ProcessEvents,
-    TransportEvent, TransportFlags, UnknownEvent,
+    EventLists, InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent,
+    NoteExpressionEvent, OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents,
+    ParamModEvent, TransportEvent, TransportFlags, UnknownEvent,
 };
 pub use process_buffer::{
     AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,

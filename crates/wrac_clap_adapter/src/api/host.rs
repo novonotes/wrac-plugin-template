@@ -1,26 +1,15 @@
 use crate::{GuiSize, PluginResult};
 
-/// Notifies the host automation lane of a parameter edit triggered by the GUI or other
-/// product-side action.
+/// Requests the host to schedule CLAP params synchronization.
 ///
-/// This is not an API to update the source of truth. The product updates its own store
-/// first, then calls this to report the edit back to the host
-/// (begin -> update -> end forms one undo unit).
-///
-/// `Send + Sync` allows GUI or control callbacks to share the notifier. It is not
-/// realtime-safe; do not call it from `Processor::process()`.
-pub trait HostParamsEditNotifier: Send + Sync {
-    /// Queues a CLAP `PARAM_GESTURE_BEGIN` event and requests `host_params.request_flush`.
-    /// `[thread-safe & control-thread]`
-    fn begin_edit(&self, param_id: u32);
-
-    /// Queues a CLAP `PARAM_VALUE` event and requests `host_params.request_flush`.
-    /// `[thread-safe & control-thread]`
-    fn update_edit(&self, param_id: u32, value: f64);
-
-    /// Queues a CLAP `PARAM_GESTURE_END` event and requests `host_params.request_flush`.
-    /// `[thread-safe & control-thread]`
-    fn end_edit(&self, param_id: u32);
+/// This maps directly to `clap_host_params.request_flush`. It does not carry
+/// parameter values; plugins emit those as output events from `process` or
+/// `flush_params`.
+pub trait HostParamsFlushRequester: Send + Sync {
+    /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
+    ///
+    /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
+    fn request_flush(&self);
 }
 
 /// Notifies the host that non-parameter project state changed and should be saved.
@@ -30,7 +19,7 @@ pub trait HostParamsEditNotifier: Send + Sync {
 ///
 /// CLAP requires this notification to be sent from the main thread. The adapter
 /// does not marshal calls, so call this from the product's GUI/control path, not
-/// directly from `Processor::process()` or a background worker.
+/// directly from `ActiveProcessor::process()` or a background worker.
 pub trait HostStateDirtyNotifier: Send + Sync {
     /// Calls CLAP `host_state.mark_dirty`. `[main-thread]`
     fn mark_dirty(&self);

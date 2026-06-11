@@ -8,7 +8,7 @@ use clap_sys::ext::configurable_audio_ports::{
 };
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::ffi_bool;
 use crate::{AudioPortConfigRequest, AudioPortType};
 
@@ -24,14 +24,14 @@ unsafe extern "C" fn configurable_audio_ports_can_apply_configuration(
     request_count: u32,
 ) -> bool {
     ffi_bool(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("configurable_audio_ports.can_apply: missing plugin instance");
             return false;
         };
-        // Layout changes invalidate the Processor's buffer view contract, so reject while active.
-        // Activity is determined solely by whether a Processor exists and whether lifecycle is busy
+        // Layout changes invalidate the ActiveProcessor's buffer view contract, so reject while active.
+        // Activity is determined solely by whether an ActiveProcessor exists and whether lifecycle is busy
         // (wrappers may omit or delay start/stop_processing, so they are not the source of truth).
-        // This lets the plugin assume the layout is stable for the lifetime of any Processor.
+        // This lets the plugin assume the layout is stable for the lifetime of any ActiveProcessor.
         if instance.has_processor_or_busy() || instance.lifecycle_busy.load(Ordering::Acquire) {
             log::warn!(
                 "configurable_audio_ports.can_apply: rejected while processor/lifecycle is busy"
@@ -65,7 +65,7 @@ unsafe extern "C" fn configurable_audio_ports_apply_configuration(
     request_count: u32,
 ) -> bool {
     ffi_bool(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("configurable_audio_ports.apply: missing plugin instance");
             return false;
         };

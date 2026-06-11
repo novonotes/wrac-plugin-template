@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
+use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    ParamFlags, ParamInfo, ParamInputEvents, PluginError, PluginParamsExtension, PluginResult,
+    HostParamsFlushRequester, InputEvents, OutputEvent, OutputEvents, ParamFlags,
+    ParamGestureEvent, ParamInfo, ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
 };
 
 use crate::state::SharedState;
@@ -121,49 +124,23 @@ impl WracGainParamsExtension {
     }
 }
 
-impl PluginParamsExtension for WracGainParamsExtension {
-    fn param_count(&self) -> u32 {
+impl PluginParamsQuery for WracGainParamsExtension {
+    fn count(&self) -> u32 {
         PARAM_SPECS.len() as u32
     }
 
-    fn param_info(&self, index: u32) -> Option<ParamInfo> {
+    fn get_info(&self, index: u32) -> Option<ParamInfo> {
         PARAM_SPECS.get(index as usize).map(|spec| spec.info)
     }
 
     /// Answers the host's query for the current value of a parameter.
-    fn param_value(&self, param_id: u32) -> PluginResult<f64> {
+    fn get_value(&self, param_id: u32) -> PluginResult<f64> {
         let spec = param_spec(param_id)?;
         let value = self
             .shared
             .parameter_value(param_id)
             .ok_or(PluginError::InvalidParameter)?;
         Ok(plain_to_host(spec, value))
-    }
-
-    /// Called when parameter values arrive from the host as input events.
-    fn apply_param_events(&self, events: ParamInputEvents<'_>) -> PluginResult<()> {
-        for event in events.values() {
-            let Ok(plain_value) = parameter_host_input_to_plain(event.param_id, event.value) else {
-                wrac_log::rtwarn!(
-                    "params.flush: ignoring invalid parameter input param_id={} value={}",
-                    event.param_id,
-                    event.value
-                );
-                continue;
-            };
-            if self
-                .shared
-                .set_parameter_value(event.param_id, plain_value)
-                .is_none()
-            {
-                wrac_log::rtwarn!(
-                    "params.flush: ignoring unknown parameter input param_id={} value={}",
-                    event.param_id,
-                    event.value
-                );
-            }
-        }
-        Ok(())
     }
 
     /// Converts a host-domain value to a display string. Example: 0.5 -> "0.0 dB".
@@ -177,6 +154,92 @@ impl PluginParamsExtension for WracGainParamsExtension {
         let spec = param_spec(param_id)?;
         let plain_value = text_to_plain(spec, text)?;
         Ok(plain_to_host(spec, plain_value as f32))
+    }
+}
+
+/// Product-owned queue for GUI-originated parameter events.
+///
+/// CLAP output event queues only exist during `process` and `flush_params`, so GUI
+/// commands store typed CLAP events here and ask the host for a params flush.
+pub(crate) struct WracGainParamOutputQueue {
+    pending: Mutex<VecDeque<OutputEvent>>,
+    flush_requester: Arc<dyn HostParamsFlushRequester>,
+}
+
+impl WracGainParamOutputQueue {
+    pub(crate) fn new(flush_requester: Arc<dyn HostParamsFlushRequester>) -> Self {
+        Self {
+            pending: Mutex::new(VecDeque::new()),
+            flush_requester,
+        }
+    }
+
+    pub(crate) fn begin_edit(&self, param_id: u32) {
+        self.push(OutputEvent::ParamGestureBegin(ParamGestureEvent {
+            time: 0,
+            param_id,
+        }));
+    }
+
+    pub(crate) fn update_edit(&self, param_id: u32, value: f64) {
+        self.push(OutputEvent::ParamValue(ParamValueEvent {
+            time: 0,
+            param_id,
+            value,
+            note_id: -1,
+            port_index: -1,
+            channel: -1,
+            key: -1,
+        }));
+    }
+
+    pub(crate) fn end_edit(&self, param_id: u32) {
+        self.push(OutputEvent::ParamGestureEnd(ParamGestureEvent {
+            time: 0,
+            param_id,
+        }));
+    }
+
+    pub(crate) fn drain(&self, events: &mut OutputEvents<'_>) {
+        let Some(mut pending) = self.pending.try_lock() else {
+            wrac_log::rtdebug!("param_output_queue.drain: pending queue is busy");
+            return;
+        };
+
+        while let Some(event) = pending.pop_front() {
+            if !events.try_push(event.clone()) {
+                pending.push_front(event);
+                break;
+            }
+        }
+    }
+
+    fn push(&self, event: OutputEvent) {
+        self.pending.lock().push_back(event);
+        self.flush_requester.request_flush();
+    }
+}
+
+pub(crate) fn apply_param_input_events(shared: &SharedState, events: &InputEvents<'_>) {
+    for event in events.parameter_values() {
+        let Ok(plain_value) = parameter_host_input_to_plain(event.param_id, event.value) else {
+            wrac_log::rtwarn!(
+                "params.input: ignoring invalid parameter input param_id={} value={}",
+                event.param_id,
+                event.value
+            );
+            continue;
+        };
+        if shared
+            .set_parameter_value(event.param_id, plain_value)
+            .is_none()
+        {
+            wrac_log::rtwarn!(
+                "params.input: ignoring unknown parameter input param_id={} value={}",
+                event.param_id,
+                event.value
+            );
+        }
     }
 }
 

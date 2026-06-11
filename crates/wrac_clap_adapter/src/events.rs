@@ -22,17 +22,17 @@ const TRANSPORT_HAS_SECONDS_TIMELINE: u32 = 1 << 2;
 const TRANSPORT_HAS_TIME_SIGNATURE: u32 = 1 << 3;
 const TRANSPORT_IS_PLAYING: u32 = 1 << 4;
 
-/// View that confines the CLAP event lists from `process()`/`flush()` to the callback lifetime.
+/// View that confines CLAP input/output event lists to the callback lifetime.
 ///
 /// The underlying data is owned by the host and is invalid after the callback returns.
 /// Raw pointers are not exposed to the product; events are converted to typed enums so
-/// they can only be handled within the audio callback.
-pub struct ProcessEvents<'a> {
+/// they can only be handled within the current CLAP callback.
+pub struct EventLists<'a> {
     pub input: InputEvents<'a>,
     pub output: OutputEvents<'a>,
 }
 
-impl<'a> ProcessEvents<'a> {
+impl<'a> EventLists<'a> {
     pub(crate) unsafe fn from_raw(
         input: *const clap_input_events,
         output: *const clap_output_events,
