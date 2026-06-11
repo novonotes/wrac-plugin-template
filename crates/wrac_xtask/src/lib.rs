@@ -69,6 +69,7 @@ pub struct BuildOptions {
     pub dry_run: bool,
     pub continue_on_error: bool,
     pub target: Vec<Target>,
+    pub plugin_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -180,6 +181,7 @@ impl WracWorkspace {
             dry_run: options.dry_run,
             continue_on_error: options.continue_on_error,
             target: options.target,
+            standalone_plugin_id: options.plugin_id,
         };
         // Keep build/install logic scoped to one plugin package at a time. A package may
         // export multiple plugin products; the shared Context is still the correct unit for
@@ -325,6 +327,7 @@ impl From<cli::Commands> for WracCommand {
                 dry_run: args.dry_run,
                 continue_on_error: args.continue_on_error,
                 target: args.target,
+                plugin_id: args.standalone_plugin_id,
             }),
             cli::Commands::Install(args) => Self::Install(InstallOptions {
                 package: args.package,
@@ -444,6 +447,7 @@ fn args_for_launch_build(args: &cli::LaunchArgs) -> cli::BuildArgs {
         dry_run: false,
         continue_on_error: false,
         target: vec![targets::Target::Standalone],
+        standalone_plugin_id: args.plugin_id.clone(),
     }
 }
 

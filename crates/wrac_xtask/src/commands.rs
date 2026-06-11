@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::Result;
 use crate::cli::{InstallScope, UninstallScope};
 use crate::context::Context;
-use crate::metadata::PluginMetadata;
+use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target, ValidateTarget};
 use crate::util::{
@@ -487,9 +487,10 @@ pub(crate) fn build_wrapper_target(
     profile: BuildProfile,
     build: WrapperBuild,
     target: WrapperTarget,
+    standalone_plugin_id: Option<&str>,
 ) -> Result<()> {
     let build_dir = ctx.cmake_dir(build.purpose(), profile);
-    for cmake_target in cmake_wrapper_targets(ctx, build, target) {
+    for cmake_target in cmake_wrapper_targets(ctx, build, target, standalone_plugin_id)? {
         // Build the concrete CMake target for this DAG node instead of ALL_BUILD.
         // That keeps dry-run output aligned with the actual work and lets
         // independent format tasks fail or pass separately.
@@ -544,7 +545,8 @@ pub(crate) fn build_wrapper_target(
             }
         }
         WrapperTarget::Standalone => {
-            for artifact in ctx.standalone_artifacts(profile) {
+            for (_, plugin) in standalone_products(ctx, standalone_plugin_id)? {
+                let artifact = ctx.standalone_artifact_for(profile, plugin);
                 ensure_exists(&artifact, "standalone artifact")?;
                 if ctx.platform == Platform::Macos {
                     // Apply the same Gatekeeper/loader treatment to the standalone app as to plugin bundles.
@@ -565,20 +567,39 @@ pub(crate) enum WrapperTarget {
     Standalone,
 }
 
-fn cmake_wrapper_targets(ctx: &Context, build: WrapperBuild, target: WrapperTarget) -> Vec<String> {
+fn cmake_wrapper_targets(
+    ctx: &Context,
+    build: WrapperBuild,
+    target: WrapperTarget,
+    standalone_plugin_id: Option<&str>,
+) -> Result<Vec<String>> {
     let base = build.target_name_base(ctx);
-    match target {
+    Ok(match target {
         WrapperTarget::Vst3 => vec![format!("{base}_vst3")],
         WrapperTarget::Aax => vec![format!("{base}_aax")],
         WrapperTarget::Au => vec![format!("{base}_auv2")],
-        WrapperTarget::Standalone => ctx
+        WrapperTarget::Standalone => standalone_products(ctx, standalone_plugin_id)?
+            .iter()
+            .map(|(index, _)| format!("{base}_product_{index}_standalone"))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn standalone_products<'a>(
+    ctx: &'a Context,
+    plugin_id: Option<&str>,
+) -> Result<Vec<(usize, &'a PluginProductMetadata)>> {
+    if let Some(plugin_id) = plugin_id {
+        return ctx
             .metadata
             .plugins
             .iter()
             .enumerate()
-            .map(|(index, _)| format!("{base}_product_{index}_standalone"))
-            .collect::<Vec<_>>(),
+            .find(|(_, plugin)| plugin.plugin_id == plugin_id)
+            .map(|(index, plugin)| vec![(index, plugin)])
+            .ok_or_else(|| format!("plugin ID not found in WRAC metadata: {plugin_id}").into());
     }
+    Ok(ctx.metadata.plugins.iter().enumerate().collect())
 }
 
 fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
@@ -1835,7 +1856,12 @@ fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
     }
 }
 
-pub(crate) fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
+pub(crate) fn print_outputs(
+    ctx: &Context,
+    profile: BuildProfile,
+    targets: &[Target],
+    standalone_plugin_id: Option<&str>,
+) -> Result<()> {
     for target in targets {
         match target {
             Target::Clap => println!("CLAP: {}", ctx.clap_bundle(profile).display()),
@@ -1847,12 +1873,14 @@ pub(crate) fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Tar
                 }
             }
             Target::Standalone => {
-                for artifact in ctx.standalone_artifacts(profile) {
+                for (_, plugin) in standalone_products(ctx, standalone_plugin_id)? {
+                    let artifact = ctx.standalone_artifact_for(profile, plugin);
                     println!("Standalone: {}", artifact.display());
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {

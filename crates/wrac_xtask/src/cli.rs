@@ -196,6 +196,13 @@ pub(crate) struct BuildArgs {
         long_help = "Targets to build, comma-separated. Supported values are clap, vst3, au, aax, and standalone. Defaults to wrac-plugin.toml supported_formats supported on this platform plus standalone."
     )]
     pub(crate) target: Vec<Target>,
+
+    #[arg(
+        long = "plugin-id",
+        value_name = "PLUGIN_ID",
+        help = "Standalone plugin ID to build when --target includes standalone."
+    )]
+    pub(crate) standalone_plugin_id: Option<String>,
 }
 
 #[derive(Debug, Args)]
