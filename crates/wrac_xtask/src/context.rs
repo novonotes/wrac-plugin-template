@@ -5,15 +5,7 @@ use cargo_metadata::MetadataCommand;
 use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
-use crate::{Result, XtaskConfig};
-
-#[derive(Debug, Clone)]
-pub(crate) struct PluginPackage {
-    pub(crate) package_name: String,
-    pub(crate) artifact_namespace: String,
-    pub(crate) manifest_path: PathBuf,
-    pub(crate) plugin_root: PathBuf,
-}
+use crate::{Result, WracPluginPackage, XtaskConfig};
 
 pub(crate) struct Context {
     pub(crate) root: PathBuf,
@@ -146,7 +138,7 @@ impl Context {
     }
 }
 
-pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPackage>> {
+pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
     let metadata = MetadataCommand::new()
         .manifest_path(config.root.join("Cargo.toml"))
         .exec()?;
@@ -194,7 +186,7 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
             continue;
         }
         validate_plugin_layout(&package_dir, &plugin_root)?;
-        packages.push(PluginPackage {
+        packages.push(WracPluginPackage {
             package_name: package.name.clone(),
             artifact_namespace,
             manifest_path,
@@ -205,7 +197,7 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
     Ok(packages)
 }
 
-fn find_package(config: &XtaskConfig, package_name: &str) -> Result<PluginPackage> {
+fn find_package(config: &XtaskConfig, package_name: &str) -> Result<WracPluginPackage> {
     let packages = available_packages(config)?;
     for package in &packages {
         if package.package_name == package_name {
