@@ -45,6 +45,23 @@ pub struct XtaskConfig {
     pub target_namespace: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WracPluginPackage {
+    pub package_name: String,
+    pub artifact_namespace: String,
+    pub manifest_path: PathBuf,
+    pub plugin_root: PathBuf,
+}
+
+/// Discovers WRAC plugin packages from workspace metadata.
+///
+/// This is the same package discovery used by `--all` commands, exposed for
+/// repository-local automation that needs to build CI matrices without
+/// duplicating Cargo metadata and WRAC manifest lookup rules.
+pub fn discover_plugin_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
+    available_packages(config)
+}
+
 #[derive(Debug, Clone)]
 pub struct WracWorkspace {
     config: XtaskConfig,
