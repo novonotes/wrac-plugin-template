@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGui, HostWindow, PluginError,
     PluginGuiExtension, PluginResult,
 };
 use wrac_host_context::{HostContext, HostFamily, PluginFormat};
@@ -682,9 +682,9 @@ impl WxpGuiResizeHandle {
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
-        host_gui_resize_requester: &dyn HostGuiResizeRequester,
+        host_gui: &dyn HostGui,
     ) -> PluginResult<LogicalSize<f64>> {
-        // `HostGuiResizeRequester` can be shared from Send/Sync product state, but the target
+        // `HostGui` can be shared from Send/Sync product state, but the target
         // API is a host GUI extension. Keep the "GUI command only" threading contract at the
         // command registration boundary rather than making this a generic background-thread API.
         let scale = *self.scale.lock();
@@ -693,7 +693,7 @@ impl WxpGuiResizeHandle {
         let gui_size = dpi.logical_size_to_gui(logical_size);
 
         let previous_revision = self.layout.accepted_size_revision();
-        let resize_result = host_gui_resize_requester.request_resize(gui_size);
+        let resize_result = host_gui.request_resize(gui_size);
         let current_revision = self.layout.accepted_size_revision();
 
         // Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls

@@ -45,7 +45,7 @@ pub use extensions::{
     PluginLatencyExtension, PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension,
     PluginTailExtension,
 };
-pub use host::{HostGuiResizeRequester, HostParamsFlushRequester, HostStateDirtyNotifier};
+pub use host::{HostGui, HostParams, HostState};
 pub use params::PluginParamsQuery;
 pub use process::{
     ActiveProcessor, InactiveProcessor, ParamFlushContext, ProcessContext, ProcessStatus,

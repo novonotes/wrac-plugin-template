@@ -19,13 +19,13 @@ mod process_buffer;
 pub use api::{
     ActivateContext, ActiveProcessor, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo,
     AudioPortType, DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext,
-    HostFamily, HostGuiResizeRequester, HostParamsFlushRequester, HostStateDirtyNotifier,
-    HostVersion, HostWindow, InactiveProcessor, NoteDialects, NotePortInfo, ParamFlags,
-    ParamFlushContext, ParamInfo, ParamValueEvent, PluginAudioPortsExtension,
-    PluginConfigurableAudioPortsExtension, PluginError, PluginFormat, PluginGuiExtension,
-    PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension,
-    PluginParamsQuery, PluginRenderExtension, PluginRenderMode, PluginResult, PluginStateExtension,
-    PluginTailExtension, ProcessContext, ProcessStatus, State, SystemContext,
+    HostFamily, HostGui, HostParams, HostState, HostVersion, HostWindow, InactiveProcessor,
+    NoteDialects, NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo, ParamValueEvent,
+    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginFormat,
+    PluginGuiExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
+    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginRenderMode,
+    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus, State,
+    SystemContext,
 };
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,

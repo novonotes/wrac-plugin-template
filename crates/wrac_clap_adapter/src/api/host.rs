@@ -5,7 +5,7 @@ use crate::{GuiSize, PluginResult};
 /// This maps directly to `clap_host_params.request_flush`. It does not carry
 /// parameter values; plugins emit those as output events from `process` or
 /// `flush_params`.
-pub trait HostParamsFlushRequester: Send + Sync {
+pub trait HostParams: Send + Sync {
     /// Calls CLAP `host_params.rescan`. `[main-thread]`
     fn rescan(&self, _flags: u32) {}
 
@@ -26,7 +26,7 @@ pub trait HostParamsFlushRequester: Send + Sync {
 /// CLAP requires this notification to be sent from the main thread. The adapter
 /// does not marshal calls, so call this from the product's GUI/control path, not
 /// directly from `ActiveProcessor::process()` or a background worker.
-pub trait HostStateDirtyNotifier: Send + Sync {
+pub trait HostState: Send + Sync {
     /// Calls CLAP `host_state.mark_dirty`. `[main-thread]`
     fn mark_dirty(&self);
 }
@@ -36,7 +36,7 @@ pub trait HostStateDirtyNotifier: Send + Sync {
 /// This trait is `Send + Sync` because it is stored inside the shared plugin context,
 /// not because every method is meaningful from every thread. Call `request_resize` only
 /// from the product's GUI event path.
-pub trait HostGuiResizeRequester: Send + Sync {
+pub trait HostGui: Send + Sync {
     /// Calls CLAP `host_gui.resize_hints_changed`. `[main-thread]`
     fn resize_hints_changed(&self) {}
 

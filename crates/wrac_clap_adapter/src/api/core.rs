@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    ActiveProcessor, HostGuiResizeRequester, HostParamsFlushRequester, HostStateDirtyNotifier,
-    InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
-    PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
-    PluginRenderExtension, PluginResult, PluginStateExtension, PluginTailExtension,
+    ActiveProcessor, HostGui, HostParams, HostState, InactiveProcessor, PluginAudioPortsExtension,
+    PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginLatencyExtension,
+    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginResult,
+    PluginStateExtension, PluginTailExtension,
 };
 use wrac_host_context::HostContext;
 
@@ -20,9 +20,9 @@ pub struct ActivateContext {
 /// Contains only adapter proxies that the product can hold safely, not raw FFI pointers.
 #[derive(Clone)]
 pub struct PluginInstanceContext {
-    pub host_params_flush_requester: Arc<dyn HostParamsFlushRequester>,
-    pub host_state_dirty_notifier: Arc<dyn HostStateDirtyNotifier>,
-    pub host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    pub host_params: Arc<dyn HostParams>,
+    pub host_state: Arc<dyn HostState>,
+    pub host_gui: Arc<dyn HostGui>,
     pub host_context: HostContext,
 }
 

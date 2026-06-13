@@ -57,8 +57,8 @@ use crate::factory::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
-use crate::host_gui::HostGuiResizeRequest;
-use crate::host_state::HostStateDirtyNotification;
+use crate::host_gui::HostGuiProxy;
+use crate::host_state::HostStateProxy;
 use crate::params::HostParamsProxy;
 use crate::{
     ActivateContext, ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
@@ -151,9 +151,9 @@ impl PluginInstanceState {
         // Pass as a safe proxy so product GUI code can hold it without knowing about
         // host pointers or CLAP event lifetimes.
         let context = PluginInstanceContext {
-            host_params_flush_requester: host_params.clone(),
-            host_state_dirty_notifier: Arc::new(HostStateDirtyNotification::new(host)),
-            host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
+            host_params: host_params.clone(),
+            host_state: Arc::new(HostStateProxy::new(host)),
+            host_gui: Arc::new(HostGuiProxy::new(host)),
             host_context: host_context.clone(),
         };
         let mut core = registration

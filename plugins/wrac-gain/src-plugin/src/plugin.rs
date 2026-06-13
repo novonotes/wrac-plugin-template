@@ -119,7 +119,7 @@ impl WracGainPlugin {
             Arc::new(WracGainConfigurableAudioPorts::new(audio_layout.clone()));
         let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
         let param_output_queue = Arc::new(WracGainParamOutputQueue::new(
-            context.host_params_flush_requester.clone(),
+            context.host_params.clone(),
         ));
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
@@ -127,7 +127,7 @@ impl WracGainPlugin {
             project_state.clone(),
             shared.clone(),
             param_output_queue.clone(),
-            context.host_gui_resize_requester,
+            context.host_gui,
             context.host_context,
         );
         let state_extension = Arc::new(WracGainStateExtension::new(

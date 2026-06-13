@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    HostParamsFlushRequester, InputEvents, OutputEvent, OutputEvents, ParamFlags,
+    HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags,
     ParamGestureEvent, ParamInfo, ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
 };
 
@@ -163,11 +163,11 @@ impl PluginParamsQuery for WracGainParamsExtension {
 /// commands store typed CLAP events here and ask the host for a params flush.
 pub(crate) struct WracGainParamOutputQueue {
     pending: Mutex<VecDeque<OutputEvent>>,
-    flush_requester: Arc<dyn HostParamsFlushRequester>,
+    flush_requester: Arc<dyn HostParams>,
 }
 
 impl WracGainParamOutputQueue {
-    pub(crate) fn new(flush_requester: Arc<dyn HostParamsFlushRequester>) -> Self {
+    pub(crate) fn new(flush_requester: Arc<dyn HostParams>) -> Self {
         Self {
             pending: Mutex::new(VecDeque::new()),
             flush_requester,

@@ -4,11 +4,11 @@ use clap_sys::ext::params::{
 };
 use clap_sys::host::clap_host;
 
-use crate::HostParamsFlushRequester;
+use crate::HostParams;
 
 /// Thin proxy for the CLAP host params extension.
 pub(crate) struct HostParamsProxy {
-    host_params: Option<HostParams>,
+    host_params: Option<HostParamsCallbacks>,
 }
 
 impl HostParamsProxy {
@@ -34,7 +34,7 @@ impl HostParamsProxy {
     }
 }
 
-impl HostParamsFlushRequester for HostParamsProxy {
+impl HostParams for HostParamsProxy {
     fn rescan(&self, flags: u32) {
         let Some(params) = self.host_params else {
             log::debug!("host_params.rescan: host params extension unavailable");
@@ -82,7 +82,7 @@ impl HostParamsFlushRequester for HostParamsProxy {
 }
 
 #[derive(Clone, Copy)]
-struct HostParams {
+struct HostParamsCallbacks {
     host: *const clap_host,
     rescan: Option<unsafe extern "C" fn(host: *const clap_host, flags: clap_param_rescan_flags)>,
     clear: Option<
@@ -95,10 +95,10 @@ struct HostParams {
 // CLAP ABI. Product-facing usage is limited to `request_flush()`; adapter-internal
 // `rescan_values()` is called only after state load, where CLAP gives the callback a
 // main-thread contract.
-unsafe impl Send for HostParams {}
-unsafe impl Sync for HostParams {}
+unsafe impl Send for HostParamsCallbacks {}
+unsafe impl Sync for HostParamsCallbacks {}
 
-fn host_params(host: *const clap_host) -> Option<HostParams> {
+fn host_params(host: *const clap_host) -> Option<HostParamsCallbacks> {
     if host.is_null() {
         return None;
     }
@@ -109,7 +109,7 @@ fn host_params(host: *const clap_host) -> Option<HostParams> {
         if params.is_null() {
             return None;
         }
-        Some(HostParams {
+        Some(HostParamsCallbacks {
             host,
             rescan: (*params).rescan,
             clear: (*params).clear,

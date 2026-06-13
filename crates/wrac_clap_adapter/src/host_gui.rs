@@ -1,13 +1,13 @@
 use clap_sys::ext::gui::{CLAP_EXT_GUI, clap_host_gui};
 use clap_sys::host::clap_host;
 
-use crate::{GuiSize, HostGuiResizeRequester, PluginError, PluginResult};
+use crate::{GuiSize, HostGui, PluginError, PluginResult};
 
-pub(crate) struct HostGuiResizeRequest {
+pub(crate) struct HostGuiProxy {
     host_gui: Option<HostGuiCallbacks>,
 }
 
-impl HostGuiResizeRequest {
+impl HostGuiProxy {
     pub(crate) fn new(host: *const clap_host) -> Self {
         Self {
             host_gui: host_gui_request_resize(host),
@@ -15,7 +15,7 @@ impl HostGuiResizeRequest {
     }
 }
 
-impl HostGuiResizeRequester for HostGuiResizeRequest {
+impl HostGui for HostGuiProxy {
     fn resize_hints_changed(&self) {
         let Some(host_gui) = self.host_gui else {
             log::debug!("host_gui.resize_hints_changed: host GUI extension unavailable");

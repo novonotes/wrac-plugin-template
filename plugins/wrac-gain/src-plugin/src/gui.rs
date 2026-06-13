@@ -23,7 +23,7 @@ use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, PluginResult};
+use wrac_clap_adapter::{GuiConfig, GuiSize, HostContext, HostGui, PluginResult};
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
     WxpGuiRuntime,
@@ -67,7 +67,7 @@ pub(crate) fn create_gui_integration(
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     param_output_queue: Arc<WracGainParamOutputQueue>,
-    host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    host_gui: Arc<dyn HostGui>,
     host_context: HostContext,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());
@@ -84,7 +84,7 @@ pub(crate) fn create_gui_integration(
         shared,
         gui_notifier: notifier.clone(),
         param_output_queue,
-        host_gui_resize_requester,
+        host_gui,
         resize_handle: resize_handle.clone(),
         host_context: host_context.clone(),
     };

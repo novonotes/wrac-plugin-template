@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::{HostContext, HostFamily, HostGuiResizeRequester, PluginDescriptor};
+use wrac_clap_adapter::{HostContext, HostFamily, HostGui, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };
@@ -45,7 +45,7 @@ pub(crate) struct CommandRegistrationDependencies {
     pub(crate) gui_notifier: Arc<GuiStateNotifier>,
     pub(crate) descriptor: PluginDescriptor,
     pub(crate) param_output_queue: Arc<WracGainParamOutputQueue>,
-    pub(crate) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    pub(crate) host_gui: Arc<dyn HostGui>,
     pub(crate) gui_resize_handle: WxpGuiResizeHandle,
     pub(crate) host_context: HostContext,
 }
@@ -64,7 +64,7 @@ pub(crate) fn register_commands(
         gui_notifier,
         descriptor,
         param_output_queue,
-        host_gui_resize_requester,
+        host_gui,
         gui_resize_handle,
         host_context,
     } = dependencies;
@@ -272,7 +272,7 @@ pub(crate) fn register_commands(
     // Register them here so the product command list stays the single Rust/TS rendezvous point.
     register_resize_commands(
         &command_handler,
-        host_gui_resize_requester,
+        host_gui,
         gui_resize_handle,
     );
     register_native_cursor_bridge_commands(&command_handler);
