@@ -5,8 +5,7 @@ use std::time::Duration;
 use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostContext, HostGui, PluginDescriptor, PluginError,
-    PluginResult,
+    GuiConfig, GuiSize, HostContext, HostGui, PluginDescriptor, PluginError, PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,

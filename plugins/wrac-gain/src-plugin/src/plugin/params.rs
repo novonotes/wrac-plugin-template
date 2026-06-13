@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags,
-    ParamGestureEvent, ParamInfo, ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
+    HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags, ParamGestureEvent, ParamInfo,
+    ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
 };
 
 use crate::state::SharedState;

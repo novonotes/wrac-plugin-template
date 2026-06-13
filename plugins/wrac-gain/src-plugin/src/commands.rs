@@ -270,11 +270,7 @@ pub(crate) fn register_commands(
 
     // Window-management commands are shared wxp GUI plumbing, not WRAC Gain product state.
     // Register them here so the product command list stays the single Rust/TS rendezvous point.
-    register_resize_commands(
-        &command_handler,
-        host_gui,
-        gui_resize_handle,
-    );
+    register_resize_commands(&command_handler, host_gui, gui_resize_handle);
     register_native_cursor_bridge_commands(&command_handler);
 }
 
