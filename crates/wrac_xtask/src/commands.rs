@@ -634,8 +634,7 @@ fn windows_cmake_generator() -> Result<String> {
     ]);
     let output = run_output(&mut vswhere)?;
     let installation_version = String::from_utf8(output.stdout)?;
-    let generator = visual_studio_cmake_generator(installation_version.trim())?;
-    ensure_cmake_lists_generator(&generator)?;
+    let generator = select_visual_studio_cmake_generator(installation_version.trim())?;
     println!("Using CMake generator: {generator}");
     Ok(generator)
 }
@@ -653,7 +652,17 @@ fn vswhere_command() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("vswhere"))
 }
 
+#[cfg(test)]
 fn visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
+    Ok(
+        visual_studio_cmake_generator_candidates(installation_version)?
+            .into_iter()
+            .next()
+            .expect("Visual Studio generator candidates are non-empty"),
+    )
+}
+
+fn visual_studio_cmake_generator_candidates(installation_version: &str) -> Result<Vec<String>> {
     let major = installation_version
         .split('.')
         .next()
@@ -663,9 +672,12 @@ fn visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
         .parse::<u32>()?;
 
     match major {
-        18 => Ok("Visual Studio 18 2026".to_owned()),
-        17 => Ok("Visual Studio 17 2022".to_owned()),
-        16 => Ok("Visual Studio 16 2019".to_owned()),
+        18 => Ok(vec![
+            "Visual Studio 18 2026".to_owned(),
+            "Visual Studio 17 2022".to_owned(),
+        ]),
+        17 => Ok(vec!["Visual Studio 17 2022".to_owned()]),
+        16 => Ok(vec!["Visual Studio 16 2019".to_owned()]),
         _ => Err(format!(
             "unsupported Visual Studio major version {major} from `{installation_version}`"
         )
@@ -673,11 +685,14 @@ fn visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
     }
 }
 
-fn ensure_cmake_lists_generator(generator: &str) -> Result<()> {
+fn select_visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
+    let candidates = visual_studio_cmake_generator_candidates(installation_version)?;
     let output = run_output(Command::new("cmake").arg("--help"))?;
     let help = String::from_utf8(output.stdout)?;
-    if cmake_help_lists_generator(&help, generator) {
-        return Ok(());
+    for candidate in candidates {
+        if cmake_help_lists_generator(&help, &candidate) {
+            return Ok(candidate);
+        }
     }
 
     let visual_studio_generators = cmake_visual_studio_generators(&help);
@@ -687,7 +702,7 @@ fn ensure_cmake_lists_generator(generator: &str) -> Result<()> {
         visual_studio_generators.join(", ")
     };
     Err(format!(
-        "CMake does not list generator `{generator}`; available Visual Studio generators: {available}"
+        "CMake does not list a compatible Visual Studio generator for `{installation_version}`; available Visual Studio generators: {available}"
     )
     .into())
 }
@@ -2113,6 +2128,13 @@ mod tests {
         assert_eq!(
             visual_studio_cmake_generator("18.0.12345.0").unwrap(),
             "Visual Studio 18 2026"
+        );
+        assert_eq!(
+            visual_studio_cmake_generator_candidates("18.0.12345.0").unwrap(),
+            vec![
+                "Visual Studio 18 2026".to_owned(),
+                "Visual Studio 17 2022".to_owned()
+            ]
         );
         assert_eq!(
             visual_studio_cmake_generator("17.12.12345.0").unwrap(),
