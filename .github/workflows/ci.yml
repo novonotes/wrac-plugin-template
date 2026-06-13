@@ -52,7 +52,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
-          - windows-2022
+          - windows-latest
           - macos-latest
 
     steps:
@@ -100,7 +100,7 @@ jobs:
               test -f "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.clap"
               test -d "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
               test -x "target/wrac-plugins/wrac-gain/wrac/standalone/release/WRAC Gain Standalone"
-          - os: windows-2022
+          - os: windows-latest
             build-targets: clap,vst3,standalone
             validate-targets: clap,vst3
             verify: |
@@ -178,7 +178,7 @@ jobs:
       matrix:
         os:
           - macos-latest
-          - windows-2022
+          - windows-latest
 
     steps:
       - name: Checkout repository
