@@ -1,4 +1,7 @@
-use clap_sys::ext::params::{CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_VALUES, clap_host_params};
+use clap_sys::ext::params::{
+    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags,
+    clap_param_rescan_flags,
+};
 use clap_sys::host::clap_host;
 
 use crate::HostParamsFlushRequester;
@@ -32,6 +35,36 @@ impl HostParamsProxy {
 }
 
 impl HostParamsFlushRequester for HostParamsProxy {
+    fn rescan(&self, flags: u32) {
+        let Some(params) = self.host_params else {
+            log::debug!("host_params.rescan: host params extension unavailable");
+            return;
+        };
+
+        if let Some(rescan) = params.rescan {
+            unsafe {
+                rescan(params.host, flags);
+            }
+        } else {
+            log::debug!("host_params.rescan: host rescan callback unavailable");
+        }
+    }
+
+    fn clear(&self, param_id: u32, flags: u32) {
+        let Some(params) = self.host_params else {
+            log::debug!("host_params.clear: host params extension unavailable");
+            return;
+        };
+
+        if let Some(clear) = params.clear {
+            unsafe {
+                clear(params.host, param_id, flags);
+            }
+        } else {
+            log::debug!("host_params.clear: host clear callback unavailable");
+        }
+    }
+
     fn request_flush(&self) {
         let Some(params) = self.host_params else {
             log::debug!("host_params.request_flush: host params extension unavailable");
@@ -51,7 +84,10 @@ impl HostParamsFlushRequester for HostParamsProxy {
 #[derive(Clone, Copy)]
 struct HostParams {
     host: *const clap_host,
-    rescan: Option<unsafe extern "C" fn(host: *const clap_host, flags: u32)>,
+    rescan: Option<unsafe extern "C" fn(host: *const clap_host, flags: clap_param_rescan_flags)>,
+    clear: Option<
+        unsafe extern "C" fn(host: *const clap_host, param_id: u32, flags: clap_param_clear_flags),
+    >,
     request_flush: Option<unsafe extern "C" fn(host: *const clap_host)>,
 }
 
@@ -76,6 +112,7 @@ fn host_params(host: *const clap_host) -> Option<HostParams> {
         Some(HostParams {
             host,
             rescan: (*params).rescan,
+            clear: (*params).clear,
             request_flush: (*params).request_flush,
         })
     }

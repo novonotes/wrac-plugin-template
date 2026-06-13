@@ -6,6 +6,12 @@ use crate::{GuiSize, PluginResult};
 /// parameter values; plugins emit those as output events from `process` or
 /// `flush_params`.
 pub trait HostParamsFlushRequester: Send + Sync {
+    /// Calls CLAP `host_params.rescan`. `[main-thread]`
+    fn rescan(&self, _flags: u32) {}
+
+    /// Calls CLAP `host_params.clear`. `[main-thread]`
+    fn clear(&self, _param_id: u32, _flags: u32) {}
+
     /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
     ///
     /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
@@ -31,8 +37,24 @@ pub trait HostStateDirtyNotifier: Send + Sync {
 /// not because every method is meaningful from every thread. Call `request_resize` only
 /// from the product's GUI event path.
 pub trait HostGuiResizeRequester: Send + Sync {
+    /// Calls CLAP `host_gui.resize_hints_changed`. `[main-thread]`
+    fn resize_hints_changed(&self) {}
+
     /// Calls CLAP `host_gui.request_resize`. `[thread-safe & control-thread]`
     ///
     /// Product code should normally call this from its GUI event path.
     fn request_resize(&self, size: GuiSize) -> PluginResult<()>;
+
+    /// Calls CLAP `host_gui.request_show`. `[thread-safe]`
+    fn request_show(&self) -> bool {
+        false
+    }
+
+    /// Calls CLAP `host_gui.request_hide`. `[thread-safe]`
+    fn request_hide(&self) -> bool {
+        false
+    }
+
+    /// Calls CLAP `host_gui.closed`. `[main-thread]`
+    fn closed(&self, _was_destroyed: bool) {}
 }
