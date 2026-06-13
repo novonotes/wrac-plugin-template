@@ -43,6 +43,7 @@ pub struct XtaskConfig {
     pub root: PathBuf,
     pub wrapper_dir: PathBuf,
     pub target_namespace: String,
+    pub default_aax_sdk_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

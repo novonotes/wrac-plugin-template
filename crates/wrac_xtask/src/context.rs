@@ -15,6 +15,7 @@ pub(crate) struct Context {
     pub(crate) platform: Platform,
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
+    pub(crate) default_aax_sdk_root: Option<PathBuf>,
     pub(crate) metadata: PluginMetadata,
 }
 
@@ -49,6 +50,7 @@ impl Context {
             platform: Platform::detect()?,
             target_dir,
             wrapper_dir,
+            default_aax_sdk_root: config.default_aax_sdk_root.clone(),
             metadata,
         })
     }
