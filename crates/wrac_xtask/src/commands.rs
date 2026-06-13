@@ -622,6 +622,13 @@ fn windows_cmake_generator() -> Result<String> {
         }
     }
 
+    ensure_visual_studio_msbuild_available()?;
+    let generator = latest_cmake_visual_studio_generator()?;
+    println!("Using CMake generator: {generator}");
+    Ok(generator)
+}
+
+fn ensure_visual_studio_msbuild_available() -> Result<()> {
     let mut vswhere = Command::new(vswhere_command());
     vswhere.args([
         "-products",
@@ -630,13 +637,14 @@ fn windows_cmake_generator() -> Result<String> {
         "Microsoft.Component.MSBuild",
         "-latest",
         "-property",
-        "installationVersion",
+        "installationPath",
     ]);
     let output = run_output(&mut vswhere)?;
-    let installation_version = String::from_utf8(output.stdout)?;
-    let generator = select_visual_studio_cmake_generator(installation_version.trim())?;
-    println!("Using CMake generator: {generator}");
-    Ok(generator)
+    let installation_path = String::from_utf8(output.stdout)?;
+    if installation_path.trim().is_empty() {
+        return Err("Visual Studio with MSBuild was not found by vswhere".into());
+    }
+    Ok(())
 }
 
 fn vswhere_command() -> PathBuf {
@@ -652,65 +660,36 @@ fn vswhere_command() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("vswhere"))
 }
 
-#[cfg(test)]
-fn visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
-    Ok(
-        visual_studio_cmake_generator_candidates(installation_version)?
-            .into_iter()
-            .next()
-            .expect("Visual Studio generator candidates are non-empty"),
-    )
-}
-
-fn visual_studio_cmake_generator_candidates(installation_version: &str) -> Result<Vec<String>> {
-    let major = installation_version
-        .split('.')
-        .next()
-        .ok_or_else(|| {
-            format!("could not parse Visual Studio version from `{installation_version}`")
-        })?
-        .parse::<u32>()?;
-
-    match major {
-        18 => Ok(vec![
-            "Visual Studio 18 2026".to_owned(),
-            "Visual Studio 17 2022".to_owned(),
-        ]),
-        17 => Ok(vec!["Visual Studio 17 2022".to_owned()]),
-        16 => Ok(vec!["Visual Studio 16 2019".to_owned()]),
-        _ => Err(format!(
-            "unsupported Visual Studio major version {major} from `{installation_version}`"
-        )
-        .into()),
-    }
-}
-
-fn select_visual_studio_cmake_generator(installation_version: &str) -> Result<String> {
-    let candidates = visual_studio_cmake_generator_candidates(installation_version)?;
+fn latest_cmake_visual_studio_generator() -> Result<String> {
     let output = run_output(Command::new("cmake").arg("--help"))?;
     let help = String::from_utf8(output.stdout)?;
-    for candidate in candidates {
-        if cmake_help_lists_generator(&help, &candidate) {
-            return Ok(candidate);
-        }
-    }
-
-    let visual_studio_generators = cmake_visual_studio_generators(&help);
-    let available = if visual_studio_generators.is_empty() {
-        "none".to_owned()
-    } else {
-        visual_studio_generators.join(", ")
-    };
-    Err(format!(
-        "CMake does not list a compatible Visual Studio generator for `{installation_version}`; available Visual Studio generators: {available}"
-    )
-    .into())
+    select_latest_visual_studio_generator(&help)
+        .ok_or_else(|| "CMake does not list any Visual Studio generator".into())
 }
 
+#[cfg(test)]
 fn cmake_help_lists_generator(help: &str, generator: &str) -> bool {
     cmake_visual_studio_generators(help)
         .into_iter()
         .any(|available| available == generator)
+}
+
+fn select_latest_visual_studio_generator(help: &str) -> Option<String> {
+    cmake_visual_studio_generators(help)
+        .into_iter()
+        .filter_map(|generator| {
+            visual_studio_generator_version(&generator).map(|version| (version, generator))
+        })
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, generator)| generator)
+}
+
+fn visual_studio_generator_version(generator: &str) -> Option<u32> {
+    let mut words = generator.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("Visual"), Some("Studio"), Some(version)) => version.parse().ok(),
+        _ => None,
+    }
 }
 
 fn cmake_visual_studio_generators(help: &str) -> Vec<String> {
@@ -2124,30 +2103,6 @@ mod tests {
     }
 
     #[test]
-    fn maps_visual_studio_versions_to_cmake_generators() {
-        assert_eq!(
-            visual_studio_cmake_generator("18.0.12345.0").unwrap(),
-            "Visual Studio 18 2026"
-        );
-        assert_eq!(
-            visual_studio_cmake_generator_candidates("18.0.12345.0").unwrap(),
-            vec![
-                "Visual Studio 18 2026".to_owned(),
-                "Visual Studio 17 2022".to_owned()
-            ]
-        );
-        assert_eq!(
-            visual_studio_cmake_generator("17.12.12345.0").unwrap(),
-            "Visual Studio 17 2022"
-        );
-        assert_eq!(
-            visual_studio_cmake_generator("16.11.12345.0").unwrap(),
-            "Visual Studio 16 2019"
-        );
-        assert!(visual_studio_cmake_generator("19.0.0").is_err());
-    }
-
-    #[test]
     fn parses_visual_studio_generators_from_cmake_help() {
         let help = r#"
 Generators
@@ -2167,6 +2122,24 @@ The following generators are available on this platform (* marks default):
                 "Visual Studio 18 2026".to_owned(),
                 "Visual Studio 17 2022".to_owned(),
             ]
+        );
+    }
+
+    #[test]
+    fn selects_latest_visual_studio_generator_from_cmake_help() {
+        let help = r#"
+Generators
+
+The following generators are available on this platform (* marks default):
+  Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
+* Visual Studio 16 2019        = Generates Visual Studio 2019 project files.
+  Visual Studio 15 2017 [arch] = Generates Visual Studio 2017 project files.
+  Ninja                        = Generates build.ninja files.
+"#;
+
+        assert_eq!(
+            select_latest_visual_studio_generator(help),
+            Some("Visual Studio 17 2022".to_owned())
         );
     }
 }
