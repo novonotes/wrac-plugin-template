@@ -1823,7 +1823,7 @@ fn ensure_au_sdk_input(ctx: &Context) -> Result<()> {
 
 fn ensure_aax_sdk_input(ctx: &Context) -> Result<()> {
     let root = aax_sdk_root(ctx)?;
-    ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")
+    ensure_aax_sdk_exists(&root)
 }
 
 fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
@@ -1831,16 +1831,28 @@ fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
         // clap-wrapper evaluates AAX_SDK_ROOT inside its CMake project, so a relative
         // path would be resolved against clap_wrapper_builder rather than this repo.
         // Resolve relative .env and CI paths from the repository root instead.
-        ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")?;
+        ensure_aax_sdk_exists(&root)?;
         return Ok(root);
     }
 
     if let Some(root) = config_path(ctx, ctx.default_aax_sdk_root.as_ref()) {
-        ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")?;
+        ensure_aax_sdk_exists(&root)?;
         return Ok(root);
     }
 
-    Err("AAX SDK not found. Set AAX_SDK_ROOT in .env or the process environment, or configure default_aax_sdk_root in XtaskConfig.".into())
+    Err("AAX SDK not found.\nRun `cargo xtask setup` to download the repository-local AAX SDK, then retry.".into())
+}
+
+fn ensure_aax_sdk_exists(root: &Path) -> Result<()> {
+    let header = root.join("Interfaces").join("AAX.h");
+    if header.exists() {
+        return Ok(());
+    }
+    Err(format!(
+        "AAX SDK not found: {}\nRun `cargo xtask setup` to download the repository-local AAX SDK, then retry.",
+        header.display()
+    )
+    .into())
 }
 
 fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
