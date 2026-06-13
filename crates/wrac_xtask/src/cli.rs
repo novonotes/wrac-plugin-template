@@ -98,7 +98,7 @@ Notes:
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
-  AAX validation requires AAX_SDK_ROOT and AAX_VALIDATOR_DSH_ARCHIVE from .env or the process environment.
+  AAX validation requires an AAX SDK from AAX_SDK_ROOT or the configured default path, and AAX_VALIDATOR_DSH_ARCHIVE from .env or the process environment.
   AAX validation runs selected AAX Validator tests by test ID through Avid's bundled DTT runner.
   AAX validation saves official JSON results under target/wrac-plugins/<package>/wrac/validation/aax/.
   AAX validation intentionally skips DSP/HDX cycle-count and page-table XML load tests.
