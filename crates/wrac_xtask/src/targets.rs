@@ -184,8 +184,7 @@ impl Platform {
     pub(crate) fn cmake_generator(self) -> Option<&'static str> {
         match self {
             Self::Macos => Some("Xcode"),
-            Self::Windows => Some("Visual Studio 17 2022"),
-            Self::Linux => None,
+            Self::Windows | Self::Linux => None,
         }
     }
 
