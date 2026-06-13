@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -71,10 +71,10 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     if !is_pnpm_workspace(ctx) {
         // Standalone template projects keep the frontend package under src-gui
         // without a repository-level package.json.
-        run(Command::new(npm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "npm"))
             .arg("install")
             .current_dir(ctx.gui_dir()))?;
-        run(Command::new(npm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "npm"))
             .args(["run", "build"])
             .current_dir(ctx.gui_dir()))?;
         return Ok(());
@@ -84,15 +84,15 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     let dependency_names = workspace_dependency_names(&package);
     // build.rs embeds src-gui/dist into the plugin binary. Workspace packages such as
     // @novonotes/webview-bridge also need their dist before the GUI typecheck runs.
-    run(Command::new(pnpm_command(ctx.platform))
+    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
         .arg("install")
         .current_dir(&ctx.root))?;
     for dependency_name in dependency_names {
-        run(Command::new(pnpm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "pnpm"))
             .args(["--filter", &dependency_name, "run", "--if-present", "build"])
             .current_dir(&ctx.root))?;
     }
-    run(Command::new(pnpm_command(ctx.platform))
+    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
         .args(["--filter", &package_name, "run", "build"])
         .current_dir(&ctx.root))?;
     Ok(())
@@ -137,20 +137,32 @@ fn workspace_dependency_names(json: &Value) -> Vec<String> {
         .collect()
 }
 
-fn pnpm_command(platform: Platform) -> &'static str {
+fn command_for_platform(platform: Platform, command: &'static str) -> OsString {
     if platform == Platform::Windows {
-        "pnpm.cmd"
-    } else {
-        "pnpm"
+        let candidates = [
+            format!("{command}.cmd"),
+            format!("{command}.exe"),
+            command.to_string(),
+        ];
+        for candidate in candidates {
+            let candidate = OsString::from(candidate);
+            if command_exists_on_path(&candidate) {
+                return candidate;
+            }
+        }
     }
+    OsString::from(command)
 }
 
-fn npm_command(platform: Platform) -> &'static str {
-    if platform == Platform::Windows {
-        "npm.cmd"
-    } else {
-        "npm"
-    }
+fn command_exists_on_path(command: &OsStr) -> bool {
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+    command_exists_in_paths(command, env::split_paths(&paths))
+}
+
+fn command_exists_in_paths(command: &OsStr, paths: impl IntoIterator<Item = PathBuf>) -> bool {
+    paths.into_iter().any(|path| path.join(command).is_file())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2080,6 +2092,29 @@ fn codesign_nested_macos_bundle(bundle: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn command_exists_in_paths_checks_exact_candidate_files() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "wrac_xtask_command_path_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(temp_dir.join("pnpm.exe"), "").unwrap();
+
+        assert!(command_exists_in_paths(
+            OsStr::new("pnpm.exe"),
+            [temp_dir.clone()]
+        ));
+        assert!(!command_exists_in_paths(
+            OsStr::new("pnpm.cmd"),
+            [temp_dir.clone()]
+        ));
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 
     #[test]
     fn parses_vst3_validator_cids_from_logged_output() {
