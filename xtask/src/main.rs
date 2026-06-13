@@ -16,6 +16,7 @@ fn main() -> wrac_xtask::Result<()> {
     let workspace = WracWorkspace::new(XtaskConfig {
         wrapper_dir: root.join("clap_wrapper_builder"),
         target_namespace: "wrac-plugins".to_string(),
+        default_aax_sdk_root: None,
         root,
     })?;
     workspace.run(wrac_xtask::command_from_args())

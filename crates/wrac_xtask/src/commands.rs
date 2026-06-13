@@ -1835,7 +1835,12 @@ fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
         return Ok(root);
     }
 
-    Err("AAX SDK not found. Set AAX_SDK_ROOT in .env or the process environment.".into())
+    if let Some(root) = config_path(ctx, ctx.default_aax_sdk_root.as_ref()) {
+        ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")?;
+        return Ok(root);
+    }
+
+    Err("AAX SDK not found. Set AAX_SDK_ROOT in .env or the process environment, or configure default_aax_sdk_root in XtaskConfig.".into())
 }
 
 fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
@@ -1853,6 +1858,15 @@ fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
         // root. Using one base directory avoids CMake resolving relative AAX
         // paths from clap_wrapper_builder or another subprocess directory.
         Ok(Some(ctx.root.join(path)))
+    }
+}
+
+fn config_path(ctx: &Context, path: Option<&PathBuf>) -> Option<PathBuf> {
+    let path = path?;
+    if path.is_absolute() {
+        Some(path.clone())
+    } else {
+        Some(ctx.root.join(path))
     }
 }
 
