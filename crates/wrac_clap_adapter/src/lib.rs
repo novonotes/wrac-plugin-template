@@ -22,10 +22,10 @@ pub use api::{
     HostFamily, HostGui, HostParams, HostState, HostVersion, HostWindow, InactiveProcessor,
     NoteDialects, NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo, ParamValueEvent,
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginFormat,
-    PluginGuiExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginRenderMode,
-    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus, State,
-    SystemContext,
+    PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginInstance,
+    PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
+    PluginRenderExtension, PluginRenderMode, PluginResult, PluginStateExtension,
+    PluginTailExtension, ProcessContext, ProcessStatus, State, SystemContext,
 };
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
