@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use crate::factory::PluginRegistrationStorage;
-use crate::{PluginCore, PluginCoreContext, PluginDescriptor, PluginResult};
+use crate::{PluginDescriptor, PluginInstance, PluginInstanceContext, PluginResult};
 
 pub struct EntryContext<'a> {
     pub plugin_path: Option<&'a str>,
@@ -27,8 +27,8 @@ pub trait PluginFactory: Send + Sync + 'static {
     fn create_plugin(
         &self,
         plugin_id: &str,
-        context: PluginCoreContext,
-    ) -> Option<Box<dyn PluginCore>>;
+        context: PluginInstanceContext,
+    ) -> Option<Box<dyn PluginInstance>>;
 }
 
 /// Static owner for the safe Rust entry and ABI-facing factory storage.

@@ -11,7 +11,7 @@ use crate::window::ParentWindowHandle;
 
 thread_local! {
     // Native GUI objects such as WebViews are typically bound to the thread that created them.
-    // `WxpGuiController` lives inside a Send/Sync `PluginCore`, so runtimes are confined to TLS.
+    // `WxpGuiController` lives inside a Send/Sync `PluginInstance`, so runtimes are confined to TLS.
     static GUI_RUNTIMES: RefCell<HashMap<u64, GuiRuntimeEntry>> = RefCell::new(HashMap::new());
     // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
     // cross-thread token; it releases this guard by dispatching back to the owner thread.
@@ -70,7 +70,7 @@ pub trait WxpGuiRuntime: 'static {
 
 /// Factory that creates a product-specific GUI runtime.
 ///
-/// The factory itself is `Send + Sync` because it is held inside `PluginCore`, but the
+/// The factory itself is `Send + Sync` because it is held inside `PluginInstance`, but the
 /// runtime it returns does not need to be `Send` — it lives in the UI thread's TLS.
 /// Runtime creation may allocate and touch native GUI APIs; it is not realtime-safe.
 pub trait WxpGuiFactory: Send + Sync + 'static {

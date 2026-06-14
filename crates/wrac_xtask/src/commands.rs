@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::Result;
 use crate::cli::{InstallScope, UninstallScope};
 use crate::context::Context;
-use crate::metadata::PluginMetadata;
+use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target, ValidateTarget};
 use crate::util::{
@@ -71,10 +71,10 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     if !is_pnpm_workspace(ctx) {
         // Standalone template projects keep the frontend package under src-gui
         // without a repository-level package.json.
-        run(Command::new(npm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "npm"))
             .arg("install")
             .current_dir(ctx.gui_dir()))?;
-        run(Command::new(npm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "npm"))
             .args(["run", "build"])
             .current_dir(ctx.gui_dir()))?;
         return Ok(());
@@ -84,15 +84,15 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     let dependency_names = workspace_dependency_names(&package);
     // build.rs embeds src-gui/dist into the plugin binary. Workspace packages such as
     // @novonotes/webview-bridge also need their dist before the GUI typecheck runs.
-    run(Command::new(pnpm_command(ctx.platform))
+    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
         .arg("install")
         .current_dir(&ctx.root))?;
     for dependency_name in dependency_names {
-        run(Command::new(pnpm_command(ctx.platform))
+        run(Command::new(command_for_platform(ctx.platform, "pnpm"))
             .args(["--filter", &dependency_name, "run", "--if-present", "build"])
             .current_dir(&ctx.root))?;
     }
-    run(Command::new(pnpm_command(ctx.platform))
+    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
         .args(["--filter", &package_name, "run", "build"])
         .current_dir(&ctx.root))?;
     Ok(())
@@ -137,20 +137,32 @@ fn workspace_dependency_names(json: &Value) -> Vec<String> {
         .collect()
 }
 
-fn pnpm_command(platform: Platform) -> &'static str {
+fn command_for_platform(platform: Platform, command: &'static str) -> OsString {
     if platform == Platform::Windows {
-        "pnpm.cmd"
-    } else {
-        "pnpm"
+        let candidates = [
+            format!("{command}.cmd"),
+            format!("{command}.exe"),
+            command.to_string(),
+        ];
+        for candidate in candidates {
+            let candidate = OsString::from(candidate);
+            if command_exists_on_path(&candidate) {
+                return candidate;
+            }
+        }
     }
+    OsString::from(command)
 }
 
-fn npm_command(platform: Platform) -> &'static str {
-    if platform == Platform::Windows {
-        "npm.cmd"
-    } else {
-        "npm"
-    }
+fn command_exists_on_path(command: &OsStr) -> bool {
+    let Some(paths) = env::var_os("PATH") else {
+        return false;
+    };
+    command_exists_in_paths(command, env::split_paths(&paths))
+}
+
+fn command_exists_in_paths(command: &OsStr, paths: impl IntoIterator<Item = PathBuf>) -> bool {
+    paths.into_iter().any(|path| path.join(command).is_file())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -455,7 +467,7 @@ pub(crate) fn configure_wrapper(
         );
     }
 
-    if let Some(generator) = ctx.platform.cmake_generator() {
+    if let Some(generator) = cmake_generator(ctx.platform)? {
         push_cmake_arg(&mut args, "-G");
         push_cmake_arg(&mut args, generator);
     }
@@ -487,9 +499,10 @@ pub(crate) fn build_wrapper_target(
     profile: BuildProfile,
     build: WrapperBuild,
     target: WrapperTarget,
+    standalone_plugin_id: Option<&str>,
 ) -> Result<()> {
     let build_dir = ctx.cmake_dir(build.purpose(), profile);
-    for cmake_target in cmake_wrapper_targets(ctx, build, target) {
+    for cmake_target in cmake_wrapper_targets(ctx, build, target, standalone_plugin_id)? {
         // Build the concrete CMake target for this DAG node instead of ALL_BUILD.
         // That keeps dry-run output aligned with the actual work and lets
         // independent format tasks fail or pass separately.
@@ -544,7 +557,8 @@ pub(crate) fn build_wrapper_target(
             }
         }
         WrapperTarget::Standalone => {
-            for artifact in ctx.standalone_artifacts(profile) {
+            for (_, plugin) in standalone_products(ctx, standalone_plugin_id)? {
+                let artifact = ctx.standalone_artifact_for(profile, plugin);
                 ensure_exists(&artifact, "standalone artifact")?;
                 if ctx.platform == Platform::Macos {
                     // Apply the same Gatekeeper/loader treatment to the standalone app as to plugin bundles.
@@ -565,24 +579,143 @@ pub(crate) enum WrapperTarget {
     Standalone,
 }
 
-fn cmake_wrapper_targets(ctx: &Context, build: WrapperBuild, target: WrapperTarget) -> Vec<String> {
+fn cmake_wrapper_targets(
+    ctx: &Context,
+    build: WrapperBuild,
+    target: WrapperTarget,
+    standalone_plugin_id: Option<&str>,
+) -> Result<Vec<String>> {
     let base = build.target_name_base(ctx);
-    match target {
+    Ok(match target {
         WrapperTarget::Vst3 => vec![format!("{base}_vst3")],
         WrapperTarget::Aax => vec![format!("{base}_aax")],
         WrapperTarget::Au => vec![format!("{base}_auv2")],
-        WrapperTarget::Standalone => ctx
+        WrapperTarget::Standalone => standalone_products(ctx, standalone_plugin_id)?
+            .iter()
+            .map(|(index, _)| format!("{base}_product_{index}_standalone"))
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn standalone_products<'a>(
+    ctx: &'a Context,
+    plugin_id: Option<&str>,
+) -> Result<Vec<(usize, &'a PluginProductMetadata)>> {
+    if let Some(plugin_id) = plugin_id {
+        return ctx
             .metadata
             .plugins
             .iter()
             .enumerate()
-            .map(|(index, _)| format!("{base}_product_{index}_standalone"))
-            .collect::<Vec<_>>(),
+            .find(|(_, plugin)| plugin.plugin_id == plugin_id)
+            .map(|(index, plugin)| vec![(index, plugin)])
+            .ok_or_else(|| format!("plugin ID not found in WRAC metadata: {plugin_id}").into());
     }
+    Ok(ctx.metadata.plugins.iter().enumerate().collect())
 }
 
 fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
     args.push(arg.into());
+}
+
+fn cmake_generator(platform: Platform) -> Result<Option<String>> {
+    match platform {
+        Platform::Macos => Ok(platform.cmake_generator().map(ToOwned::to_owned)),
+        Platform::Windows => Ok(Some(windows_cmake_generator()?)),
+        Platform::Linux => Ok(None),
+    }
+}
+
+fn windows_cmake_generator() -> Result<String> {
+    if let Ok(generator) = env::var("WRAC_CMAKE_GENERATOR") {
+        let generator = generator.trim();
+        if !generator.is_empty() {
+            return Ok(generator.to_owned());
+        }
+    }
+
+    ensure_visual_studio_msbuild_available()?;
+    let generator = latest_cmake_visual_studio_generator()?;
+    println!("Using CMake generator: {generator}");
+    Ok(generator)
+}
+
+fn ensure_visual_studio_msbuild_available() -> Result<()> {
+    let mut vswhere = Command::new(vswhere_command());
+    vswhere.args([
+        "-products",
+        "*",
+        "-requires",
+        "Microsoft.Component.MSBuild",
+        "-latest",
+        "-property",
+        "installationPath",
+    ]);
+    let output = run_output(&mut vswhere)?;
+    let installation_path = String::from_utf8(output.stdout)?;
+    if installation_path.trim().is_empty() {
+        return Err("Visual Studio with MSBuild was not found by vswhere".into());
+    }
+    Ok(())
+}
+
+fn vswhere_command() -> PathBuf {
+    env::var_os("ProgramFiles(x86)")
+        .map(PathBuf::from)
+        .map(|program_files_x86| {
+            program_files_x86
+                .join("Microsoft Visual Studio")
+                .join("Installer")
+                .join("vswhere.exe")
+        })
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("vswhere"))
+}
+
+fn latest_cmake_visual_studio_generator() -> Result<String> {
+    let output = run_output(Command::new("cmake").arg("--help"))?;
+    let help = String::from_utf8(output.stdout)?;
+    select_latest_visual_studio_generator(&help)
+        .ok_or_else(|| "CMake does not list any Visual Studio generator".into())
+}
+
+#[cfg(test)]
+fn cmake_help_lists_generator(help: &str, generator: &str) -> bool {
+    cmake_visual_studio_generators(help)
+        .into_iter()
+        .any(|available| available == generator)
+}
+
+fn select_latest_visual_studio_generator(help: &str) -> Option<String> {
+    cmake_visual_studio_generators(help)
+        .into_iter()
+        .filter_map(|generator| {
+            visual_studio_generator_version(&generator).map(|version| (version, generator))
+        })
+        .max_by_key(|(version, _)| *version)
+        .map(|(_, generator)| generator)
+}
+
+fn visual_studio_generator_version(generator: &str) -> Option<u32> {
+    let mut words = generator.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("Visual"), Some("Studio"), Some(version)) => version.parse().ok(),
+        _ => None,
+    }
+}
+
+fn cmake_visual_studio_generators(help: &str) -> Vec<String> {
+    help.lines()
+        .filter_map(|line| {
+            let line = line
+                .trim_start()
+                .strip_prefix("* ")
+                .unwrap_or(line.trim_start());
+            let (name, _) = line.split_once(" = ")?;
+            let name = name.trim();
+            name.starts_with("Visual Studio").then(|| name.to_owned())
+        })
+        .collect()
 }
 
 fn cmake_configure_stamp_path(build_dir: &Path) -> PathBuf {
@@ -1096,7 +1229,7 @@ fn validate_vst3_component_ids(
         .into());
     }
 
-    println!("VST3 component IDs match package.metadata.wrac.plugins.vst3_component_id");
+    println!("VST3 component IDs match plugins.vst3_component_id");
     Ok(())
 }
 
@@ -1693,7 +1826,12 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     } else {
         "validator"
     };
-    let validator_bin_dir = ctx.target_dir.join("vst3sdk-validator").join("bin");
+    let shared_validator_dir = ctx
+        .target_dir
+        .parent()
+        .map(|path| path.join("vst3sdk-validator"))
+        .unwrap_or_else(|| ctx.target_dir.join("vst3sdk-validator"));
+    let validator_bin_dir = shared_validator_dir.join("bin");
     let validator = validator_bin_dir.join("Debug").join(executable);
     let validator_without_config = validator_bin_dir.join(executable);
 
@@ -1705,8 +1843,9 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     }
 
     // The validator is a verification tool, not a shipping artifact.
-    // It is independent of the plugin's release/debug profile, so a single Debug build is reused for both profiles.
-    let build_dir = ctx.target_dir.join("vst3sdk-validator");
+    // It is independent of the plugin and release/debug profile, so one Debug build is
+    // shared by all plugin validations in the same target namespace.
+    let build_dir = shared_validator_dir;
     let mut configure = Command::new("cmake");
     configure
         .arg("-S")
@@ -1721,14 +1860,28 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     }
     run(configure.current_dir(&ctx.root))?;
 
-    run(Command::new("cmake")
+    let mut build = Command::new("cmake");
+    build
         .arg("--build")
         .arg(&build_dir)
         .arg("--target")
         .arg("validator")
         .arg("--config")
-        .arg("Debug")
-        .current_dir(&ctx.root))?;
+        .arg("Debug");
+    if ctx.platform == Platform::Macos {
+        build.args([
+            "--",
+            "-quiet",
+            "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-unknown-warning-option -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32 -Wno-perf-constraint-implies-noexcept",
+        ]);
+    }
+
+    let build = build.current_dir(&ctx.root);
+    if ctx.platform == Platform::Macos {
+        run_with_optional_xcbeautify(build)?;
+    } else {
+        run(build)?;
+    }
 
     if validator.exists() {
         Ok(validator)
@@ -1782,7 +1935,7 @@ fn ensure_au_sdk_input(ctx: &Context) -> Result<()> {
 
 fn ensure_aax_sdk_input(ctx: &Context) -> Result<()> {
     let root = aax_sdk_root(ctx)?;
-    ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")
+    ensure_aax_sdk_exists(&root)
 }
 
 fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
@@ -1790,11 +1943,28 @@ fn aax_sdk_root(ctx: &Context) -> Result<PathBuf> {
         // clap-wrapper evaluates AAX_SDK_ROOT inside its CMake project, so a relative
         // path would be resolved against clap_wrapper_builder rather than this repo.
         // Resolve relative .env and CI paths from the repository root instead.
-        ensure_exists(&root.join("Interfaces").join("AAX.h"), "AAX SDK")?;
+        ensure_aax_sdk_exists(&root)?;
         return Ok(root);
     }
 
-    Err("AAX SDK not found. Set AAX_SDK_ROOT in .env or the process environment.".into())
+    if let Some(root) = config_path(ctx, ctx.default_aax_sdk_root.as_ref()) {
+        ensure_aax_sdk_exists(&root)?;
+        return Ok(root);
+    }
+
+    Err("AAX SDK not found.\nRun `cargo xtask setup` to download the repository-local AAX SDK, then retry.".into())
+}
+
+fn ensure_aax_sdk_exists(root: &Path) -> Result<()> {
+    let header = root.join("Interfaces").join("AAX.h");
+    if header.exists() {
+        return Ok(());
+    }
+    Err(format!(
+        "AAX SDK not found: {}\nRun `cargo xtask setup` to download the repository-local AAX SDK, then retry.",
+        header.display()
+    )
+    .into())
 }
 
 fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
@@ -1815,7 +1985,21 @@ fn env_path(ctx: &Context, key: &str) -> Result<Option<PathBuf>> {
     }
 }
 
-pub(crate) fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Target]) {
+fn config_path(ctx: &Context, path: Option<&PathBuf>) -> Option<PathBuf> {
+    let path = path?;
+    if path.is_absolute() {
+        Some(path.clone())
+    } else {
+        Some(ctx.root.join(path))
+    }
+}
+
+pub(crate) fn print_outputs(
+    ctx: &Context,
+    profile: BuildProfile,
+    targets: &[Target],
+    standalone_plugin_id: Option<&str>,
+) -> Result<()> {
     for target in targets {
         match target {
             Target::Clap => println!("CLAP: {}", ctx.clap_bundle(profile).display()),
@@ -1827,12 +2011,14 @@ pub(crate) fn print_outputs(ctx: &Context, profile: BuildProfile, targets: &[Tar
                 }
             }
             Target::Standalone => {
-                for artifact in ctx.standalone_artifacts(profile) {
+                for (_, plugin) in standalone_products(ctx, standalone_plugin_id)? {
+                    let artifact = ctx.standalone_artifact_for(profile, plugin);
                     println!("Standalone: {}", artifact.display());
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
@@ -1908,6 +2094,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn command_exists_in_paths_checks_exact_candidate_files() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "wrac_xtask_command_path_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(temp_dir.join("pnpm.exe"), "").unwrap();
+
+        assert!(command_exists_in_paths(
+            OsStr::new("pnpm.exe"),
+            [temp_dir.clone()]
+        ));
+        assert!(!command_exists_in_paths(
+            OsStr::new("pnpm.cmd"),
+            [temp_dir.clone()]
+        ));
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
     fn parses_vst3_validator_cids_from_logged_output() {
         let output = r#"
 * Scanning classes...
@@ -1925,6 +2134,47 @@ mod tests {
                 "822011CA37EC5CEF92D7EC7E67207195".to_string(),
                 "FFFF664CB96353E687CC2A7CEB29674B".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn parses_visual_studio_generators_from_cmake_help() {
+        let help = r#"
+Generators
+
+The following generators are available on this platform (* marks default):
+* Visual Studio 18 2026        = Generates Visual Studio 2026 project files.
+  Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
+  Ninja                        = Generates build.ninja files.
+"#;
+
+        assert!(cmake_help_lists_generator(help, "Visual Studio 18 2026"));
+        assert!(cmake_help_lists_generator(help, "Visual Studio 17 2022"));
+        assert!(!cmake_help_lists_generator(help, "Visual Studio 16 2019"));
+        assert_eq!(
+            cmake_visual_studio_generators(help),
+            vec![
+                "Visual Studio 18 2026".to_owned(),
+                "Visual Studio 17 2022".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn selects_latest_visual_studio_generator_from_cmake_help() {
+        let help = r#"
+Generators
+
+The following generators are available on this platform (* marks default):
+  Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
+* Visual Studio 16 2019        = Generates Visual Studio 2019 project files.
+  Visual Studio 15 2017 [arch] = Generates Visual Studio 2017 project files.
+  Ninja                        = Generates build.ninja files.
+"#;
+
+        assert_eq!(
+            select_latest_visual_studio_generator(help),
+            Some("Visual Studio 17 2022".to_owned())
         );
     }
 }

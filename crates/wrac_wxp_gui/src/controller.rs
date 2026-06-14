@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGuiResizeRequester, HostWindow, PluginError,
-    PluginGuiExtension, PluginResult,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGui, HostWindow, PluginError,
+    PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginResult,
 };
 use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 use wxp::{WebViewDispatch, dpi::LogicalSize};
@@ -682,9 +682,9 @@ impl WxpGuiResizeHandle {
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
-        host_gui_resize_requester: &dyn HostGuiResizeRequester,
+        host_gui: &dyn HostGui,
     ) -> PluginResult<LogicalSize<f64>> {
-        // `HostGuiResizeRequester` can be shared from Send/Sync product state, but the target
+        // `HostGui` can be shared from Send/Sync product state, but the target
         // API is a host GUI extension. Keep the "GUI command only" threading contract at the
         // command registration boundary rather than making this a generic background-thread API.
         let scale = *self.scale.lock();
@@ -693,7 +693,7 @@ impl WxpGuiResizeHandle {
         let gui_size = dpi.logical_size_to_gui(logical_size);
 
         let previous_revision = self.layout.accepted_size_revision();
-        let resize_result = host_gui_resize_requester.request_resize(gui_size);
+        let resize_result = host_gui.request_resize(gui_size);
         let current_revision = self.layout.accepted_size_revision();
 
         // Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls
@@ -851,7 +851,7 @@ fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64
     None
 }
 
-impl PluginGuiExtension for WxpGuiController {
+impl PluginGuiQueryExtension for WxpGuiController {
     fn is_api_supported(&self, api: GuiApi, is_floating: bool) -> bool {
         !is_floating && api == default_gui_api()
     }
@@ -860,9 +860,37 @@ impl PluginGuiExtension for WxpGuiController {
         Some(default_gui_configuration())
     }
 
+    fn get_size(&self) -> PluginResult<GuiSize> {
+        let size = self.layout.accepted_size();
+        log::debug!(
+            "wxp controller: get_size called: width={}, height={}",
+            size.width,
+            size.height
+        );
+        Ok(size)
+    }
+
+    fn can_resize(&self) -> bool {
+        self.layout.can_resize()
+    }
+
+    fn resize_hints(&self) -> Option<GuiResizeHints> {
+        Some(self.layout.resize_hints())
+    }
+
+    fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
+        Ok(self.layout.clamp_size(size))
+    }
+}
+
+impl PluginGuiMainThreadExtension for WxpGuiController {
     fn create(&self, configuration: GuiConfig) -> PluginResult<()> {
         log::debug!("wxp controller: create called: configuration={configuration:?}");
-        if !self.is_api_supported(configuration.api, configuration.is_floating) {
+        if !PluginGuiQueryExtension::is_api_supported(
+            self,
+            configuration.api,
+            configuration.is_floating,
+        ) {
             log::debug!("wxp controller: create rejected unsupported configuration");
             return Err(PluginError::Message("unsupported GUI configuration"));
         }
@@ -914,28 +942,6 @@ impl PluginGuiExtension for WxpGuiController {
         *self.scale.lock() = scale;
         log::debug!("wxp controller: set_scale completed");
         Ok(())
-    }
-
-    fn get_size(&self) -> PluginResult<GuiSize> {
-        let size = self.layout.accepted_size();
-        log::debug!(
-            "wxp controller: get_size called: width={}, height={}",
-            size.width,
-            size.height
-        );
-        Ok(size)
-    }
-
-    fn can_resize(&self) -> bool {
-        self.layout.can_resize()
-    }
-
-    fn resize_hints(&self) -> Option<GuiResizeHints> {
-        Some(self.layout.resize_hints())
-    }
-
-    fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
-        Ok(self.layout.clamp_size(size))
     }
 
     fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
@@ -1114,6 +1120,16 @@ impl PluginGuiExtension for WxpGuiController {
         }
         log::debug!("wxp controller: hide completed");
         Ok(())
+    }
+}
+
+impl PluginGuiExtension for WxpGuiController {
+    fn query(&self) -> &(dyn PluginGuiQueryExtension + Send + Sync) {
+        self
+    }
+
+    fn main_thread(&self) -> &dyn PluginGuiMainThreadExtension {
+        self
     }
 }
 

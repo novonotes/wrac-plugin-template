@@ -1,7 +1,7 @@
 use clap_sys::ext::latency::clap_plugin_latency;
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::ffi_u32;
 
 pub(super) static LATENCY: clap_plugin_latency = clap_plugin_latency {
@@ -10,7 +10,7 @@ pub(super) static LATENCY: clap_plugin_latency = clap_plugin_latency {
 
 unsafe extern "C" fn latency_get(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("latency.get: missing plugin instance");
             return 0;
         };

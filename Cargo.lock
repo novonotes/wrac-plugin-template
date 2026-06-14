@@ -3083,6 +3083,7 @@ dependencies = [
 name = "wrac_build"
 version = "0.1.0"
 dependencies = [
+ "wrac_manifest",
  "zip 2.4.2",
 ]
 
@@ -3109,7 +3110,6 @@ dependencies = [
  "run_loop_timer",
  "serde",
  "serde_json",
- "toml",
  "wrac_build",
  "wrac_clap_adapter",
  "wrac_log",
@@ -3131,6 +3131,14 @@ dependencies = [
  "env_logger",
  "log",
  "time",
+]
+
+[[package]]
+name = "wrac_manifest"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -3166,6 +3174,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "wrac_manifest",
 ]
 
 [[package]]

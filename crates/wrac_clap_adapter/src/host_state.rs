@@ -1,13 +1,13 @@
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_host_state};
 use clap_sys::host::clap_host;
 
-use crate::HostStateDirtyNotifier;
+use crate::HostState;
 
-pub(crate) struct HostStateDirtyNotification {
+pub(crate) struct HostStateProxy {
     host_state: Option<HostStateMarkDirty>,
 }
 
-impl HostStateDirtyNotification {
+impl HostStateProxy {
     pub(crate) fn new(host: *const clap_host) -> Self {
         Self {
             host_state: host_state_mark_dirty(host),
@@ -15,7 +15,7 @@ impl HostStateDirtyNotification {
     }
 }
 
-impl HostStateDirtyNotifier for HostStateDirtyNotification {
+impl HostState for HostStateProxy {
     fn mark_dirty(&self) {
         let Some(host_state) = self.host_state else {
             log::debug!("host_state.mark_dirty: host state extension unavailable");

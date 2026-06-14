@@ -1,4 +1,4 @@
-//! Module that binds the CLAP ABI to `PluginCore` instances.
+//! Module that binds the CLAP ABI to `PluginInstance` instances.
 //!
 //! The public API is surfaced through re-exports in `lib.rs` and `export_clap_entry!`.
 //! This module is responsible only for C ABI callbacks and owning the adapter state.
@@ -8,6 +8,7 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 
 use clap_sys::ext::audio_ports::CLAP_EXT_AUDIO_PORTS;
 use clap_sys::ext::configurable_audio_ports::{
@@ -57,14 +58,15 @@ use crate::factory::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
-use crate::host_gui::HostGuiResizeRequest;
-use crate::host_state::HostStateDirtyNotification;
-use crate::params::ParameterEditQueue;
+use crate::host_gui::HostGuiProxy;
+use crate::host_state::HostStateProxy;
+use crate::params::HostParamsProxy;
 use crate::{
-    ActivateContext, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
-    PluginCoreContext, PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension,
-    PluginParamsExtension, PluginRenderExtension, PluginStateExtension, PluginTailExtension,
-    ProcessContext, ProcessStatus, Processor, TransportEvent,
+    ActivateContext, ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
+    PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginInstance,
+    PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
+    PluginRenderExtension, PluginStateExtension, PluginTailExtension, ProcessContext,
+    ProcessStatus, TransportEvent,
 };
 
 // clap-wrapper reads this draft factory when generating AUv2 metadata. Without a
@@ -88,18 +90,18 @@ const WRAC_PLUGIN_MAIN_THREAD_HOOK: &CStr = c"com.novonotes.wrac.plugin-main-thr
 /// instance creation. Without this separation, a wrapper that re-enters a query during
 /// `activate()` would fail to acquire the core lock and return "no parameters" or "state
 /// save failed" to the host — no crash, but project data and routing can be corrupted.
-pub(crate) struct PluginInstance {
+pub(crate) struct PluginInstanceState {
     plugin: clap_plugin,
     registration: &'static EntryRegistration,
     // Owner of the processor lifecycle; only activate/deactivate take this lock.
-    core: Mutex<Box<dyn PluginCore>>,
+    core: Mutex<Box<dyn PluginInstance>>,
     // Capability presence is frozen at instance creation. Coupling it to runtime state
     // would make extensions appear to disappear transiently during queries.
     capabilities: PluginCapabilities,
     audio_ports: Option<Arc<dyn PluginAudioPortsExtension>>,
     configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPortsExtension>>,
     note_ports: Option<Arc<dyn PluginNotePortsExtension>>,
-    parameters: Option<Arc<dyn PluginParamsExtension>>,
+    parameters: Arc<dyn PluginParamsQuery>,
     state: Option<Arc<dyn PluginStateExtension>>,
     gui: Option<Arc<dyn PluginGuiExtension>>,
     render: Option<Arc<dyn PluginRenderExtension>>,
@@ -109,12 +111,18 @@ pub(crate) struct PluginInstance {
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
     gui_callback_busy: Mutex<()>,
-    parameter_edits: Arc<ParameterEditQueue>,
+    // Defensive owner check for CLAP GUI [main-thread] callbacks. The adapter cannot
+    // identify the OS UI thread portably here, but it can reject lifecycle callbacks
+    // that move between host threads within one GUI session.
+    gui_lifecycle_thread: Mutex<Option<ThreadId>>,
+    host_params: Arc<HostParamsProxy>,
     // To preserve soundness even when a wrapper violates thread/lifecycle annotations,
     // the RT path never takes a lock — only a callback that wins the atomic guard
-    // constructs a `&mut` to `Processor`.
-    processor: UnsafeCell<Option<Box<dyn Processor>>>,
+    // constructs a `&mut` to the active or inactive processor.
+    inactive_processor: UnsafeCell<Option<Box<dyn InactiveProcessor>>>,
+    processor: UnsafeCell<Option<Box<dyn ActiveProcessor>>>,
     processor_busy: AtomicBool,
+    processor_active: AtomicBool,
     lifecycle_busy: AtomicBool,
 }
 
@@ -123,7 +131,6 @@ pub(crate) struct PluginCapabilities {
     audio_ports: bool,
     configurable_audio_ports: bool,
     note_ports: bool,
-    parameters: bool,
     state: bool,
     gui: bool,
     render: bool,
@@ -133,10 +140,10 @@ pub(crate) struct PluginCapabilities {
 // Safety: CLAP shares the same opaque plugin pointer across callbacks. Adapter state is
 // shared via locks and atomics, so Rust aliasing rules are never violated even when the
 // host's thread annotations or callback ordering breaks down.
-unsafe impl Send for PluginInstance {}
-unsafe impl Sync for PluginInstance {}
+unsafe impl Send for PluginInstanceState {}
+unsafe impl Sync for PluginInstanceState {}
 
-impl PluginInstance {
+impl PluginInstanceState {
     fn new(
         registration: &'static EntryRegistration,
         descriptor_index: usize,
@@ -145,16 +152,16 @@ impl PluginInstance {
         clap_host_name: Option<String>,
         host_context: HostContext,
     ) -> Option<Box<Self>> {
-        let parameter_edits = Arc::new(ParameterEditQueue::new(host));
+        let host_params = Arc::new(HostParamsProxy::new(host));
         // Pass as a safe proxy so product GUI code can hold it without knowing about
         // host pointers or CLAP event lifetimes.
-        let context = PluginCoreContext {
-            host_parameter_edit_notifier: parameter_edits.clone(),
-            host_state_dirty_notifier: Arc::new(HostStateDirtyNotification::new(host)),
-            host_gui_resize_requester: Arc::new(HostGuiResizeRequest::new(host)),
+        let context = PluginInstanceContext {
+            host_params: host_params.clone(),
+            host_state: Arc::new(HostStateProxy::new(host)),
+            host_gui: Arc::new(HostGuiProxy::new(host)),
             host_context: host_context.clone(),
         };
-        let core = registration
+        let mut core = registration
             .entry
             .plugin_factory()?
             .create_plugin(plugin_id, context)?;
@@ -174,6 +181,13 @@ impl PluginInstance {
         let configurable_audio_ports = core.configurable_audio_ports();
         let note_ports = core.note_ports();
         let parameters = core.params();
+        let inactive_processor = match core.initialize_processor() {
+            Ok(processor) => processor,
+            Err(error) => {
+                log::warn!("factory.create_plugin: inactive processor creation failed: {error}");
+                return None;
+            }
+        };
         let state = core.state();
         let gui = core.gui();
         let render = core.render();
@@ -183,7 +197,6 @@ impl PluginInstance {
             audio_ports: audio_ports.is_some(),
             configurable_audio_ports: configurable_audio_ports.is_some(),
             note_ports: note_ports.is_some(),
-            parameters: parameters.is_some(),
             state: state.is_some(),
             gui: gui.is_some(),
             render: render.is_some(),
@@ -220,9 +233,12 @@ impl PluginInstance {
             latency,
             host_context,
             gui_callback_busy: Mutex::new(()),
-            parameter_edits,
+            gui_lifecycle_thread: Mutex::new(None),
+            host_params,
+            inactive_processor: UnsafeCell::new(Some(inactive_processor)),
             processor: UnsafeCell::new(None),
             processor_busy: AtomicBool::new(false),
+            processor_active: AtomicBool::new(false),
             lifecycle_busy: AtomicBool::new(false),
         }))
     }
@@ -240,7 +256,7 @@ impl PluginInstance {
 
     fn with_processor_mut<R>(
         &self,
-        f: impl FnOnce(Option<&mut Box<dyn Processor>>) -> R,
+        f: impl FnOnce(Option<&mut Box<dyn ActiveProcessor>>) -> R,
     ) -> Option<R> {
         if self
             .processor_busy
@@ -261,11 +277,44 @@ impl PluginInstance {
         Some(f(unsafe { &mut *self.processor.get() }.as_mut()))
     }
 
-    fn try_take_processor(&self) -> Option<Option<Box<dyn Processor>>> {
-        self.with_processor_mut(|_| unsafe { &mut *self.processor.get() }.take())
+    fn try_take_processor(&self) -> Option<Option<Box<dyn ActiveProcessor>>> {
+        self.with_processor_mut(|_| {
+            let processor = unsafe { &mut *self.processor.get() }.take();
+            if processor.is_some() {
+                self.processor_active.store(false, Ordering::Release);
+            }
+            processor
+        })
     }
 
-    fn put_processor_blocking(&self, processor: Box<dyn Processor>) {
+    fn try_take_inactive_processor(&self) -> Option<Option<Box<dyn InactiveProcessor>>> {
+        self.with_processor_mut(|_| unsafe { &mut *self.inactive_processor.get() }.take())
+    }
+
+    fn with_inactive_processor_mut<R>(
+        &self,
+        f: impl FnOnce(Option<&mut Box<dyn InactiveProcessor>>) -> R,
+    ) -> Option<R> {
+        if self
+            .processor_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return None;
+        }
+
+        struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+        impl Drop for ProcessorBusyGuard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+
+        let _guard = ProcessorBusyGuard(&self.processor_busy);
+        Some(f(unsafe { &mut *self.inactive_processor.get() }.as_mut()))
+    }
+
+    fn put_processor_blocking(&self, processor: Box<dyn ActiveProcessor>) {
         let mut processor = Some(processor);
         loop {
             if self
@@ -282,6 +331,7 @@ impl PluginInstance {
                 let _guard = ProcessorBusyGuard(&self.processor_busy);
                 let storage = unsafe { &mut *self.processor.get() };
                 let old = storage.replace(processor.take().expect("stored once"));
+                self.processor_active.store(true, Ordering::Release);
                 drop(old);
                 return;
             }
@@ -291,14 +341,51 @@ impl PluginInstance {
         }
     }
 
-    fn take_processor_blocking(&self) -> Option<Box<dyn Processor>> {
+    fn put_inactive_processor_blocking(&self, processor: Box<dyn InactiveProcessor>) {
+        let mut processor = Some(processor);
+        loop {
+            if self
+                .processor_busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+                impl Drop for ProcessorBusyGuard<'_> {
+                    fn drop(&mut self) {
+                        self.0.store(false, Ordering::Release);
+                    }
+                }
+                let _guard = ProcessorBusyGuard(&self.processor_busy);
+                let storage = unsafe { &mut *self.inactive_processor.get() };
+                let old = storage.replace(processor.take().expect("stored once"));
+                drop(old);
+                return;
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    pub(crate) fn is_processor_active(&self) -> bool {
+        self.processor_active.load(Ordering::Acquire)
+    }
+
+    fn take_processor_blocking(&self) -> Option<Box<dyn ActiveProcessor>> {
         loop {
             if let Some(processor) = self.try_take_processor() {
                 return processor;
             }
             // deactivate/destroy are non-realtime lifecycle callbacks. Waiting here
             // ensures that even a wrapper which races lifecycle against audio never
-            // frees the instance while process() holds a temporary Processor borrow.
+            // frees the instance while process() holds a temporary ActiveProcessor borrow.
+            std::thread::yield_now();
+        }
+    }
+
+    fn take_inactive_processor_blocking(&self) -> Option<Box<dyn InactiveProcessor>> {
+        loop {
+            if let Some(processor) = self.try_take_inactive_processor() {
+                return processor;
+            }
             std::thread::yield_now();
         }
     }
@@ -325,6 +412,28 @@ impl PluginInstance {
             // stale adapter state.
             std::thread::yield_now();
         }
+    }
+
+    pub(crate) fn enter_gui_lifecycle_thread(&self, callback_name: &'static str) -> bool {
+        let current = std::thread::current().id();
+        let mut owner = self.gui_lifecycle_thread.lock();
+        match *owner {
+            Some(expected) if expected != current => {
+                log::error!(
+                    "rejecting CLAP GUI main-thread callback from a different thread: callback={callback_name} expected={expected:?} current={current:?}"
+                );
+                false
+            }
+            Some(_) => true,
+            None => {
+                *owner = Some(current);
+                true
+            }
+        }
+    }
+
+    pub(crate) fn clear_gui_lifecycle_thread(&self) {
+        *self.gui_lifecycle_thread.lock() = None;
     }
 }
 
@@ -612,7 +721,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
             registration.entry.attach_main_thread();
         }
 
-        let Some(mut instance) = PluginInstance::new(
+        let Some(mut instance) = PluginInstanceState::new(
             registration,
             descriptor_index,
             plugin_id,
@@ -626,7 +735,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
             log::warn!("factory.create_plugin: product factory returned no plugin core");
             return ptr::null();
         };
-        let instance_ptr = (&mut *instance) as *mut PluginInstance;
+        let instance_ptr = (&mut *instance) as *mut PluginInstanceState;
         instance.plugin.plugin_data = instance_ptr.cast();
         let plugin_ptr = &instance.plugin as *const clap_plugin;
         let _ = Box::into_raw(instance);
@@ -636,7 +745,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
 
 unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
-        let initialized = unsafe { PluginInstance::from_plugin(plugin).is_some() };
+        let initialized = unsafe { PluginInstanceState::from_plugin(plugin).is_some() };
         if !initialized {
             log::warn!("plugin.init: missing plugin instance");
         }
@@ -646,7 +755,7 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
 
 unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
     ffi_unit(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("plugin.destroy: missing plugin instance");
             return;
         };
@@ -656,7 +765,10 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
 
         if let Some(gui) = &instance.gui {
             if let Some(_gui_callback) = instance.gui_callback_busy.try_lock() {
-                gui.destroy();
+                if instance.enter_gui_lifecycle_thread("destroy") {
+                    gui.main_thread().destroy();
+                    instance.clear_gui_lifecycle_thread();
+                }
             } else {
                 log::error!(
                     "skipping GUI destroy during plugin destruction because another GUI callback is active"
@@ -665,13 +777,16 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         }
 
         if let Some(processor) = instance.take_processor_blocking() {
-            if let Err(error) = instance.core.lock().deactivate(processor) {
-                log::warn!("plugin.destroy: plugin deactivate failed: {error}");
+            match instance.core.lock().deactivate(processor) {
+                Ok(inactive) => drop(inactive),
+                Err(error) => log::warn!("plugin.destroy: plugin deactivate failed: {error}"),
             }
+        } else if let Some(inactive) = instance.take_inactive_processor_blocking() {
+            drop(inactive);
         }
 
         drop(guard);
-        let data = unsafe { (*plugin).plugin_data } as *mut PluginInstance;
+        let data = unsafe { (*plugin).plugin_data } as *mut PluginInstanceState;
         unsafe {
             drop(Box::from_raw(data));
         }
@@ -688,7 +803,7 @@ unsafe extern "C" fn plugin_activate(
     max_frames_count: u32,
 ) -> bool {
     ffi_bool(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("plugin.activate: missing plugin instance");
             return false;
         };
@@ -701,14 +816,29 @@ unsafe extern "C" fn plugin_activate(
             return false;
         }
 
-        let processor = match instance.core.lock().activate(ActivateContext {
-            sample_rate,
-            min_frames_count,
-            max_frames_count,
-        }) {
+        let Some(inactive_processor) = instance.take_inactive_processor_blocking() else {
+            log::warn!("plugin.activate: inactive processor is unavailable");
+            return false;
+        };
+
+        let mut core = instance.core.lock();
+        let processor = match core.activate(
+            ActivateContext {
+                sample_rate,
+                min_frames_count,
+                max_frames_count,
+            },
+            inactive_processor,
+        ) {
             Ok(processor) => processor,
             Err(error) => {
                 log::warn!("plugin.activate: plugin activate failed: {error}");
+                match core.initialize_processor() {
+                    Ok(inactive) => instance.put_inactive_processor_blocking(inactive),
+                    Err(error) => log::warn!(
+                        "plugin.activate: inactive processor recreation failed after activation error: {error}"
+                    ),
+                }
                 return false;
             }
         };
@@ -720,17 +850,20 @@ unsafe extern "C" fn plugin_activate(
 
 unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
     ffi_unit(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("plugin.deactivate: missing plugin instance");
             return;
         };
-        // deactivate is a cleanup callback that must reclaim the Processor before
+        // deactivate is a cleanup callback that must reclaim the ActiveProcessor before
         // returning completion to the host. Even if a wrapper runs lifecycle callbacks
         // concurrently, wait here to avoid missing the teardown.
         let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
-            if let Err(error) = instance.core.lock().deactivate(processor) {
-                log::warn!("plugin.deactivate: plugin deactivate failed: {error}");
+            match instance.core.lock().deactivate(processor) {
+                Ok(inactive) => instance.put_inactive_processor_blocking(inactive),
+                Err(error) => {
+                    log::warn!("plugin.deactivate: plugin deactivate failed: {error}");
+                }
             }
         }
     });
@@ -738,14 +871,14 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
 
 unsafe extern "C" fn plugin_start_processing(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!("plugin.start_processing: missing plugin instance");
             return false;
         };
         // In wrapper formats, `start_processing` / `stop_processing` may not be
         // synchronized with the VST3/AU activate. A dedicated flag would become a
         // failure point that stops audio at the host's discretion, so whether processing
-        // is possible is determined solely by the presence of a Processor.
+        // is possible is determined solely by the presence of an ActiveProcessor.
         let can_process = instance.has_processor_or_busy();
         if !can_process {
             wrac_log::rtwarn!("plugin.start_processing: no processor is available");
@@ -760,7 +893,7 @@ unsafe extern "C" fn plugin_stop_processing(_plugin: *const clap_plugin) {
 
 unsafe extern "C" fn plugin_reset(plugin: *const clap_plugin) {
     ffi_unit(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!("plugin.reset: missing plugin instance");
             return;
         };
@@ -782,7 +915,7 @@ unsafe extern "C" fn plugin_process(
     process: *const clap_process,
 ) -> clap_process_status {
     ffi_status(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rterror!("plugin.process: missing plugin instance");
             return CLAP_PROCESS_ERROR;
         };
@@ -792,11 +925,7 @@ unsafe extern "C" fn plugin_process(
             return CLAP_PROCESS_SLEEP;
         }
         let process = unsafe { &*process };
-        let mut events =
-            unsafe { crate::ProcessEvents::from_raw(process.in_events, process.out_events) };
-        instance
-            .parameter_edits
-            .drain_output_parameter_events(&mut events.output);
+        let events = unsafe { crate::EventLists::from_raw(process.in_events, process.out_events) };
         let audio = match unsafe { audio_buffers(process) } {
             Ok(audio) => audio,
             Err(error) => {
@@ -805,8 +934,8 @@ unsafe extern "C" fn plugin_process(
             }
         };
 
-        // The audio callback never takes the `PluginCore` lock. Whether processing is
-        // possible is determined by the actual presence of a `Processor`, not a separate
+        // The audio callback never takes the `PluginInstance` lock. Whether processing is
+        // possible is determined by the actual presence of a `ActiveProcessor`, not a separate
         // flag. If a wrapper violates lifecycle ordering, the RT path falls through to
         // sleep/error without waiting.
         let Some(result) = instance.with_processor_mut(|processor| {
@@ -848,7 +977,7 @@ unsafe extern "C" fn plugin_get_extension(
             return ptr::null();
         }
         let id = unsafe { CStr::from_ptr(id) };
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(_plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(_plugin) }) else {
             wrac_log::rtwarn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
@@ -861,7 +990,7 @@ unsafe extern "C" fn plugin_get_extension(
             &configurable_audio_ports::CONFIGURABLE_AUDIO_PORTS as *const _ as *const c_void
         } else if id == CLAP_EXT_NOTE_PORTS && instance.capabilities.note_ports {
             &note_ports::NOTE_PORTS as *const _ as *const c_void
-        } else if id == CLAP_EXT_PARAMS && instance.capabilities.parameters {
+        } else if id == CLAP_EXT_PARAMS {
             &params_extension::PARAMS as *const _ as *const c_void
         } else if id == CLAP_EXT_STATE && instance.capabilities.state {
             &state_extension::STATE as *const _ as *const c_void

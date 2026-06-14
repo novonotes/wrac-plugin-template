@@ -113,7 +113,7 @@ Standalone app は軽量な開発・smoke test 用 host です。リリース用
 | Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
 
-既定の build / install / validate target は `package.metadata.wrac.supported_formats` から決まります。
+既定の build / install / validate target は `wrac-plugin.toml` の `supported_formats` から決まります。
 `--target` を使うと特定の subset だけを指定できます。明示した plugin format target は `supported_formats` に含まれている必要があります。
 `cargo xtask build` は既定で開発用 standalone app もビルドします。build コマンドでは、開発専用 target として `standalone` も指定できます。
 build / install / validate では `--dry-run` を使って、実行前に task graph を確認できます。

@@ -8,6 +8,7 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 
 [dependencies]
+wrac_manifest = { workspace = true }
 zip = { version = "2.4.2", default-features = false, features = ["deflate"] }
 
 [lints.rust]

@@ -5,26 +5,17 @@ use cargo_metadata::MetadataCommand;
 use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
-use crate::{Result, XtaskConfig};
-
-#[derive(Debug, Clone)]
-pub(crate) struct PluginPackage {
-    pub(crate) package_name: String,
-    pub(crate) artifact_namespace: String,
-    pub(crate) manifest_path: PathBuf,
-    pub(crate) package_dir: PathBuf,
-    pub(crate) plugin_root: PathBuf,
-}
+use crate::{Result, WracPluginPackage, XtaskConfig};
 
 pub(crate) struct Context {
     pub(crate) root: PathBuf,
     pub(crate) package_name: String,
-    pub(crate) package_dir: PathBuf,
     pub(crate) plugin_root: PathBuf,
     pub(crate) manifest_path: PathBuf,
     pub(crate) platform: Platform,
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
+    pub(crate) default_aax_sdk_root: Option<PathBuf>,
     pub(crate) metadata: PluginMetadata,
 }
 
@@ -46,36 +37,26 @@ impl Context {
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.wrapper_dir.clone());
-        // Plugin identity is sourced from [package.metadata.wrac] in src-plugin/Cargo.toml.
-        // Maintaining separate bundle names or wrapper arguments in xtask risks stale build artifacts on rename.
-        let metadata = PluginMetadata::read(&package.manifest_path)?;
+        // Plugin identity is sourced from wrac-plugin.toml, with legacy Cargo
+        // metadata supported only as a migration fallback.
+        let metadata =
+            PluginMetadata::read_discovered(&package.manifest_path, &package.plugin_root)?;
 
         Ok(Self {
             root: config.root.clone(),
             package_name: package.package_name,
-            package_dir: package.package_dir,
             plugin_root: package.plugin_root,
             manifest_path: package.manifest_path,
             platform: Platform::detect()?,
             target_dir,
             wrapper_dir,
+            default_aax_sdk_root: config.default_aax_sdk_root.clone(),
             metadata,
         })
     }
 
     pub(crate) fn gui_dir(&self) -> PathBuf {
-        let package_gui_dir = self.package_dir.join("src-gui");
-        if package_gui_dir.join("package.json").exists() {
-            return package_gui_dir;
-        }
-        let plugin_root_gui_dir = self.plugin_root.join("src-gui");
-        if plugin_root_gui_dir.join("package.json").exists() {
-            return plugin_root_gui_dir;
-        }
-        // Some product repos keep the frontend package at the plugin root while
-        // the Rust crate lives in src-plugin. Build that package so release
-        // artifacts do not depend on checked-in dist files.
-        self.plugin_root.clone()
+        self.plugin_root.join("src-gui")
     }
 
     pub(crate) fn plugin_manifest(&self) -> PathBuf {
@@ -135,14 +116,6 @@ impl Context {
             .join(self.metadata.au_bundle_name())
     }
 
-    pub(crate) fn standalone_artifacts(&self, profile: BuildProfile) -> Vec<PathBuf> {
-        self.metadata
-            .plugins
-            .iter()
-            .map(|plugin| self.standalone_artifact_for(profile, plugin))
-            .collect()
-    }
-
     pub(crate) fn standalone_artifact_for(
         &self,
         profile: BuildProfile,
@@ -167,16 +140,13 @@ impl Context {
     }
 }
 
-pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPackage>> {
+pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
     let metadata = MetadataCommand::new()
         .manifest_path(config.root.join("Cargo.toml"))
         .exec()?;
 
     let mut packages = Vec::new();
     for package in metadata.workspace_packages() {
-        if package.metadata.get("wrac").is_none() {
-            continue;
-        }
         let manifest_path = package.manifest_path.clone().into_std_path_buf();
         let package_dir = manifest_path
             .parent()
@@ -206,11 +176,22 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
             })?
             .to_string_lossy()
             .into_owned();
-        packages.push(PluginPackage {
+        let has_manifest = wrac_manifest::discover_manifest(&manifest_path, &plugin_root)
+            .map(|source| match source {
+                wrac_manifest::ManifestSource::Dedicated(path) => path.exists(),
+                wrac_manifest::ManifestSource::LegacyCargoMetadata(_) => {
+                    package.metadata.get("wrac").is_some()
+                }
+            })
+            .unwrap_or(false);
+        if !has_manifest {
+            continue;
+        }
+        validate_plugin_layout(&package_dir, &plugin_root)?;
+        packages.push(WracPluginPackage {
             package_name: package.name.clone(),
             artifact_namespace,
             manifest_path,
-            package_dir,
             plugin_root,
         });
     }
@@ -218,7 +199,7 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<PluginPacka
     Ok(packages)
 }
 
-fn find_package(config: &XtaskConfig, package_name: &str) -> Result<PluginPackage> {
+fn find_package(config: &XtaskConfig, package_name: &str) -> Result<WracPluginPackage> {
     let packages = available_packages(config)?;
     for package in &packages {
         if package.package_name == package_name {
@@ -234,5 +215,108 @@ fn find_package(config: &XtaskConfig, package_name: &str) -> Result<PluginPackag
         Err(format!("unknown WRAC plugin package: {package_name}").into())
     } else {
         Err(format!("unknown WRAC plugin package: {package_name}. Available: {available}").into())
+    }
+}
+
+fn validate_plugin_layout(
+    package_dir: &std::path::Path,
+    plugin_root: &std::path::Path,
+) -> Result<()> {
+    if package_dir.file_name().and_then(|name| name.to_str()) != Some("src-plugin") {
+        return Err(format!(
+            "WRAC plugin package must live at <plugin-root>/src-plugin, but found {}",
+            package_dir.display()
+        )
+        .into());
+    }
+
+    let root_package_json = plugin_root.join("package.json");
+    if root_package_json.exists() {
+        return Err(format!(
+            "WRAC plugin frontend package must live at <plugin-root>/src-gui/package.json, but found {}",
+            root_package_json.display()
+        )
+        .into());
+    }
+
+    let nested_package_json = package_dir.join("src-gui").join("package.json");
+    if nested_package_json.exists() {
+        return Err(format!(
+            "WRAC plugin frontend package must live at <plugin-root>/src-gui/package.json, but found {}",
+            nested_package_json.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::validate_plugin_layout;
+
+    #[test]
+    fn accepts_conventional_plugin_layout() {
+        let root = temp_dir("conventional");
+        let plugin_root = root.join("plugins").join("wrac-gain");
+        let package_dir = plugin_root.join("src-plugin");
+        fs::create_dir_all(&package_dir).unwrap();
+
+        validate_plugin_layout(&package_dir, &plugin_root).unwrap();
+    }
+
+    #[test]
+    fn rejects_plugin_crate_outside_src_plugin() {
+        let root = temp_dir("plugin-crate-outside-src-plugin");
+        let plugin_root = root.join("plugins").join("wrac-gain");
+        let package_dir = plugin_root.clone();
+        fs::create_dir_all(&package_dir).unwrap();
+
+        let error = validate_plugin_layout(&package_dir, &plugin_root)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("<plugin-root>/src-plugin"));
+    }
+
+    #[test]
+    fn rejects_frontend_package_at_plugin_root() {
+        let root = temp_dir("frontend-at-plugin-root");
+        let plugin_root = root.join("plugins").join("wrac-gain");
+        let package_dir = plugin_root.join("src-plugin");
+        fs::create_dir_all(&package_dir).unwrap();
+        fs::write(plugin_root.join("package.json"), "{}").unwrap();
+
+        let error = validate_plugin_layout(&package_dir, &plugin_root)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("<plugin-root>/src-gui/package.json"));
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "wrac_xtask_layout_test_{}_{}_{}",
+            std::process::id(),
+            nanos,
+            name
+        ));
+        reset_dir(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn reset_dir(path: &Path) {
+        if path.exists() {
+            fs::remove_dir_all(path).unwrap();
+        }
     }
 }

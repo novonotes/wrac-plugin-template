@@ -1,3 +1,10 @@
+//! Host and wrapper-format detection for WRAC plugins.
+//!
+//! This crate keeps process-name, operating-system, and CLAP-wrapper format
+//! detection in one place so product code can receive a typed [`HostContext`]
+//! instead of duplicating host-specific checks. The result is diagnostic context;
+//! each caller still owns the policy decision for any workaround.
+
 use std::{path::Path, sync::OnceLock};
 
 #[cfg(target_os = "macos")]
@@ -26,7 +33,7 @@ impl HostContext {
 
     /// Keeps validation / scanner process classification as the WRAC-owned source of truth.
     ///
-    /// Product code should consume this result from the `PluginCoreContext::host_context`
+    /// Product code should consume this result from the `PluginInstanceContext::host_context`
     /// passed during plugin instance creation instead of duplicating process-name checks.
     pub fn is_validation_or_scan_host(&self) -> bool {
         self.host.is_validation_or_scan_host()

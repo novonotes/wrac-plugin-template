@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@novonotes/wrac-frontend-runtime": "file:../../../packages/wrac-frontend-runtime",
     "@novonotes/webview-bridge": "https://files.novonotes.download/libs/novonotes-webview-bridge-0.1.0-alpha.1.tgz"
   },
   "devDependencies": {

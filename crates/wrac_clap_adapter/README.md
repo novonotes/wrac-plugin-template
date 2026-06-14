@@ -25,11 +25,13 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 
 - `PluginEntry`: DSO-level lifecycle and typed factory provider
 - `PluginFactory`: CLAP `clap.plugin-factory`
-- `PluginCore`: instance lifecycle and declaration of supported extensions
+- `PluginInstance`: instance lifecycle and declaration of supported extensions
+- `ActiveProcessor`: active audio processing and active `params.flush`
+- `InactiveProcessor`: inactive `params.flush`
 - `PluginAudioPortsExtension`: CLAP `audio-ports`
 - `PluginConfigurableAudioPortsExtension`: CLAP `configurable-audio-ports`
 - `PluginNotePortsExtension`: CLAP `note-ports`
-- `PluginParamsExtension`: CLAP `params`
+- `PluginParamsQuery`: CLAP params query surface
 - `PluginStateExtension`: CLAP `state`
 - `PluginGuiExtension`: CLAP `gui`
 - `PluginRenderExtension`: CLAP `render`

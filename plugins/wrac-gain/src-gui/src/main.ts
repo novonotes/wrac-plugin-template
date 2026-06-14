@@ -16,14 +16,16 @@
  */
 import { Channel, invoke } from "@novonotes/webview-bridge";
 import {
-  type FrontendRuntimeContext,
+  createHostFocusRestorer,
+  createWracFrontendRuntime,
+  installConsoleLogPipe,
   installNativeCursorBridge,
   installResizeBridge,
-} from "./wracRuntime";
-import { installConsoleLogPipe } from "./nativeLog";
+} from "@novonotes/wrac-frontend-runtime";
 import "./style.css";
 
-installConsoleLogPipe();
+const runtime = createWracFrontendRuntime();
+installConsoleLogPipe(runtime.writeToLog);
 
 type PluginMetadata = {
   pluginId: string;
@@ -121,29 +123,7 @@ let parameterSubscriptionId: number | undefined;
 let editorPageSubscriptionId: number | undefined;
 let pluginMetadata: PluginMetadata | undefined;
 
-function isEditableElement(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
-}
-
-function restoreHostFocusIfNeeded(target?: EventTarget | null): void {
-  if (
-    isEditableElement(target ?? null) ||
-    isEditableElement(document.activeElement)
-  ) {
-    return;
-  }
-  window.setTimeout(() => {
-    if (isEditableElement(document.activeElement)) {
-      return;
-    }
-    void invoke("focus_host_window");
-  }, 0);
-}
+const restoreHostFocusIfNeeded = createHostFocusRestorer(runtime);
 
 function editableText(source: string): string {
   const match = source.match(/[-+]?\d*\.?\d+/);
@@ -223,10 +203,13 @@ void (async () => {
   );
   editorPageSubscriptionId = editorPageSubscription.subscriptionId;
   console.info("GUI initialization completed");
-  const runtimeContext = await invoke<FrontendRuntimeContext>(
-    "get_frontend_runtime_context",
-  ).catch(() => ({}));
-  installNativeCursorBridge(runtimeContext);
+  const runtimeContext = await runtime
+    .getFrontendRuntimeContext()
+    .catch(() => ({}));
+  installNativeCursorBridge({
+    runtime,
+    context: runtimeContext,
+  });
 })();
 
 function clamp(value: number): number {
@@ -491,6 +474,7 @@ headerAction.addEventListener("click", (event) => {
 });
 
 installResizeBridge({
+  runtime,
   resizeGrip,
   restoreHostFocus: restoreHostFocusIfNeeded,
 });

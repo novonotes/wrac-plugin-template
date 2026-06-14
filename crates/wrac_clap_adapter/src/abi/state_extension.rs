@@ -2,7 +2,7 @@ use clap_sys::ext::state::clap_plugin_state;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::stream::{clap_istream, clap_ostream};
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::{ffi_bool, read_stream_to_end, write_stream};
 use crate::State;
 
@@ -14,7 +14,7 @@ pub(super) static STATE: clap_plugin_state = clap_plugin_state {
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 // State callbacks may arrive while the plugin is active, depending on the host format.
-// Waiting for or giving up on the `PluginCore` write lock here could silently drop a project save,
+// Waiting for or giving up on the `PluginInstance` write lock here could silently drop a project save,
 // so only the thread-safe state capability fixed at instance creation is called.
 unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_ostream) -> bool {
     ffi_bool(|| {
@@ -22,7 +22,7 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.save: null stream");
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("state.save: missing plugin instance");
             return false;
         };
@@ -56,7 +56,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: null stream");
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("state.load: missing plugin instance");
             return false;
         };
@@ -74,7 +74,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }
-        instance.parameter_edits.rescan_values();
+        instance.host_params.rescan_values();
         log::debug!("state.load: restored byte_len={byte_len}");
         true
     })

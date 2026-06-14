@@ -1,3 +1,10 @@
+//! Shared implementation of the standard WRAC `cargo xtask` command surface.
+//!
+//! Repository-local `xtask` crates provide workspace paths and wrapper settings,
+//! then delegate build, install, launch, validate, uninstall, and clean behavior
+//! to this crate. Keeping the command implementation here prevents template and
+//! product repositories from drifting apart.
+
 use std::env;
 use std::error::Error;
 use std::path::PathBuf;
@@ -10,119 +17,372 @@ mod context;
 mod metadata;
 mod plan;
 mod profile;
-mod targets;
+pub mod targets;
 mod util;
 mod validation;
 
-use cli::{Cli, Commands};
+use cli::{CleanArgs, InstallScope, UninstallScope};
 use commands::{clean, launch};
 use context::{Context, available_packages};
 use profile::BuildProfile;
+use targets::{PluginTarget, Target, ValidateTarget};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
+/// Parses the standard WRAC xtask CLI into a typed command.
+///
+/// Repository-local xtasks can provide only workspace wiring and delegate the
+/// WRAC command surface to this crate, which keeps help text and behavior from
+/// drifting between the template and downstream product repositories.
+pub fn command_from_args() -> WracCommand {
+    cli::Cli::parse().command.into()
+}
 
 #[derive(Debug, Clone)]
 pub struct XtaskConfig {
     pub root: PathBuf,
     pub wrapper_dir: PathBuf,
     pub target_namespace: String,
+    pub default_aax_sdk_root: Option<PathBuf>,
 }
 
-pub fn run(config: XtaskConfig) -> Result<()> {
-    load_workspace_dotenv(&config)?;
-    let cli = Cli::parse();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WracPluginPackage {
+    pub package_name: String,
+    pub artifact_namespace: String,
+    pub manifest_path: PathBuf,
+    pub plugin_root: PathBuf,
+}
 
-    match cli.command {
-        Commands::Build(args) => {
-            // Keep build/install logic scoped to one plugin package at a time. A package may
-            // export multiple plugin products; the shared Context is still the correct unit for
-            // metadata, GUI assets, wrapper staging, and install paths.
-            let mut failures = Vec::new();
-            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &package)?;
-                if let Err(err) = plan::run_build(&ctx, &args) {
-                    if args.continue_on_error {
-                        failures.push(format!("{package}: {err}"));
-                    } else {
-                        return Err(err);
-                    }
-                }
-            }
-            if !failures.is_empty() {
-                return Err(failures.join("\n").into());
-            }
-        }
-        Commands::Install(args) => {
-            let mut failures = Vec::new();
-            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &package)?;
-                if let Err(err) = plan::run_install(&ctx, &args) {
-                    if args.continue_on_error {
-                        failures.push(format!("{package}: {err}"));
-                    } else {
-                        return Err(err);
-                    }
-                }
-            }
-            if !failures.is_empty() {
-                return Err(failures.join("\n").into());
-            }
-        }
-        Commands::Uninstall(args) => {
-            let mut failures = Vec::new();
-            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &package)?;
-                if let Err(err) = plan::run_uninstall(&ctx, &args) {
-                    if args.continue_on_error {
-                        failures.push(format!("{package}: {err}"));
-                    } else {
-                        return Err(err);
-                    }
-                }
-            }
-            if !failures.is_empty() {
-                return Err(failures.join("\n").into());
-            }
-        }
-        Commands::Validate(args) => {
-            let mut failures = Vec::new();
-            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &package)?;
-                if let Err(err) = plan::run_validate(&ctx, &args) {
-                    if args.continue_on_error {
-                        failures.push(format!("{package}: {err}"));
-                    } else {
-                        return Err(err);
-                    }
-                }
-            }
-            if !failures.is_empty() {
-                return Err(failures.join("\n").into());
-            }
-        }
-        Commands::Launch(args) => {
-            let package = selected_package(&config, args.package.as_deref())?;
-            let ctx = Context::new(&config, &package)?;
-            // Validate product selection before the implicit standalone build.
-            // A typo in --plugin-id is independent of artifacts and should not
-            // spend time configuring CMake or building wrapper dependencies.
-            commands::ensure_launch_target_exists(&ctx, args.plugin_id.as_deref())?;
-            plan::run_build(&ctx, &args_for_launch_build(&args))?;
-            launch(
-                &ctx,
-                BuildProfile::from_release(args.release),
-                args.plugin_id.as_deref(),
-            )?;
-        }
-        Commands::Clean(args) => {
-            for package in selected_packages(&config, args.package.as_deref(), args.all)? {
-                let ctx = Context::new(&config, &package)?;
-                clean(&ctx)?;
-            }
-        }
+/// Discovers WRAC plugin packages from workspace metadata.
+///
+/// This is the same package discovery used by `--all` commands, exposed for
+/// repository-local automation that needs to build CI matrices without
+/// duplicating Cargo metadata and WRAC manifest lookup rules.
+pub fn discover_plugin_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
+    available_packages(config)
+}
+
+#[derive(Debug, Clone)]
+pub struct WracWorkspace {
+    config: XtaskConfig,
+}
+
+#[derive(Debug, Clone)]
+pub enum WracCommand {
+    Build(BuildOptions),
+    Install(InstallOptions),
+    Uninstall(UninstallOptions),
+    Validate(ValidateOptions),
+    Launch(LaunchOptions),
+    Clean(CleanOptions),
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BuildOptions {
+    pub package: Option<String>,
+    pub all: bool,
+    pub release: bool,
+    pub clean: bool,
+    pub dry_run: bool,
+    pub continue_on_error: bool,
+    pub target: Vec<Target>,
+    pub plugin_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InstallOptions {
+    pub package: Option<String>,
+    pub all: bool,
+    pub release: bool,
+    pub scope: WracInstallScope,
+    pub dry_run: bool,
+    pub continue_on_error: bool,
+    pub target: Vec<PluginTarget>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UninstallOptions {
+    pub package: Option<String>,
+    pub all: bool,
+    pub scope: WracUninstallScope,
+    pub target: Vec<PluginTarget>,
+    pub dry_run: bool,
+    pub continue_on_error: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ValidateOptions {
+    pub package: Option<String>,
+    pub all: bool,
+    pub release: bool,
+    pub dry_run: bool,
+    pub continue_on_error: bool,
+    pub target: Vec<ValidateTarget>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LaunchOptions {
+    pub package: Option<String>,
+    pub release: bool,
+    pub plugin_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CleanOptions {
+    pub package: Option<String>,
+    pub all: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WracInstallScope {
+    Default,
+    User,
+    System,
+}
+
+impl Default for WracInstallScope {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WracUninstallScope {
+    All,
+    User,
+    System,
+}
+
+impl Default for WracUninstallScope {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl WracWorkspace {
+    pub fn new(config: XtaskConfig) -> Result<Self> {
+        load_workspace_dotenv(&config)?;
+        Ok(Self { config })
     }
 
-    Ok(())
+    pub fn run(&self, command: WracCommand) -> Result<()> {
+        match command {
+            WracCommand::Build(options) => {
+                self.run_build(options)?;
+            }
+            WracCommand::Install(options) => {
+                self.run_install(options)?;
+            }
+            WracCommand::Uninstall(options) => {
+                self.run_uninstall(options)?;
+            }
+            WracCommand::Validate(options) => {
+                self.run_validate(options)?;
+            }
+            WracCommand::Launch(options) => {
+                self.run_launch(options)?;
+            }
+            WracCommand::Clean(options) => {
+                self.run_clean(options)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn run_build(&self, options: BuildOptions) -> Result<()> {
+        let args = cli::BuildArgs {
+            package: options.package,
+            all: options.all,
+            release: options.release,
+            clean: options.clean,
+            dry_run: options.dry_run,
+            continue_on_error: options.continue_on_error,
+            target: options.target,
+            standalone_plugin_id: options.plugin_id,
+        };
+        // Keep build/install logic scoped to one plugin package at a time. A package may
+        // export multiple plugin products; the shared Context is still the correct unit for
+        // metadata, GUI assets, wrapper staging, and install paths.
+        let mut failures = Vec::new();
+        for package in selected_packages(&self.config, args.package.as_deref(), args.all)? {
+            let ctx = Context::new(&self.config, &package)?;
+            if let Err(err) = plan::run_build(&ctx, &args) {
+                if args.continue_on_error {
+                    failures.push(format!("{package}: {err}"));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("\n").into());
+        }
+        Ok(())
+    }
+
+    fn run_install(&self, options: InstallOptions) -> Result<()> {
+        let args = cli::InstallArgs {
+            package: options.package,
+            all: options.all,
+            release: options.release,
+            scope: options.scope.into(),
+            dry_run: options.dry_run,
+            continue_on_error: options.continue_on_error,
+            target: options.target,
+        };
+        let mut failures = Vec::new();
+        for package in selected_packages(&self.config, args.package.as_deref(), args.all)? {
+            let ctx = Context::new(&self.config, &package)?;
+            if let Err(err) = plan::run_install(&ctx, &args) {
+                if args.continue_on_error {
+                    failures.push(format!("{package}: {err}"));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("\n").into());
+        }
+        Ok(())
+    }
+
+    fn run_uninstall(&self, options: UninstallOptions) -> Result<()> {
+        let args = cli::UninstallArgs {
+            package: options.package,
+            all: options.all,
+            scope: options.scope.into(),
+            target: options.target,
+            dry_run: options.dry_run,
+            continue_on_error: options.continue_on_error,
+        };
+        let mut failures = Vec::new();
+        for package in selected_packages(&self.config, args.package.as_deref(), args.all)? {
+            let ctx = Context::new(&self.config, &package)?;
+            if let Err(err) = plan::run_uninstall(&ctx, &args) {
+                if args.continue_on_error {
+                    failures.push(format!("{package}: {err}"));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("\n").into());
+        }
+        Ok(())
+    }
+
+    fn run_validate(&self, options: ValidateOptions) -> Result<()> {
+        let args = cli::ValidateArgs {
+            package: options.package,
+            all: options.all,
+            release: options.release,
+            dry_run: options.dry_run,
+            continue_on_error: options.continue_on_error,
+            target: options.target,
+        };
+        let mut failures = Vec::new();
+        for package in selected_packages(&self.config, args.package.as_deref(), args.all)? {
+            let ctx = Context::new(&self.config, &package)?;
+            if let Err(err) = plan::run_validate(&ctx, &args) {
+                if args.continue_on_error {
+                    failures.push(format!("{package}: {err}"));
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+        if !failures.is_empty() {
+            return Err(failures.join("\n").into());
+        }
+        Ok(())
+    }
+
+    fn run_launch(&self, options: LaunchOptions) -> Result<()> {
+        let args = cli::LaunchArgs {
+            package: options.package,
+            release: options.release,
+            plugin_id: options.plugin_id,
+        };
+        let package = selected_package(&self.config, args.package.as_deref())?;
+        let ctx = Context::new(&self.config, &package)?;
+        // Validate product selection before the implicit standalone build.
+        // A typo in --plugin-id is independent of artifacts and should not
+        // spend time configuring CMake or building wrapper dependencies.
+        commands::ensure_launch_target_exists(&ctx, args.plugin_id.as_deref())?;
+        plan::run_build(&ctx, &args_for_launch_build(&args))?;
+        launch(
+            &ctx,
+            BuildProfile::from_release(args.release),
+            args.plugin_id.as_deref(),
+        )?;
+        Ok(())
+    }
+
+    fn run_clean(&self, options: CleanOptions) -> Result<()> {
+        let args = CleanArgs {
+            package: options.package,
+            all: options.all,
+        };
+        for package in selected_packages(&self.config, args.package.as_deref(), args.all)? {
+            let ctx = Context::new(&self.config, &package)?;
+            clean(&ctx)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<cli::Commands> for WracCommand {
+    fn from(command: cli::Commands) -> Self {
+        match command {
+            cli::Commands::Build(args) => Self::Build(BuildOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                clean: args.clean,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+                plugin_id: args.standalone_plugin_id,
+            }),
+            cli::Commands::Install(args) => Self::Install(InstallOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                scope: args.scope.into(),
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+            }),
+            cli::Commands::Uninstall(args) => Self::Uninstall(UninstallOptions {
+                package: args.package,
+                all: args.all,
+                scope: args.scope.into(),
+                target: args.target,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+            }),
+            cli::Commands::Validate(args) => Self::Validate(ValidateOptions {
+                package: args.package,
+                all: args.all,
+                release: args.release,
+                dry_run: args.dry_run,
+                continue_on_error: args.continue_on_error,
+                target: args.target,
+            }),
+            cli::Commands::Launch(args) => Self::Launch(LaunchOptions {
+                package: args.package,
+                release: args.release,
+                plugin_id: args.plugin_id,
+            }),
+            cli::Commands::Clean(args) => Self::Clean(CleanOptions {
+                package: args.package,
+                all: args.all,
+            }),
+        }
+    }
 }
 
 fn load_workspace_dotenv(config: &XtaskConfig) -> Result<()> {
@@ -205,5 +465,46 @@ fn args_for_launch_build(args: &cli::LaunchArgs) -> cli::BuildArgs {
         dry_run: false,
         continue_on_error: false,
         target: vec![targets::Target::Standalone],
+        standalone_plugin_id: args.plugin_id.clone(),
+    }
+}
+
+impl From<WracInstallScope> for InstallScope {
+    fn from(scope: WracInstallScope) -> Self {
+        match scope {
+            WracInstallScope::Default => Self::Default,
+            WracInstallScope::User => Self::User,
+            WracInstallScope::System => Self::System,
+        }
+    }
+}
+
+impl From<InstallScope> for WracInstallScope {
+    fn from(scope: InstallScope) -> Self {
+        match scope {
+            InstallScope::Default => Self::Default,
+            InstallScope::User => Self::User,
+            InstallScope::System => Self::System,
+        }
+    }
+}
+
+impl From<WracUninstallScope> for UninstallScope {
+    fn from(scope: WracUninstallScope) -> Self {
+        match scope {
+            WracUninstallScope::All => Self::All,
+            WracUninstallScope::User => Self::User,
+            WracUninstallScope::System => Self::System,
+        }
+    }
+}
+
+impl From<UninstallScope> for WracUninstallScope {
+    fn from(scope: UninstallScope) -> Self {
+        match scope {
+            UninstallScope::All => Self::All,
+            UninstallScope::User => Self::User,
+            UninstallScope::System => Self::System,
+        }
     }
 }

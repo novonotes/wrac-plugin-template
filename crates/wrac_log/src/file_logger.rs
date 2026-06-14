@@ -234,10 +234,17 @@ fn archive_existing_latest_log(latest_log_file: &Path, file_stem: &str) -> std::
     let Some(log_dir) = latest_log_file.parent() else {
         return Ok(());
     };
-    std::fs::rename(
+    match std::fs::rename(
         latest_log_file,
         unique_archived_log_file_path(log_dir, file_stem)?,
-    )
+    ) {
+        Ok(()) => Ok(()),
+        // Validators and plugin scanners can create multiple short-lived plugin
+        // processes at once. Another process may archive the same Latest log after
+        // our exists check, which is already a successful outcome for this session.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn unique_archived_log_file_path(log_dir: &Path, file_stem: &str) -> std::io::Result<PathBuf> {

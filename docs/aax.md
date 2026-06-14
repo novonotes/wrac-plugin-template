@@ -3,7 +3,7 @@
 > Japanese version: [aax-ja.md](aax-ja.md)
 
 AAX support can be enabled by adding `aax` to
-`package.metadata.wrac.supported_formats`.
+`wrac-plugin.toml` `supported_formats`.
 
 ## Prerequisites
 

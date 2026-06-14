@@ -1,20 +1,4 @@
-import { invoke } from "@novonotes/webview-bridge";
-
-export type NativeLogLevel = "debug" | "info" | "warn" | "error";
-
-export type NativeLogData =
-  | null
-  | string
-  | number
-  | boolean
-  | NativeLogData[]
-  | { [key: string]: NativeLogData };
-
-export type NativeLogEntry = {
-  level: NativeLogLevel;
-  message: string;
-  data?: NativeLogData;
-};
+import type { NativeLogData, NativeLogEntry, NativeLogLevel } from "./runtime";
 
 type ConsoleMethodName = "debug" | "log" | "info" | "warn" | "error";
 
@@ -28,15 +12,9 @@ const consoleMethodLevels = {
 
 let consoleLogPipeInstalled = false;
 
-export function logNative(entry: NativeLogEntry): void {
-  try {
-    void invoke("write_to_log", { entry }).catch(() => undefined);
-  } catch {
-    // Logging must never break GUI behavior.
-  }
-}
-
-export function installConsoleLogPipe(): void {
+export function installConsoleLogPipe(
+  writeToLog: (entry: NativeLogEntry) => Promise<unknown> | void,
+): void {
   if (consoleLogPipeInstalled) {
     return;
   }
@@ -55,10 +33,17 @@ export function installConsoleLogPipe(): void {
   ) as ConsoleMethodName[]) {
     console[methodName] = (...args: unknown[]) => {
       originalConsole[methodName](...args);
-      logNative({
-        level: consoleMethodLevels[methodName],
-        message: formatConsoleArgs(args),
-      });
+      try {
+        const result = writeToLog({
+          level: consoleMethodLevels[methodName],
+          message: formatConsoleArgs(args),
+        });
+        if (result instanceof Promise) {
+          void result.catch(() => undefined);
+        }
+      } catch {
+        // Logging must never break GUI behavior.
+      }
     };
   }
 }
@@ -104,7 +89,7 @@ function stringifyObject(value: object, seen: WeakSet<object>): string {
 }
 
 function createJsonReplacer(seen: WeakSet<object>) {
-  return (_key: string, value: unknown): unknown => {
+  return (_key: string, value: unknown): NativeLogData | undefined => {
     if (typeof value === "bigint") {
       return `${value.toString()}n`;
     }
@@ -118,7 +103,7 @@ function createJsonReplacer(seen: WeakSet<object>) {
       return {
         name: value.name,
         message: value.message,
-        stack: value.stack,
+        stack: value.stack ?? null,
       };
     }
     if (value && typeof value === "object") {
@@ -127,6 +112,17 @@ function createJsonReplacer(seen: WeakSet<object>) {
       }
       seen.add(value);
     }
-    return value;
+    if (
+      value === undefined ||
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      Array.isArray(value) ||
+      typeof value === "object"
+    ) {
+      return value as NativeLogData | undefined;
+    }
+    return String(value);
   };
 }
