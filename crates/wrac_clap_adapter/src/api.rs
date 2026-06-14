@@ -50,6 +50,8 @@ pub use params::PluginParamsQuery;
 pub use process::{
     ActiveProcessor, InactiveProcessor, ParamFlushContext, ProcessContext, ProcessStatus,
 };
+#[cfg(feature = "raw-clap-forwarding")]
+pub use process::{RawParamFlushContext, RawProcessContext};
 pub use types::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, GuiApi, GuiConfig,
     GuiResizeHints, GuiSize, HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo,

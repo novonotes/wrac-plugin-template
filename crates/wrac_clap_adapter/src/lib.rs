@@ -27,6 +27,8 @@ pub use api::{
     PluginRenderExtension, PluginRenderMode, PluginResult, PluginStateExtension,
     PluginTailExtension, ProcessContext, ProcessStatus, State, SystemContext,
 };
+#[cfg(feature = "raw-clap-forwarding")]
+pub use api::{RawParamFlushContext, RawProcessContext};
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
 };
