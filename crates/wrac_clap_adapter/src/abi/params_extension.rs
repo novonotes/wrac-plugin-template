@@ -13,8 +13,8 @@ use clap_sys::ext::params::{
 };
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_u32, ffi_unit, fill_c_char_array, write_c_str_buffer};
+use super::{PluginInstanceState, RtDepthGuard};
 use crate::ParamFlags;
 use wrac_host_context::PluginFormat;
 
@@ -203,15 +203,29 @@ unsafe extern "C" fn params_flush(
         let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             return;
         };
-        let events = unsafe { crate::EventLists::from_raw(in_events, out_events) };
+        let _flush_depth_guard = RtDepthGuard::enter(&instance.rt_flush_depth);
+        let process_depth = instance
+            .rt_process_depth
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if process_depth > 0 {
+            wrac_log::rtdebug!("params.flush enter pd={}", process_depth);
+        }
         let result = if instance.is_processor_active() {
             let Some(result) = instance.with_processor_mut(|active| {
                 let Some(active) = active else {
                     wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
                     return Ok(());
                 };
-                active.flush_params(crate::ParamFlushContext { events })
+                active.flush_params(param_flush_context(in_events, out_events))
             }) else {
+                let flush_depth = instance
+                    .rt_flush_depth
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                wrac_log::rtdebug!(
+                    "params.flush active busy pd={} fd={}",
+                    process_depth,
+                    flush_depth
+                );
                 wrac_log::rtwarn!("params.flush: active processor is busy");
                 return;
             };
@@ -228,8 +242,16 @@ unsafe extern "C" fn params_flush(
                         wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
                         return Ok(());
                     };
-                    active.flush_params(crate::ParamFlushContext { events })
+                    active.flush_params(param_flush_context(in_events, out_events))
                 }) else {
+                    let flush_depth = instance
+                        .rt_flush_depth
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    wrac_log::rtdebug!(
+                        "params.flush active busy pd={} fd={}",
+                        process_depth,
+                        flush_depth
+                    );
                     wrac_log::rtwarn!("params.flush: active processor is busy");
                     return;
                 };
@@ -242,7 +264,7 @@ unsafe extern "C" fn params_flush(
                         );
                         return Ok(());
                     };
-                    inactive.flush_params(crate::ParamFlushContext { events })
+                    inactive.flush_params(param_flush_context(in_events, out_events))
                 }) else {
                     wrac_log::rtwarn!("params.flush: inactive processor is busy");
                     return;
@@ -254,6 +276,17 @@ unsafe extern "C" fn params_flush(
             wrac_log::rtwarn!("params.flush: processor failed: {error}");
         }
     });
+}
+
+fn param_flush_context<'a>(
+    in_events: *const clap_input_events,
+    out_events: *const clap_output_events,
+) -> crate::ParamFlushContext<'a> {
+    crate::ParamFlushContext {
+        events: unsafe { crate::EventLists::from_raw(in_events, out_events) },
+        #[cfg(feature = "raw-clap-forwarding")]
+        raw: unsafe { crate::RawParamFlushContext::from_raw(in_events, out_events) },
+    }
 }
 
 fn parameter_flags(flags: ParamFlags) -> u32 {

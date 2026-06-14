@@ -7,7 +7,7 @@ use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::ThreadId;
 
 use clap_sys::ext::audio_ports::CLAP_EXT_AUDIO_PORTS;
@@ -82,6 +82,21 @@ const CLAP_PLUGIN_AS_VST3: &CStr = c"clap.plugin-info-as-vst3/0";
 const CLAP_PLUGIN_FACTORY_INFO_AAX: &CStr = c"clap.plugin-factory-info-as-aax/1";
 const WRAC_PLUGIN_MAIN_THREAD_HOOK: &CStr = c"com.novonotes.wrac.plugin-main-thread-hook/0";
 
+pub(crate) struct RtDepthGuard<'a>(&'a AtomicU32);
+
+impl<'a> RtDepthGuard<'a> {
+    pub(crate) fn enter(depth: &'a AtomicU32) -> Self {
+        depth.fetch_add(1, Ordering::Relaxed);
+        Self(depth)
+    }
+}
+
+impl Drop for RtDepthGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// Synchronization boundary between a CLAP instance and the Rust core.
 ///
 /// Key design: separate the "lifecycle lock" from "capabilities read directly by
@@ -124,6 +139,9 @@ pub(crate) struct PluginInstanceState {
     processor_busy: AtomicBool,
     processor_active: AtomicBool,
     lifecycle_busy: AtomicBool,
+    rt_process_depth: AtomicU32,
+    rt_flush_depth: AtomicU32,
+    rt_processor_contention: AtomicBool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -240,6 +258,9 @@ impl PluginInstanceState {
             processor_busy: AtomicBool::new(false),
             processor_active: AtomicBool::new(false),
             lifecycle_busy: AtomicBool::new(false),
+            rt_process_depth: AtomicU32::new(0),
+            rt_flush_depth: AtomicU32::new(0),
+            rt_processor_contention: AtomicBool::new(false),
         }))
     }
 
@@ -263,17 +284,37 @@ impl PluginInstanceState {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
+            self.rt_processor_contention.store(true, Ordering::Release);
             return None;
         }
 
-        struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+        struct ProcessorBusyGuard<'a> {
+            busy: &'a AtomicBool,
+            contention: &'a AtomicBool,
+            process_depth: &'a AtomicU32,
+            flush_depth: &'a AtomicU32,
+        }
         impl Drop for ProcessorBusyGuard<'_> {
             fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
+                self.busy.store(false, Ordering::Release);
+                if self.contention.swap(false, Ordering::AcqRel) {
+                    let process_depth = self.process_depth.load(Ordering::Relaxed);
+                    let flush_depth = self.flush_depth.load(Ordering::Relaxed);
+                    wrac_log::rtdebug!(
+                        "processor.busy clear pd={} fd={}",
+                        process_depth,
+                        flush_depth
+                    );
+                }
             }
         }
 
-        let _guard = ProcessorBusyGuard(&self.processor_busy);
+        let _guard = ProcessorBusyGuard {
+            busy: &self.processor_busy,
+            contention: &self.rt_processor_contention,
+            process_depth: &self.rt_process_depth,
+            flush_depth: &self.rt_flush_depth,
+        };
         Some(f(unsafe { &mut *self.processor.get() }.as_mut()))
     }
 
@@ -300,17 +341,37 @@ impl PluginInstanceState {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
+            self.rt_processor_contention.store(true, Ordering::Release);
             return None;
         }
 
-        struct ProcessorBusyGuard<'a>(&'a AtomicBool);
+        struct ProcessorBusyGuard<'a> {
+            busy: &'a AtomicBool,
+            contention: &'a AtomicBool,
+            process_depth: &'a AtomicU32,
+            flush_depth: &'a AtomicU32,
+        }
         impl Drop for ProcessorBusyGuard<'_> {
             fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
+                self.busy.store(false, Ordering::Release);
+                if self.contention.swap(false, Ordering::AcqRel) {
+                    let process_depth = self.process_depth.load(Ordering::Relaxed);
+                    let flush_depth = self.flush_depth.load(Ordering::Relaxed);
+                    wrac_log::rtdebug!(
+                        "processor.busy clear pd={} fd={}",
+                        process_depth,
+                        flush_depth
+                    );
+                }
             }
         }
 
-        let _guard = ProcessorBusyGuard(&self.processor_busy);
+        let _guard = ProcessorBusyGuard {
+            busy: &self.processor_busy,
+            contention: &self.rt_processor_contention,
+            process_depth: &self.rt_process_depth,
+            flush_depth: &self.rt_flush_depth,
+        };
         Some(f(unsafe { &mut *self.inactive_processor.get() }.as_mut()))
     }
 
@@ -924,6 +985,7 @@ unsafe extern "C" fn plugin_process(
             wrac_log::rtwarn!("plugin.process: null process pointer");
             return CLAP_PROCESS_SLEEP;
         }
+        let _process_depth_guard = RtDepthGuard::enter(&instance.rt_process_depth);
         let process = unsafe { &*process };
         let events = unsafe { crate::EventLists::from_raw(process.in_events, process.out_events) };
         let audio = match unsafe { audio_buffers(process) } {
@@ -949,6 +1011,8 @@ unsafe extern "C" fn plugin_process(
                 audio,
                 events,
                 transport: unsafe { process.transport.as_ref() }.map(TransportEvent::from_raw),
+                #[cfg(feature = "raw-clap-forwarding")]
+                raw: unsafe { crate::RawProcessContext::from_raw(process) },
             }) {
                 Ok(ProcessStatus::Continue) => CLAP_PROCESS_CONTINUE,
                 Ok(ProcessStatus::ContinueIfNotQuiet) => CLAP_PROCESS_CONTINUE_IF_NOT_QUIET,
@@ -960,6 +1024,8 @@ unsafe extern "C" fn plugin_process(
                 }
             }
         }) else {
+            let flush_depth = instance.rt_flush_depth.load(Ordering::Relaxed);
+            wrac_log::rtdebug!("plugin.process busy fd={}", flush_depth);
             wrac_log::rtwarn!("plugin.process: processor is busy");
             return CLAP_PROCESS_SLEEP;
         };
