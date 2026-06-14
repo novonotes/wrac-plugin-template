@@ -8,6 +8,7 @@ use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 
 use clap_sys::ext::audio_ports::CLAP_EXT_AUDIO_PORTS;
 use clap_sys::ext::configurable_audio_ports::{
@@ -110,6 +111,10 @@ pub(crate) struct PluginInstanceState {
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
     gui_callback_busy: Mutex<()>,
+    // Defensive owner check for CLAP GUI [main-thread] callbacks. The adapter cannot
+    // identify the OS UI thread portably here, but it can reject lifecycle callbacks
+    // that move between host threads within one GUI session.
+    gui_lifecycle_thread: Mutex<Option<ThreadId>>,
     host_params: Arc<HostParamsProxy>,
     // To preserve soundness even when a wrapper violates thread/lifecycle annotations,
     // the RT path never takes a lock — only a callback that wins the atomic guard
@@ -228,6 +233,7 @@ impl PluginInstanceState {
             latency,
             host_context,
             gui_callback_busy: Mutex::new(()),
+            gui_lifecycle_thread: Mutex::new(None),
             host_params,
             inactive_processor: UnsafeCell::new(Some(inactive_processor)),
             processor: UnsafeCell::new(None),
@@ -406,6 +412,28 @@ impl PluginInstanceState {
             // stale adapter state.
             std::thread::yield_now();
         }
+    }
+
+    pub(crate) fn enter_gui_lifecycle_thread(&self, callback_name: &'static str) -> bool {
+        let current = std::thread::current().id();
+        let mut owner = self.gui_lifecycle_thread.lock();
+        match *owner {
+            Some(expected) if expected != current => {
+                log::error!(
+                    "rejecting CLAP GUI main-thread callback from a different thread: callback={callback_name} expected={expected:?} current={current:?}"
+                );
+                false
+            }
+            Some(_) => true,
+            None => {
+                *owner = Some(current);
+                true
+            }
+        }
+    }
+
+    pub(crate) fn clear_gui_lifecycle_thread(&self) {
+        *self.gui_lifecycle_thread.lock() = None;
     }
 }
 
@@ -737,7 +765,10 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
 
         if let Some(gui) = &instance.gui {
             if let Some(_gui_callback) = instance.gui_callback_busy.try_lock() {
-                gui.destroy();
+                if instance.enter_gui_lifecycle_thread("destroy") {
+                    gui.main_thread().destroy();
+                    instance.clear_gui_lifecycle_thread();
+                }
             } else {
                 log::error!(
                     "skipping GUI destroy during plugin destruction because another GUI callback is active"

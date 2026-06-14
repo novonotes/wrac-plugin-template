@@ -47,7 +47,7 @@ unsafe extern "C" fn gui_is_api_supported(
             log::warn!("gui.is_api_supported: invalid API pointer");
             return false;
         };
-        gui.is_api_supported(api, is_floating)
+        gui.query().is_api_supported(api, is_floating)
     })
 }
 
@@ -68,7 +68,7 @@ unsafe extern "C" fn gui_get_preferred_api(
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
-        let Some(configuration) = gui.preferred_api() else {
+        let Some(configuration) = gui.query().preferred_api() else {
             log::debug!("gui.get_preferred_api: plugin has no preferred API");
             return false;
         };
@@ -94,7 +94,7 @@ unsafe extern "C" fn gui_create(
             log::warn!("gui.create: invalid API pointer");
             return false;
         };
-        match gui.create(GuiConfig { api, is_floating }) {
+        match gui.main_thread().create(GuiConfig { api, is_floating }) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.create: plugin create failed: {error}");
@@ -109,7 +109,8 @@ unsafe extern "C" fn gui_destroy(plugin: *const clap_plugin) {
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "destroy") }) else {
             return;
         };
-        gui.destroy();
+        gui.main_thread().destroy();
+        gui.clear_lifecycle_thread();
     });
 }
 
@@ -118,7 +119,7 @@ unsafe extern "C" fn gui_set_scale(plugin: *const clap_plugin, scale: f64) -> bo
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_scale") }) else {
             return false;
         };
-        match gui.set_scale(scale) {
+        match gui.main_thread().set_scale(scale) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.set_scale: plugin set_scale failed: {error}");
@@ -145,7 +146,7 @@ unsafe extern "C" fn gui_get_size(
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
-        let size = match gui.get_size() {
+        let size = match gui.query().get_size() {
             Ok(size) => size,
             Err(error) => {
                 log::warn!("gui.get_size: plugin get_size failed: {error}");
@@ -165,7 +166,7 @@ unsafe extern "C" fn gui_can_resize(plugin: *const clap_plugin) -> bool {
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
-        gui.can_resize()
+        gui.query().can_resize()
     })
 }
 
@@ -181,7 +182,7 @@ unsafe extern "C" fn gui_get_resize_hints(
         let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
             return false;
         };
-        let Some(resize_hints) = gui.resize_hints() else {
+        let Some(resize_hints) = gui.query().resize_hints() else {
             log::debug!("gui.get_resize_hints: plugin has no resize hints");
             return false;
         };
@@ -219,7 +220,7 @@ unsafe extern "C" fn gui_adjust_size(
                 height: *height,
             }
         };
-        let adjusted = match gui.adjust_size(requested) {
+        let adjusted = match gui.query().adjust_size(requested) {
             Ok(adjusted) => adjusted,
             Err(error) => {
                 log::warn!("gui.adjust_size: plugin adjust_size failed: {error}");
@@ -239,7 +240,7 @@ unsafe extern "C" fn gui_set_size(plugin: *const clap_plugin, width: u32, height
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "set_size") }) else {
             return false;
         };
-        match gui.set_size(GuiSize { width, height }) {
+        match gui.main_thread().set_size(GuiSize { width, height }) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.set_size: plugin set_size failed: {error}");
@@ -265,7 +266,7 @@ unsafe extern "C" fn gui_set_parent(
             log::warn!("gui.set_parent: unsupported or invalid window API");
             return false;
         };
-        match gui.set_parent(parent) {
+        match gui.main_thread().set_parent(parent) {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.set_parent: plugin set_parent failed: {error}");
@@ -298,7 +299,7 @@ unsafe extern "C" fn gui_show(plugin: *const clap_plugin) -> bool {
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "show") }) else {
             return false;
         };
-        match gui.show() {
+        match gui.main_thread().show() {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.show: plugin show failed: {error}");
@@ -313,7 +314,7 @@ unsafe extern "C" fn gui_hide(plugin: *const clap_plugin) -> bool {
         let Some(gui) = (unsafe { plugin_gui_mutation(plugin, "hide") }) else {
             return false;
         };
-        match gui.hide() {
+        match gui.main_thread().hide() {
             Ok(()) => true,
             Err(error) => {
                 log::warn!("gui.hide: plugin hide failed: {error}");
@@ -336,6 +337,7 @@ unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginG
 }
 
 struct GuiMutationAccess {
+    instance: &'static PluginInstanceState,
     gui: Arc<dyn PluginGuiExtension>,
     _guard: MutexGuard<'static, ()>,
 }
@@ -345,6 +347,12 @@ impl Deref for GuiMutationAccess {
 
     fn deref(&self) -> &Self::Target {
         self.gui.as_ref()
+    }
+}
+
+impl GuiMutationAccess {
+    fn clear_lifecycle_thread(&self) {
+        self.instance.clear_gui_lifecycle_thread();
     }
 }
 
@@ -362,10 +370,18 @@ unsafe fn plugin_gui_mutation(
     };
     // Extract only the capability handle to avoid coupling GUI callbacks to the
     // `PluginInstance` lifecycle/state lock (the GUI runtime has its own thread rules).
-    instance
-        .gui
-        .clone()
-        .map(|gui| GuiMutationAccess { gui, _guard: guard })
+    let Some(gui) = instance.gui.clone() else {
+        log::debug!("gui.{callback_name}: plugin has no GUI");
+        return None;
+    };
+    if !instance.enter_gui_lifecycle_thread(callback_name) {
+        return None;
+    }
+    Some(GuiMutationAccess {
+        instance,
+        gui,
+        _guard: guard,
+    })
 }
 
 unsafe fn clap_window_to_rust(window: &clap_window) -> Option<HostWindow> {
