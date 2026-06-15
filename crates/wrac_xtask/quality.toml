@@ -1,0 +1,5 @@
+[file_length]
+allow = [
+    { path = "src/commands.rs", reason = "Existing build/install command orchestration is concentrated here. Splitting it should be handled separately to avoid changing task graph behavior." },
+    { path = "src/plan.rs", reason = "Existing task graph planning logic is concentrated here. Splitting it should be handled separately with build, install, and validation coverage." },
+]

@@ -1,0 +1,4 @@
+[file_length]
+allow = [
+    { path = "src/lib.rs", reason = "Existing host context API definitions are concentrated in the crate root. Splitting them changes the public module shape and should be handled separately." },
+]
