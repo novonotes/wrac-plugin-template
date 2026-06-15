@@ -12,7 +12,7 @@ use crate::{GuiSize, NoteDialects, PluginResult};
 /// `MainThread` naming because the long-term contract is for the adapter to turn these
 /// into queued/coalesced host requests.
 pub trait HostParams: Send + Sync {
-    /// Calls CLAP `host_params.request_flush`. `[thread-safe,!audio-thread]`
+    /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
     ///
     /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
     fn request_flush(&self);
@@ -63,7 +63,7 @@ pub trait HostNotePorts: Send + Sync {
 
 /// Requests CLAP core host actions.
 pub trait HostLifecycle: Send + Sync {
-    /// Calls CLAP `host.request_restart`. `[thread-safe]`
+    /// Calls CLAP `host.request_restart`. `[thread-safe & control-thread]`
     fn request_restart(&self);
 
     /// Calls CLAP `host.request_process`. `[thread-safe]`
@@ -90,11 +90,14 @@ pub trait HostTail: Send + 'static {
 /// not because every method is meaningful from every thread. Call `request_resize` only
 /// from the product's GUI event path.
 ///
+/// `resize_hints_changed` and `closed` currently call CLAP `[main-thread]` host
+/// callbacks directly. The adapter does not marshal them yet, so call those methods
+/// only from a context that is already on the host main thread.
 pub trait HostGui: Send + Sync {
-    /// Calls CLAP `host_gui.resize_hints_changed`. `[thread-safe & !floating]`
+    /// Calls CLAP `host_gui.resize_hints_changed`. `[main-thread]`
     fn resize_hints_changed(&self) {}
 
-    /// Calls CLAP `host_gui.request_resize`. `[thread-safe & !floating]`
+    /// Calls CLAP `host_gui.request_resize`. `[thread-safe & control-thread]`
     ///
     /// Product code should normally call this from its GUI event path.
     fn request_resize(&self, size: GuiSize) -> PluginResult<()>;
@@ -109,6 +112,6 @@ pub trait HostGui: Send + Sync {
         false
     }
 
-    /// Calls CLAP `host_gui.closed`. `[thread-safe]`
+    /// Calls CLAP `host_gui.closed`. `[main-thread]`
     fn closed(&self, _was_destroyed: bool) {}
 }
