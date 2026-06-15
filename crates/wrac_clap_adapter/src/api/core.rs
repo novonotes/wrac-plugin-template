@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    ActiveProcessor, HostGui, HostLifecycle, HostParams, HostState, HostTail, InactiveProcessor,
-    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiExtension,
-    PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension,
-    PluginResult, PluginStateExtension, PluginTailExtension,
+    ActiveProcessor, HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState,
+    HostTail, InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
+    PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
+    PluginRenderExtension, PluginResult, PluginStateExtension, PluginTailExtension,
 };
 use wrac_host_context::HostContext;
 
@@ -45,6 +45,8 @@ pub struct ActivateNotifications {
 pub struct PluginInstanceContext {
     pub host_params: Arc<dyn HostParams>,
     pub host_state: Arc<dyn HostState>,
+    pub host_audio_ports: Arc<dyn HostAudioPorts>,
+    pub host_note_ports: Arc<dyn HostNotePorts>,
     pub host_lifecycle: Arc<dyn HostLifecycle>,
     pub host_gui: Arc<dyn HostGui>,
     pub host_context: HostContext,
@@ -81,6 +83,10 @@ pub trait PluginInstance: Send + 'static {
         &mut self,
         processor: Box<dyn ActiveProcessor>,
     ) -> PluginResult<Box<dyn InactiveProcessor>>;
+
+    /// Called from CLAP `plugin.on_main_thread`, usually after `HostLifecycle::request_callback`.
+    /// `[main-thread]`
+    fn on_main_thread(&mut self) {}
 
     /// Returns the CLAP audio-ports extension during plugin instance creation.
     ///
