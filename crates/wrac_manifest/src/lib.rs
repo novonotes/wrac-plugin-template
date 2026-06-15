@@ -107,7 +107,6 @@ pub struct AaxStemConfig {
 #[derive(Debug, Clone)]
 pub enum ManifestSource {
     Dedicated(PathBuf),
-    LegacyCargoMetadata(PathBuf),
 }
 
 pub fn discover_manifest(
@@ -128,18 +127,16 @@ pub fn discover_manifest(
     if plugin_root_manifest.exists() {
         return Ok(ManifestSource::Dedicated(plugin_root_manifest));
     }
-    if let Some(relative) = legacy_manifest_reference(package_manifest_path)? {
-        return Ok(ManifestSource::Dedicated(package_dir.join(relative)));
-    }
-    Ok(ManifestSource::LegacyCargoMetadata(
-        package_manifest_path.to_path_buf(),
-    ))
+    Err(format!(
+        "missing wrac-plugin.toml for package manifest {}",
+        package_manifest_path.display()
+    )
+    .into())
 }
 
 pub fn read_manifest(source: &ManifestSource) -> Result<PluginManifest> {
     match source {
         ManifestSource::Dedicated(path) => read_dedicated_manifest(path),
-        ManifestSource::LegacyCargoMetadata(path) => read_legacy_cargo_metadata(path),
     }
 }
 
@@ -164,71 +161,6 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
     };
     metadata.validate("wrac-plugin.toml")?;
     Ok(metadata)
-}
-
-pub fn read_legacy_cargo_metadata(path: &Path) -> Result<PluginManifest> {
-    let manifest = fs::read_to_string(path)?;
-    let cargo_manifest: CargoManifest = toml::from_str(&manifest)?;
-    let wrac = cargo_manifest
-        .package
-        .metadata
-        .wrac
-        .ok_or_else(|| format!("missing package.metadata.wrac in {}", path.display()))?;
-    if wrac.manifest.is_some() {
-        return Err(
-            "package.metadata.wrac.manifest must be resolved before reading legacy metadata".into(),
-        );
-    }
-    let metadata = PluginManifest {
-        package: ManifestPackageInfo {
-            package_name: Some(cargo_manifest.package.name),
-            version: Some(cargo_manifest.package.version),
-            repository: cargo_manifest.package.repository,
-        },
-        company_name: wrac
-            .company_name
-            .ok_or("missing package.metadata.wrac.company_name")?,
-        auv2_manufacturer_code: wrac
-            .auv2_manufacturer_code
-            .ok_or("missing package.metadata.wrac.auv2_manufacturer_code")?,
-        aax_manufacturer_id: wrac.aax_manufacturer_id,
-        bundle_name: wrac
-            .bundle_name
-            .ok_or("missing package.metadata.wrac.bundle_name")?,
-        bundle_identifier: wrac
-            .bundle_identifier
-            .ok_or("missing package.metadata.wrac.bundle_identifier")?,
-        homepage_url: wrac
-            .homepage_url
-            .ok_or("missing package.metadata.wrac.homepage_url")?,
-        manual_url: wrac
-            .manual_url
-            .ok_or("missing package.metadata.wrac.manual_url")?,
-        support_url: wrac
-            .support_url
-            .ok_or("missing package.metadata.wrac.support_url")?,
-        description: wrac
-            .description
-            .ok_or("missing package.metadata.wrac.description")?,
-        copyright: wrac
-            .copyright
-            .ok_or("missing package.metadata.wrac.copyright")?,
-        supported_formats: wrac.supported_formats.unwrap_or_default(),
-        plugins: wrac.plugins,
-        validation: wrac.validation.unwrap_or_default(),
-    };
-    metadata.validate("package.metadata.wrac")?;
-    Ok(metadata)
-}
-
-pub fn legacy_manifest_reference(path: &Path) -> Result<Option<String>> {
-    let manifest = fs::read_to_string(path)?;
-    let cargo_manifest: CargoManifest = toml::from_str(&manifest)?;
-    Ok(cargo_manifest
-        .package
-        .metadata
-        .wrac
-        .and_then(|wrac| wrac.manifest))
 }
 
 pub fn read_cargo_package_info(path: &Path) -> Result<ManifestPackageInfo> {
@@ -584,32 +516,6 @@ struct CargoPackage {
     name: String,
     version: String,
     repository: Option<String>,
-    #[serde(default)]
-    metadata: PackageMetadata,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct PackageMetadata {
-    wrac: Option<LegacyWracMetadata>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyWracMetadata {
-    manifest: Option<String>,
-    company_name: Option<String>,
-    auv2_manufacturer_code: Option<String>,
-    aax_manufacturer_id: Option<String>,
-    bundle_name: Option<String>,
-    bundle_identifier: Option<String>,
-    homepage_url: Option<String>,
-    manual_url: Option<String>,
-    support_url: Option<String>,
-    description: Option<String>,
-    copyright: Option<String>,
-    supported_formats: Option<Vec<PluginFormat>>,
-    #[serde(default)]
-    plugins: Vec<PluginProduct>,
-    validation: Option<ValidationMetadata>,
 }
 
 #[cfg(test)]
