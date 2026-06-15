@@ -1,23 +1,42 @@
 use clap_sys::ext::gui::{CLAP_EXT_GUI, clap_host_gui};
 use clap_sys::host::clap_host;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::{GuiSize, HostGui, PluginError, PluginResult};
 
 pub(crate) struct HostGuiProxy {
-    host_gui: Option<HostGuiCallbacks>,
+    host: *const clap_host,
+    initialized: Arc<AtomicBool>,
+    host_gui: OnceLock<Option<HostGuiCallbacks>>,
 }
 
 impl HostGuiProxy {
-    pub(crate) fn new(host: *const clap_host) -> Self {
+    pub(crate) fn new(host: *const clap_host, initialized: Arc<AtomicBool>) -> Self {
         Self {
-            host_gui: host_gui_request_resize(host),
+            host,
+            initialized,
+            host_gui: OnceLock::new(),
         }
+    }
+
+    fn callbacks(&self) -> Option<HostGuiCallbacks> {
+        if !self.initialized.load(Ordering::Acquire) {
+            log::debug!("host_gui: host extension unavailable before plugin.init");
+            return None;
+        }
+
+        *self
+            .host_gui
+            .get_or_init(|| host_gui_request_resize(self.host))
     }
 }
 
 impl HostGui for HostGuiProxy {
     fn resize_hints_changed(&self) {
-        let Some(host_gui) = self.host_gui else {
+        let Some(host_gui) = self.callbacks() else {
             log::debug!("host_gui.resize_hints_changed: host GUI extension unavailable");
             return;
         };
@@ -34,7 +53,7 @@ impl HostGui for HostGuiProxy {
     }
 
     fn request_resize(&self, size: GuiSize) -> PluginResult<()> {
-        let Some(host_gui) = self.host_gui else {
+        let Some(host_gui) = self.callbacks() else {
             return Err(PluginError::Message(
                 "host does not expose CLAP GUI extension",
             ));
@@ -49,7 +68,7 @@ impl HostGui for HostGuiProxy {
     }
 
     fn request_show(&self) -> bool {
-        let Some(host_gui) = self.host_gui else {
+        let Some(host_gui) = self.callbacks() else {
             log::debug!("host_gui.request_show: host GUI extension unavailable");
             return false;
         };
@@ -63,7 +82,7 @@ impl HostGui for HostGuiProxy {
     }
 
     fn request_hide(&self) -> bool {
-        let Some(host_gui) = self.host_gui else {
+        let Some(host_gui) = self.callbacks() else {
             log::debug!("host_gui.request_hide: host GUI extension unavailable");
             return false;
         };
@@ -77,7 +96,7 @@ impl HostGui for HostGuiProxy {
     }
 
     fn closed(&self, was_destroyed: bool) {
-        let Some(host_gui) = self.host_gui else {
+        let Some(host_gui) = self.callbacks() else {
             log::debug!("host_gui.closed: host GUI extension unavailable");
             return;
         };
@@ -107,6 +126,11 @@ struct HostGuiCallbacks {
 // must still use request_resize from the GUI event path, not from audio/background work.
 unsafe impl Send for HostGuiCallbacks {}
 unsafe impl Sync for HostGuiCallbacks {}
+
+// Extension lookup is delayed until after `plugin.init`; callers only hold the safe
+// trait object exposed by the adapter context.
+unsafe impl Send for HostGuiProxy {}
+unsafe impl Sync for HostGuiProxy {}
 
 fn host_gui_request_resize(host: *const clap_host) -> Option<HostGuiCallbacks> {
     if host.is_null() {

@@ -129,6 +129,7 @@ pub(crate) struct PluginInstanceState {
     latency: Option<Arc<dyn PluginLatencyExtension>>,
     host_latency: HostLatencyProxy,
     host_tail: HostTailFactory,
+    host_extensions_initialized: Arc<AtomicBool>,
     host_context: HostContext,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
@@ -178,16 +179,29 @@ impl PluginInstanceState {
         clap_host_name: Option<String>,
         host_context: HostContext,
     ) -> Option<Box<Self>> {
-        let host_params = Arc::new(HostParamsProxy::new(host));
+        let host_extensions_initialized = Arc::new(AtomicBool::new(false));
+        let host_params = Arc::new(HostParamsProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
         // Pass as a safe proxy so product GUI code can hold it without knowing about
         // host pointers or CLAP event lifetimes.
         let context = PluginInstanceContext {
             host_params: host_params.clone(),
-            host_state: Arc::new(HostStateProxy::new(host)),
-            host_audio_ports: Arc::new(HostAudioPortsProxy::new(host)),
-            host_note_ports: Arc::new(HostNotePortsProxy::new(host)),
+            host_state: Arc::new(HostStateProxy::new(
+                host,
+                host_extensions_initialized.clone(),
+            )),
+            host_audio_ports: Arc::new(HostAudioPortsProxy::new(
+                host,
+                host_extensions_initialized.clone(),
+            )),
+            host_note_ports: Arc::new(HostNotePortsProxy::new(
+                host,
+                host_extensions_initialized.clone(),
+            )),
             host_lifecycle: Arc::new(HostLifecycleProxy::new(host)),
-            host_gui: Arc::new(HostGuiProxy::new(host)),
+            host_gui: Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone())),
             host_context: host_context.clone(),
         };
         let mut core = registration
@@ -270,8 +284,9 @@ impl PluginInstanceState {
             render,
             tail,
             latency,
-            host_latency: HostLatencyProxy::new(host),
-            host_tail: HostTailFactory::new(host),
+            host_latency: HostLatencyProxy::new(host, host_extensions_initialized.clone()),
+            host_tail: HostTailFactory::new(host, host_extensions_initialized.clone()),
+            host_extensions_initialized,
             host_context,
             gui_callback_busy: Mutex::new(()),
             gui_lifecycle_thread: Mutex::new(None),
@@ -829,11 +844,14 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
 
 unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
-        let initialized = unsafe { PluginInstanceState::from_plugin(plugin).is_some() };
-        if !initialized {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("plugin.init: missing plugin instance");
-        }
-        initialized
+            return false;
+        };
+        instance
+            .host_extensions_initialized
+            .store(true, Ordering::Release);
+        true
     })
 }
 
@@ -846,6 +864,9 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         let detach_in_adapter = instance.host_context.plugin_format == PluginFormat::Unknown;
         let registration = instance.registration;
         let guard = instance.enter_lifecycle_blocking();
+        instance
+            .host_extensions_initialized
+            .store(false, Ordering::Release);
 
         if let Some(gui) = &instance.gui {
             if let Some(_gui_callback) = instance.gui_callback_busy.try_lock() {
@@ -1234,14 +1255,18 @@ mod tests {
     #[test]
     fn activate_notification_calls_host_latency_changed_during_activate() {
         LATENCY_CHANGED_COUNT.store(0, Ordering::Relaxed);
-        let host = test_host();
+        let host_get_extension_count = AtomicU32::new(0);
+        let host = test_host_with_get_extension_count(&host_get_extension_count);
         let instance = test_instance(&ACTIVATE_LATENCY_CHANGED_REGISTRATION, &host);
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
 
         assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
         let activated =
             unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
 
         assert!(activated);
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 1);
         assert_eq!(LATENCY_CHANGED_COUNT.load(Ordering::Relaxed), 1);
     }
 
@@ -1281,14 +1306,18 @@ mod tests {
         AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
         NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
         NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
-        let host = test_host();
+        let host_get_extension_count = AtomicU32::new(0);
+        let host = test_host_with_get_extension_count(&host_get_extension_count);
         let instance = test_instance(&REQUEST_HOST_PORTS_REGISTRATION, &host);
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
 
         assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
         let activated =
             unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
 
         assert!(activated);
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 2);
         assert_eq!(
             AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
             1
@@ -1320,9 +1349,17 @@ mod tests {
     }
 
     fn test_host() -> clap_host {
+        test_host_with_data(ptr::null_mut())
+    }
+
+    fn test_host_with_get_extension_count(count: &AtomicU32) -> clap_host {
+        test_host_with_data((count as *const AtomicU32).cast_mut().cast())
+    }
+
+    fn test_host_with_data(host_data: *mut std::ffi::c_void) -> clap_host {
         clap_host {
             clap_version: CLAP_VERSION,
-            host_data: ptr::null_mut(),
+            host_data,
             name: c"Test Host".as_ptr(),
             vendor: c"Test Vendor".as_ptr(),
             url: c"https://example.invalid".as_ptr(),
@@ -1335,11 +1372,17 @@ mod tests {
     }
 
     unsafe extern "C" fn test_host_get_extension(
-        _host: *const clap_host,
+        host: *const clap_host,
         extension_id: *const std::ffi::c_char,
     ) -> *const std::ffi::c_void {
         if extension_id.is_null() {
             return ptr::null();
+        }
+        if let Some(count) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<AtomicU32>().as_ref())
+        } {
+            count.fetch_add(1, Ordering::Relaxed);
         }
         let id = unsafe { std::ffi::CStr::from_ptr(extension_id) };
         if id == CLAP_EXT_LATENCY {

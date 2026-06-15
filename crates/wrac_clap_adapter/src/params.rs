@@ -3,23 +3,31 @@ use clap_sys::ext::params::{
     clap_param_rescan_flags,
 };
 use clap_sys::host::clap_host;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::HostParams;
 
 /// Thin proxy for the CLAP host params extension.
 pub(crate) struct HostParamsProxy {
-    host_params: Option<HostParamsCallbacks>,
+    host: *const clap_host,
+    initialized: Arc<AtomicBool>,
+    host_params: OnceLock<Option<HostParamsCallbacks>>,
 }
 
 impl HostParamsProxy {
-    pub(crate) fn new(host: *const clap_host) -> Self {
+    pub(crate) fn new(host: *const clap_host, initialized: Arc<AtomicBool>) -> Self {
         Self {
-            host_params: host_params(host),
+            host,
+            initialized,
+            host_params: OnceLock::new(),
         }
     }
 
     pub(crate) fn rescan_values(&self) {
-        let Some(params) = self.host_params else {
+        let Some(params) = self.callbacks() else {
             log::debug!("host_params.rescan_values: host params extension unavailable");
             return;
         };
@@ -32,11 +40,20 @@ impl HostParamsProxy {
             log::debug!("host_params.rescan_values: host rescan callback unavailable");
         }
     }
+
+    fn callbacks(&self) -> Option<HostParamsCallbacks> {
+        if !self.initialized.load(Ordering::Acquire) {
+            log::debug!("host_params: host extension unavailable before plugin.init");
+            return None;
+        }
+
+        *self.host_params.get_or_init(|| host_params(self.host))
+    }
 }
 
 impl HostParams for HostParamsProxy {
     fn request_flush(&self) {
-        let Some(params) = self.host_params else {
+        let Some(params) = self.callbacks() else {
             log::debug!("host_params.request_flush: host params extension unavailable");
             return;
         };
@@ -50,7 +67,7 @@ impl HostParams for HostParamsProxy {
         }
     }
     fn rescan(&self, flags: u32) {
-        let Some(params) = self.host_params else {
+        let Some(params) = self.callbacks() else {
             log::debug!("host_params.rescan: host params extension unavailable");
             return;
         };
@@ -65,7 +82,7 @@ impl HostParams for HostParamsProxy {
     }
 
     fn clear(&self, param_id: u32, flags: u32) {
-        let Some(params) = self.host_params else {
+        let Some(params) = self.callbacks() else {
             log::debug!("host_params.clear: host params extension unavailable");
             return;
         };
@@ -96,6 +113,12 @@ struct HostParamsCallbacks {
 // main-thread contract.
 unsafe impl Send for HostParamsCallbacks {}
 unsafe impl Sync for HostParamsCallbacks {}
+
+// The host pointer is owned by the host for the plugin instance lifetime. Extension
+// lookup is delayed until after `plugin.init`, and product code only receives the
+// trait object, never this raw pointer.
+unsafe impl Send for HostParamsProxy {}
+unsafe impl Sync for HostParamsProxy {}
 
 fn host_params(host: *const clap_host) -> Option<HostParamsCallbacks> {
     if host.is_null() {
