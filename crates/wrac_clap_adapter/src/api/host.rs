@@ -1,4 +1,4 @@
-use crate::{GuiSize, PluginResult};
+use crate::{GuiSize, NoteDialects, PluginResult};
 
 /// Requests host-side parameter synchronization and invalidation.
 ///
@@ -39,10 +39,40 @@ pub trait HostState: Send + Sync {
     fn mark_dirty(&self);
 }
 
-/// Requests host lifecycle changes.
+/// Requests host-side audio port metadata invalidation.
+pub trait HostAudioPorts: Send + Sync {
+    /// Calls CLAP `host_audio_ports.is_rescan_flag_supported`. `[main-thread]`
+    fn is_rescan_flag_supported(&self, _flag: u32) -> bool {
+        false
+    }
+
+    /// Calls CLAP `host_audio_ports.rescan`. `[main-thread]`
+    fn rescan(&self, _flags: u32) {}
+}
+
+/// Requests host-side note port metadata invalidation.
+pub trait HostNotePorts: Send + Sync {
+    /// Calls CLAP `host_note_ports.supported_dialects`. `[main-thread]`
+    fn supported_dialects(&self) -> NoteDialects {
+        NoteDialects::default()
+    }
+
+    /// Calls CLAP `host_note_ports.rescan`. `[main-thread]`
+    fn rescan(&self, _flags: u32) {}
+}
+
+/// Requests CLAP core host actions.
 pub trait HostLifecycle: Send + Sync {
     /// Calls CLAP `host.request_restart`. `[thread-safe & control-thread]`
     fn request_restart(&self);
+
+    /// Calls CLAP `host.request_process`. `[thread-safe]`
+    fn request_process(&self);
+
+    /// Calls CLAP `host.request_callback`. `[thread-safe]`
+    ///
+    /// The host is expected to schedule a later `PluginInstance::on_main_thread` call.
+    fn request_callback(&self);
 }
 
 /// Host tail notification handle owned by an active processor.

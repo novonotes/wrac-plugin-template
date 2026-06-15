@@ -58,9 +58,11 @@ use crate::factory::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
+use crate::host_audio_ports::HostAudioPortsProxy;
 use crate::host_gui::HostGuiProxy;
 use crate::host_latency::HostLatencyProxy;
 use crate::host_lifecycle::HostLifecycleProxy;
+use crate::host_note_ports::HostNotePortsProxy;
 use crate::host_state::HostStateProxy;
 use crate::host_tail::HostTailFactory;
 use crate::params::HostParamsProxy;
@@ -182,6 +184,8 @@ impl PluginInstanceState {
         let context = PluginInstanceContext {
             host_params: host_params.clone(),
             host_state: Arc::new(HostStateProxy::new(host)),
+            host_audio_ports: Arc::new(HostAudioPortsProxy::new(host)),
+            host_note_ports: Arc::new(HostNotePortsProxy::new(host)),
             host_lifecycle: Arc::new(HostLifecycleProxy::new(host)),
             host_gui: Arc::new(HostGuiProxy::new(host)),
             host_context: host_context.clone(),
@@ -1118,10 +1122,14 @@ unsafe extern "C" fn plugin_get_extension(
     })
 }
 
-unsafe extern "C" fn plugin_on_main_thread(_plugin: *const clap_plugin) {
-    // WRAC intentionally does not route product work through CLAP's main-thread callback.
-    // GUI and main-thread tasks should use novonotes_run_loop/wxp instead, which keeps
-    // behavior consistent across native CLAP and wrapper-backed VST3/AU hosts.
+unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
+    ffi_unit(|| {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
+            log::warn!("plugin.on_main_thread: missing plugin instance");
+            return;
+        };
+        instance.core.lock().on_main_thread();
+    });
 }
 
 #[cfg(test)]
@@ -1131,24 +1139,37 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    use clap_sys::ext::audio_ports::{
+        CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports,
+    };
     use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency, clap_plugin_latency};
+    use clap_sys::ext::note_ports::{
+        CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_PORTS_RESCAN_NAMES,
+        clap_host_note_ports,
+    };
     use clap_sys::host::clap_host;
     use clap_sys::plugin::clap_plugin;
     use clap_sys::version::CLAP_VERSION;
 
-    use super::{PluginInstanceState, plugin_activate, plugin_get_extension, plugin_init};
+    use super::{
+        PluginInstanceState, plugin_activate, plugin_get_extension, plugin_init,
+        plugin_on_main_thread,
+    };
     use crate::entry::EntryRegistration;
     use crate::{
         ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext,
-        InactiveProcessor, ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory,
-        PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery,
-        PluginResult, ProcessContext, ProcessStatus,
+        HostAudioPorts, HostLifecycle, HostNotePorts, InactiveProcessor, NoteDialects,
+        ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory, PluginInstance,
+        PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery, PluginResult,
+        ProcessContext, ProcessStatus,
     };
     use wrac_host_context::HostContext;
 
     static ZERO_LATENCY_ENTRY: TestEntry = TestEntry {
         factory: TestFactory {
             activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_ports: false,
         },
     };
     static ZERO_LATENCY_REGISTRATION: EntryRegistration =
@@ -1157,12 +1178,41 @@ mod tests {
     static ACTIVATE_LATENCY_CHANGED_ENTRY: TestEntry = TestEntry {
         factory: TestFactory {
             activate_latency_changed: true,
+            request_host_lifecycle: false,
+            request_host_ports: false,
         },
     };
     static ACTIVATE_LATENCY_CHANGED_REGISTRATION: EntryRegistration =
         EntryRegistration::new(&ACTIVATE_LATENCY_CHANGED_ENTRY);
 
+    static REQUEST_HOST_LIFECYCLE_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+            request_host_lifecycle: true,
+            request_host_ports: false,
+        },
+    };
+    static REQUEST_HOST_PORTS_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_ports: true,
+        },
+    };
+    static REQUEST_HOST_LIFECYCLE_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&REQUEST_HOST_LIFECYCLE_ENTRY);
+    static REQUEST_HOST_PORTS_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&REQUEST_HOST_PORTS_ENTRY);
+
     static LATENCY_CHANGED_COUNT: AtomicU32 = AtomicU32::new(0);
+    static REQUEST_RESTART_COUNT: AtomicU32 = AtomicU32::new(0);
+    static REQUEST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
+    static REQUEST_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
+    static AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT: AtomicU32 = AtomicU32::new(0);
+    static AUDIO_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
+    static NOTE_PORTS_SUPPORTED_DIALECTS_COUNT: AtomicU32 = AtomicU32::new(0);
+    static NOTE_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
+    static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 
     #[test]
     fn zero_latency_exposes_latency_extension() {
@@ -1193,6 +1243,62 @@ mod tests {
 
         assert!(activated);
         assert_eq!(LATENCY_CHANGED_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn activate_forwards_host_lifecycle_requests() {
+        REQUEST_RESTART_COUNT.store(0, Ordering::Relaxed);
+        REQUEST_PROCESS_COUNT.store(0, Ordering::Relaxed);
+        REQUEST_CALLBACK_COUNT.store(0, Ordering::Relaxed);
+        let host = test_host();
+        let instance = test_instance(&REQUEST_HOST_LIFECYCLE_REGISTRATION, &host);
+
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        let activated =
+            unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
+
+        assert!(activated);
+        assert_eq!(REQUEST_RESTART_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(REQUEST_PROCESS_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(REQUEST_CALLBACK_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn plugin_on_main_thread_calls_instance_hook() {
+        ON_MAIN_THREAD_COUNT.store(0, Ordering::Relaxed);
+        let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+
+        unsafe {
+            plugin_on_main_thread(&instance.plugin as *const clap_plugin);
+        }
+
+        assert_eq!(ON_MAIN_THREAD_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn activate_forwards_host_port_requests() {
+        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.store(0, Ordering::Relaxed);
+        AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        let host = test_host();
+        let instance = test_instance(&REQUEST_HOST_PORTS_REGISTRATION, &host);
+
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        let activated =
+            unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
+
+        assert!(activated);
+        assert_eq!(
+            AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(AUDIO_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.load(Ordering::Relaxed),
+            1
+        );
+        assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
     }
 
     fn test_instance(
@@ -1238,6 +1344,10 @@ mod tests {
         let id = unsafe { std::ffi::CStr::from_ptr(extension_id) };
         if id == CLAP_EXT_LATENCY {
             (&TEST_HOST_LATENCY as *const clap_host_latency).cast()
+        } else if id == CLAP_EXT_AUDIO_PORTS {
+            (&TEST_HOST_AUDIO_PORTS as *const clap_host_audio_ports).cast()
+        } else if id == CLAP_EXT_NOTE_PORTS {
+            (&TEST_HOST_NOTE_PORTS as *const clap_host_note_ports).cast()
         } else {
             ptr::null()
         }
@@ -1247,12 +1357,51 @@ mod tests {
         LATENCY_CHANGED_COUNT.fetch_add(1, Ordering::Relaxed);
     }
 
-    unsafe extern "C" fn test_host_request_restart(_host: *const clap_host) {}
-    unsafe extern "C" fn test_host_request_process(_host: *const clap_host) {}
-    unsafe extern "C" fn test_host_request_callback(_host: *const clap_host) {}
+    unsafe extern "C" fn test_host_request_restart(_host: *const clap_host) {
+        REQUEST_RESTART_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "C" fn test_host_request_process(_host: *const clap_host) {
+        REQUEST_PROCESS_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "C" fn test_host_request_callback(_host: *const clap_host) {
+        REQUEST_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
 
     static TEST_HOST_LATENCY: clap_host_latency = clap_host_latency {
         changed: Some(test_host_latency_changed),
+    };
+
+    unsafe extern "C" fn test_host_audio_ports_is_rescan_flag_supported(
+        _host: *const clap_host,
+        flag: u32,
+    ) -> bool {
+        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.fetch_add(1, Ordering::Relaxed);
+        flag == CLAP_AUDIO_PORTS_RESCAN_NAMES
+    }
+
+    unsafe extern "C" fn test_host_audio_ports_rescan(_host: *const clap_host, _flags: u32) {
+        AUDIO_PORTS_RESCAN_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    static TEST_HOST_AUDIO_PORTS: clap_host_audio_ports = clap_host_audio_ports {
+        is_rescan_flag_supported: Some(test_host_audio_ports_is_rescan_flag_supported),
+        rescan: Some(test_host_audio_ports_rescan),
+    };
+
+    unsafe extern "C" fn test_host_note_ports_supported_dialects(_host: *const clap_host) -> u32 {
+        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.fetch_add(1, Ordering::Relaxed);
+        CLAP_NOTE_DIALECT_CLAP
+    }
+
+    unsafe extern "C" fn test_host_note_ports_rescan(_host: *const clap_host, _flags: u32) {
+        NOTE_PORTS_RESCAN_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    static TEST_HOST_NOTE_PORTS: clap_host_note_ports = clap_host_note_ports {
+        supported_dialects: Some(test_host_note_ports_supported_dialects),
+        rescan: Some(test_host_note_ports_rescan),
     };
 
     static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
@@ -1287,6 +1436,8 @@ mod tests {
     #[derive(Clone, Copy)]
     struct TestFactory {
         activate_latency_changed: bool,
+        request_host_lifecycle: bool,
+        request_host_ports: bool,
     }
 
     impl PluginFactory for TestFactory {
@@ -1301,11 +1452,16 @@ mod tests {
         fn create_plugin(
             &self,
             plugin_id: &str,
-            _context: PluginInstanceContext,
+            context: PluginInstanceContext,
         ) -> Option<Box<dyn PluginInstance>> {
             (plugin_id == TEST_DESCRIPTOR.id).then(|| {
                 Box::new(TestPlugin {
                     activate_latency_changed: self.activate_latency_changed,
+                    request_host_lifecycle: self.request_host_lifecycle,
+                    request_host_ports: self.request_host_ports,
+                    host_lifecycle: context.host_lifecycle,
+                    host_audio_ports: context.host_audio_ports,
+                    host_note_ports: context.host_note_ports,
                 }) as Box<dyn PluginInstance>
             })
         }
@@ -1313,6 +1469,11 @@ mod tests {
 
     struct TestPlugin {
         activate_latency_changed: bool,
+        request_host_lifecycle: bool,
+        request_host_ports: bool,
+        host_lifecycle: Arc<dyn HostLifecycle>,
+        host_audio_ports: Arc<dyn HostAudioPorts>,
+        host_note_ports: Arc<dyn HostNotePorts>,
     }
 
     impl PluginInstance for TestPlugin {
@@ -1325,6 +1486,23 @@ mod tests {
             _context: ActivateContext,
             _processor: Box<dyn InactiveProcessor>,
         ) -> PluginResult<ActivateResult> {
+            if self.request_host_lifecycle {
+                self.host_lifecycle.request_restart();
+                self.host_lifecycle.request_process();
+                self.host_lifecycle.request_callback();
+            }
+            if self.request_host_ports {
+                assert!(
+                    self.host_audio_ports
+                        .is_rescan_flag_supported(CLAP_AUDIO_PORTS_RESCAN_NAMES)
+                );
+                self.host_audio_ports.rescan(CLAP_AUDIO_PORTS_RESCAN_NAMES);
+                assert_eq!(
+                    self.host_note_ports.supported_dialects(),
+                    NoteDialects::CLAP
+                );
+                self.host_note_ports.rescan(CLAP_NOTE_PORTS_RESCAN_NAMES);
+            }
             Ok(ActivateResult {
                 processor: Box::new(TestActiveProcessor),
                 notifications: ActivateNotifications {
@@ -1338,6 +1516,10 @@ mod tests {
             _processor: Box<dyn ActiveProcessor>,
         ) -> PluginResult<Box<dyn InactiveProcessor>> {
             Ok(Box::new(TestInactiveProcessor))
+        }
+
+        fn on_main_thread(&mut self) {
+            ON_MAIN_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
         fn params(&self) -> Arc<dyn PluginParamsQuery> {

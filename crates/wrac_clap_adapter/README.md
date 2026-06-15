@@ -37,6 +37,8 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 - `PluginRenderExtension`: CLAP `render`
 - `PluginTailExtension`: CLAP `tail`
 - `PluginLatencyExtension`: CLAP `latency`
+- `HostParams`, `HostState`, `HostAudioPorts`, `HostNotePorts`, `HostLifecycle`,
+  `HostGui`, `HostTail`: thin proxies for plugin-to-host CLAP callbacks
 - `export_clap_entry!`: exports the CLAP entry point
 
 Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.
@@ -47,9 +49,8 @@ This crate is provided as part of an implementation example, not as a general-pu
 
 Additionally, full CLAP ABI coverage is not yet complete. Known limitations:
 
-- `audio-ports`: exposes current port metadata only; dynamic port rescan notifications are not supported
 - `configurable-audio-ports`: only layout negotiation while inactive is supported
-- `params`: value rescan after state restore is supported, but a dynamic rescan API for the parameter schema itself is not provided
+- Host callback proxies are thin wrappers and do not marshal calls to a different thread
 - Output event batching helpers are minimal (sample-accurate event ordering is the product's responsibility)
 - The `audio-ports-activation` extension is not implemented
 - Typed factories other than plugin factory and AUv2 wrapper info are not implemented yet
