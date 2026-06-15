@@ -38,14 +38,16 @@ mod params;
 mod process;
 mod types;
 
-pub use core::{ActivateContext, PluginInstance, PluginInstanceContext};
+pub use core::{
+    ActivateContext, ActivateNotifications, ActivateResult, PluginInstance, PluginInstanceContext,
+};
 pub use error::{PluginError, PluginResult};
 pub use extensions::{
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiExtension,
     PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginLatencyExtension,
     PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension, PluginTailExtension,
 };
-pub use host::{HostGui, HostParams, HostState};
+pub use host::{HostGui, HostLifecycle, HostParams, HostState, HostTail};
 pub use params::PluginParamsQuery;
 pub use process::{
     ActiveProcessor, InactiveProcessor, ParamFlushContext, ProcessContext, ProcessStatus,

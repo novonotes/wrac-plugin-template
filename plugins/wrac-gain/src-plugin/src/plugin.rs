@@ -27,7 +27,7 @@ use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudi
 use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
 use wrac_clap_adapter::{
-    AaxDescriptor, AaxStemConfig, ActivateContext, ActiveProcessor, Auv2Descriptor,
+    AaxDescriptor, AaxStemConfig, ActivateContext, ActivateResult, ActiveProcessor, Auv2Descriptor,
     InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension,
     PluginInstance, PluginInstanceContext, PluginParamsQuery, PluginResult, PluginStateExtension,
@@ -196,7 +196,7 @@ impl PluginInstance for WracGainPlugin {
         &mut self,
         context: ActivateContext,
         _processor: Box<dyn InactiveProcessor>,
-    ) -> PluginResult<Box<dyn ActiveProcessor>> {
+    ) -> PluginResult<ActivateResult> {
         // Boundary between the non-RT layout store and the RT processor.
         //
         // The adapter rejects layout changes while active, so the channel count
@@ -213,11 +213,11 @@ impl PluginInstance for WracGainPlugin {
             context.max_frames_count,
             audio_channel_count
         );
-        Ok(Box::new(WracGainAudioProcessor::new(
+        Ok(ActivateResult::new(Box::new(WracGainAudioProcessor::new(
             self.shared.clone(),
             self.param_output_queue.clone(),
             audio_channel_count,
-        )))
+        ))))
     }
 
     /// Called when the host stops audio processing.

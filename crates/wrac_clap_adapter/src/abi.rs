@@ -59,7 +59,10 @@ use crate::factory::{
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
 use crate::host_gui::HostGuiProxy;
+use crate::host_latency::HostLatencyProxy;
+use crate::host_lifecycle::HostLifecycleProxy;
 use crate::host_state::HostStateProxy;
+use crate::host_tail::HostTailFactory;
 use crate::params::HostParamsProxy;
 use crate::{
     ActivateContext, ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
@@ -122,6 +125,8 @@ pub(crate) struct PluginInstanceState {
     render: Option<Arc<dyn PluginRenderExtension>>,
     tail: Option<Arc<dyn PluginTailExtension>>,
     latency: Option<Arc<dyn PluginLatencyExtension>>,
+    host_latency: HostLatencyProxy,
+    host_tail: HostTailFactory,
     host_context: HostContext,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
     // deadlock (GUI query callbacks do not go through this guard).
@@ -153,6 +158,7 @@ pub(crate) struct PluginCapabilities {
     gui: bool,
     render: bool,
     tail: bool,
+    latency: bool,
 }
 
 // Safety: CLAP shares the same opaque plugin pointer across callbacks. Adapter state is
@@ -176,6 +182,7 @@ impl PluginInstanceState {
         let context = PluginInstanceContext {
             host_params: host_params.clone(),
             host_state: Arc::new(HostStateProxy::new(host)),
+            host_lifecycle: Arc::new(HostLifecycleProxy::new(host)),
             host_gui: Arc::new(HostGuiProxy::new(host)),
             host_context: host_context.clone(),
         };
@@ -211,6 +218,15 @@ impl PluginInstanceState {
         let render = core.render();
         let tail = core.tail();
         let latency = core.latency();
+        debug_assert!(
+            latency.is_some(),
+            "plugins should provide a latency extension because wrapper builds, especially AAX, expect it during activation; return zero latency when no delay is required"
+        );
+        if cfg!(not(debug_assertions)) && latency.is_none() {
+            log::warn!(
+                "factory.create_plugin: plugin has no latency extension; exposing zero-latency wrapper fallback"
+            );
+        }
         let capabilities = PluginCapabilities {
             audio_ports: audio_ports.is_some(),
             configurable_audio_ports: configurable_audio_ports.is_some(),
@@ -219,6 +235,7 @@ impl PluginInstanceState {
             gui: gui.is_some(),
             render: render.is_some(),
             tail: tail.is_some(),
+            latency: latency.is_some(),
         };
         let storage = registration.storage();
 
@@ -249,6 +266,8 @@ impl PluginInstanceState {
             render,
             tail,
             latency,
+            host_latency: HostLatencyProxy::new(host),
+            host_tail: HostTailFactory::new(host),
             host_context,
             gui_callback_busy: Mutex::new(()),
             gui_lifecycle_thread: Mutex::new(None),
@@ -888,10 +907,26 @@ unsafe extern "C" fn plugin_activate(
                 sample_rate,
                 min_frames_count,
                 max_frames_count,
+                host_tail: instance
+                    .capabilities
+                    .tail
+                    .then(|| instance.host_tail.create_handle())
+                    .flatten(),
             },
             inactive_processor,
         ) {
-            Ok(processor) => processor,
+            Ok(result) => {
+                if result.notifications.latency_changed {
+                    if instance.capabilities.latency {
+                        instance.host_latency.changed();
+                    } else {
+                        log::warn!(
+                            "plugin.activate: latency_changed requested without latency extension"
+                        );
+                    }
+                }
+                result.processor
+            }
             Err(error) => {
                 log::warn!("plugin.activate: plugin activate failed: {error}");
                 match core.initialize_processor() {
@@ -1067,9 +1102,13 @@ unsafe extern "C" fn plugin_get_extension(
         } else if id == CLAP_EXT_TAIL && instance.capabilities.tail {
             &tail_extension::TAIL as *const _ as *const c_void
         } else if id == CLAP_EXT_LATENCY {
-            // Some wrappers query latency unconditionally during activation. Exposing a
-            // zero-latency fallback keeps optional product support from becoming a null
-            // extension pointer at the wrapper boundary.
+            // Keep this pointer non-null even when `PluginInstance::latency()` returned
+            // `None`. clap-wrapper's AAX backend calls `_ext._latency->get(...)`
+            // unconditionally during activation, so exposing capability absence as a
+            // null CLAP extension pointer can crash before WRAC code gets a chance to
+            // diagnose the product bug. The product-facing contract is still enforced
+            // at instance creation by the debug assertion above; this fallback exists
+            // only to keep release wrapper builds from failing at the ABI boundary.
             &latency_extension::LATENCY as *const _ as *const c_void
         } else if id == CLAP_PLUGIN_AS_VST3 {
             &vst3_extension::VST3 as *const _ as *const c_void
@@ -1083,4 +1122,290 @@ unsafe extern "C" fn plugin_on_main_thread(_plugin: *const clap_plugin) {
     // WRAC intentionally does not route product work through CLAP's main-thread callback.
     // GUI and main-thread tasks should use novonotes_run_loop/wxp instead, which keeps
     // behavior consistent across native CLAP and wrapper-backed VST3/AU hosts.
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::ptr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency, clap_plugin_latency};
+    use clap_sys::host::clap_host;
+    use clap_sys::plugin::clap_plugin;
+    use clap_sys::version::CLAP_VERSION;
+
+    use super::{PluginInstanceState, plugin_activate, plugin_get_extension, plugin_init};
+    use crate::entry::EntryRegistration;
+    use crate::{
+        ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext,
+        InactiveProcessor, ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory,
+        PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery,
+        PluginResult, ProcessContext, ProcessStatus,
+    };
+    use wrac_host_context::HostContext;
+
+    static ZERO_LATENCY_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+        },
+    };
+    static ZERO_LATENCY_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&ZERO_LATENCY_ENTRY);
+
+    static ACTIVATE_LATENCY_CHANGED_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: true,
+        },
+    };
+    static ACTIVATE_LATENCY_CHANGED_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&ACTIVATE_LATENCY_CHANGED_ENTRY);
+
+    static LATENCY_CHANGED_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn zero_latency_exposes_latency_extension() {
+        let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+        let extension = unsafe {
+            plugin_get_extension(
+                &instance.plugin as *const clap_plugin,
+                CLAP_EXT_LATENCY.as_ptr(),
+            )
+        };
+        assert!(!extension.is_null());
+
+        let latency = unsafe { &*(extension as *const clap_plugin_latency) };
+        let get = latency.get.expect("latency.get callback");
+        let frames = unsafe { get(&instance.plugin as *const clap_plugin) };
+        assert_eq!(frames, 0);
+    }
+
+    #[test]
+    fn activate_notification_calls_host_latency_changed_during_activate() {
+        LATENCY_CHANGED_COUNT.store(0, Ordering::Relaxed);
+        let host = test_host();
+        let instance = test_instance(&ACTIVATE_LATENCY_CHANGED_REGISTRATION, &host);
+
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        let activated =
+            unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
+
+        assert!(activated);
+        assert_eq!(LATENCY_CHANGED_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    fn test_instance(
+        registration: &'static EntryRegistration,
+        host: *const clap_host,
+    ) -> Box<PluginInstanceState> {
+        let mut instance = PluginInstanceState::new(
+            registration,
+            0,
+            TEST_DESCRIPTOR.id,
+            host,
+            None,
+            HostContext::detect_current(None),
+        )
+        .expect("test plugin instance");
+        let instance_ptr = (&mut *instance) as *mut PluginInstanceState;
+        instance.plugin.plugin_data = instance_ptr.cast();
+        instance
+    }
+
+    fn test_host() -> clap_host {
+        clap_host {
+            clap_version: CLAP_VERSION,
+            host_data: ptr::null_mut(),
+            name: c"Test Host".as_ptr(),
+            vendor: c"Test Vendor".as_ptr(),
+            url: c"https://example.invalid".as_ptr(),
+            version: c"0.0.0".as_ptr(),
+            get_extension: Some(test_host_get_extension),
+            request_restart: Some(test_host_request_restart),
+            request_process: Some(test_host_request_process),
+            request_callback: Some(test_host_request_callback),
+        }
+    }
+
+    unsafe extern "C" fn test_host_get_extension(
+        _host: *const clap_host,
+        extension_id: *const std::ffi::c_char,
+    ) -> *const std::ffi::c_void {
+        if extension_id.is_null() {
+            return ptr::null();
+        }
+        let id = unsafe { std::ffi::CStr::from_ptr(extension_id) };
+        if id == CLAP_EXT_LATENCY {
+            (&TEST_HOST_LATENCY as *const clap_host_latency).cast()
+        } else {
+            ptr::null()
+        }
+    }
+
+    unsafe extern "C" fn test_host_latency_changed(_host: *const clap_host) {
+        LATENCY_CHANGED_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "C" fn test_host_request_restart(_host: *const clap_host) {}
+    unsafe extern "C" fn test_host_request_process(_host: *const clap_host) {}
+    unsafe extern "C" fn test_host_request_callback(_host: *const clap_host) {}
+
+    static TEST_HOST_LATENCY: clap_host_latency = clap_host_latency {
+        changed: Some(test_host_latency_changed),
+    };
+
+    static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
+        id: "dev.wrac.test",
+        name: "WRAC Test",
+        vendor: "WRAC",
+        url: "https://example.invalid",
+        manual_url: "",
+        support_url: "",
+        version: "0.0.0",
+        description: "",
+        features: &[],
+        auv2: None,
+        vst3: None,
+        aax: None,
+    };
+
+    struct TestEntry {
+        factory: TestFactory,
+    }
+
+    impl PluginEntry for TestEntry {
+        fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
+            Ok(())
+        }
+
+        fn plugin_factory(&self) -> Option<&dyn PluginFactory> {
+            Some(&self.factory)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct TestFactory {
+        activate_latency_changed: bool,
+    }
+
+    impl PluginFactory for TestFactory {
+        fn plugin_count(&self) -> u32 {
+            1
+        }
+
+        fn plugin_descriptor(&self, index: u32) -> Option<PluginDescriptor> {
+            (index == 0).then_some(TEST_DESCRIPTOR)
+        }
+
+        fn create_plugin(
+            &self,
+            plugin_id: &str,
+            _context: PluginInstanceContext,
+        ) -> Option<Box<dyn PluginInstance>> {
+            (plugin_id == TEST_DESCRIPTOR.id).then(|| {
+                Box::new(TestPlugin {
+                    activate_latency_changed: self.activate_latency_changed,
+                }) as Box<dyn PluginInstance>
+            })
+        }
+    }
+
+    struct TestPlugin {
+        activate_latency_changed: bool,
+    }
+
+    impl PluginInstance for TestPlugin {
+        fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>> {
+            Ok(Box::new(TestInactiveProcessor))
+        }
+
+        fn activate(
+            &mut self,
+            _context: ActivateContext,
+            _processor: Box<dyn InactiveProcessor>,
+        ) -> PluginResult<ActivateResult> {
+            Ok(ActivateResult {
+                processor: Box::new(TestActiveProcessor),
+                notifications: ActivateNotifications {
+                    latency_changed: self.activate_latency_changed,
+                },
+            })
+        }
+
+        fn deactivate(
+            &mut self,
+            _processor: Box<dyn ActiveProcessor>,
+        ) -> PluginResult<Box<dyn InactiveProcessor>> {
+            Ok(Box::new(TestInactiveProcessor))
+        }
+
+        fn params(&self) -> Arc<dyn PluginParamsQuery> {
+            Arc::new(TestParams)
+        }
+
+        fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
+            Some(Arc::new(TestLatency))
+        }
+    }
+
+    struct TestLatency;
+
+    impl PluginLatencyExtension for TestLatency {
+        fn latency_frames(&self) -> u32 {
+            0
+        }
+    }
+
+    struct TestParams;
+
+    impl PluginParamsQuery for TestParams {
+        fn count(&self) -> u32 {
+            0
+        }
+
+        fn get_info(&self, _index: u32) -> Option<crate::ParamInfo> {
+            None
+        }
+
+        fn get_value(&self, _param_id: u32) -> PluginResult<f64> {
+            Err(crate::PluginError::InvalidParameter)
+        }
+
+        fn value_to_text(&self, _param_id: u32, _value: f64) -> PluginResult<String> {
+            Err(crate::PluginError::InvalidParameter)
+        }
+
+        fn text_to_value(&self, _param_id: u32, _text: &str) -> PluginResult<f64> {
+            Err(crate::PluginError::InvalidParameter)
+        }
+    }
+
+    struct TestInactiveProcessor;
+
+    impl InactiveProcessor for TestInactiveProcessor {
+        fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+            self
+        }
+
+        fn flush_params(&mut self, _context: ParamFlushContext<'_>) -> PluginResult<()> {
+            Ok(())
+        }
+    }
+
+    struct TestActiveProcessor;
+
+    impl ActiveProcessor for TestActiveProcessor {
+        fn into_any(self: Box<Self>) -> Box<dyn Any + Send> {
+            self
+        }
+
+        fn process(&mut self, _context: ProcessContext<'_>) -> PluginResult<ProcessStatus> {
+            Ok(ProcessStatus::Continue)
+        }
+
+        fn flush_params(&mut self, _context: ParamFlushContext<'_>) -> PluginResult<()> {
+            Ok(())
+        }
+    }
 }

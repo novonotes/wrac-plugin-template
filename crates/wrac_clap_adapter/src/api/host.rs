@@ -1,34 +1,57 @@
 use crate::{GuiSize, PluginResult};
 
-/// Requests the host to schedule CLAP params synchronization.
+/// Requests host-side parameter synchronization and invalidation.
 ///
-/// This maps directly to `clap_host_params.request_flush`. It does not carry
-/// parameter values; plugins emit those as output events from `process` or
+/// `request_flush` maps directly to `clap_host_params.request_flush` and does not
+/// carry parameter values; plugins emit those as output events from `process` or
 /// `flush_params`.
+///
+/// `rescan` and `clear` currently call CLAP `[main-thread]` host callbacks directly.
+/// The adapter does not marshal them yet, so call those methods only from a context
+/// that is already on the host main thread. The product-facing API intentionally avoids
+/// `MainThread` naming because the long-term contract is for the adapter to turn these
+/// into queued/coalesced host requests.
 pub trait HostParams: Send + Sync {
+    /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
+    ///
+    /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
+    fn request_flush(&self);
+
     /// Calls CLAP `host_params.rescan`. `[main-thread]`
     fn rescan(&self, _flags: u32) {}
 
     /// Calls CLAP `host_params.clear`. `[main-thread]`
     fn clear(&self, _param_id: u32, _flags: u32) {}
-
-    /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
-    ///
-    /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
-    fn request_flush(&self);
 }
 
-/// Notifies the host that non-parameter project state changed and should be saved.
+/// Requests host-side project state notifications.
 ///
-/// This maps to CLAP `clap_host_state.mark_dirty()`. Use it for plugin-owned document
-/// state, not for parameter automation gestures.
+/// `mark_dirty` maps to CLAP `clap_host_state.mark_dirty()`. Use it for plugin-owned
+/// document state, not for parameter automation gestures.
 ///
-/// CLAP requires this notification to be sent from the main thread. The adapter
-/// does not marshal calls, so call this from the product's GUI/control path, not
-/// directly from `ActiveProcessor::process()` or a background worker.
+/// This currently calls a CLAP `[main-thread]` host callback directly. The adapter does
+/// not marshal it yet, so call it only from a context that is already on the host main
+/// thread. The product-facing API intentionally avoids `MainThread` naming because the
+/// long-term contract is for the adapter to turn this into a queued/coalesced host
+/// request.
 pub trait HostState: Send + Sync {
     /// Calls CLAP `host_state.mark_dirty`. `[main-thread]`
     fn mark_dirty(&self);
+}
+
+/// Requests host lifecycle changes.
+pub trait HostLifecycle: Send + Sync {
+    /// Calls CLAP `host.request_restart`. `[thread-safe & control-thread]`
+    fn request_restart(&self);
+}
+
+/// Host tail notification handle owned by an active processor.
+///
+/// CLAP marks `host_tail.changed` as `[audio-thread]`. This handle is moved into
+/// the active processor at activation time and intentionally does not require `Sync`.
+pub trait HostTail: Send + 'static {
+    /// Calls CLAP `host_tail.changed`. `[audio-thread]`
+    fn changed(&mut self);
 }
 
 /// Requests the host to resize the GUI client area on behalf of the product.
@@ -36,6 +59,10 @@ pub trait HostState: Send + Sync {
 /// This trait is `Send + Sync` because it is stored inside the shared plugin context,
 /// not because every method is meaningful from every thread. Call `request_resize` only
 /// from the product's GUI event path.
+///
+/// `resize_hints_changed` and `closed` currently call CLAP `[main-thread]` host
+/// callbacks directly. The adapter does not marshal them yet, so call those methods
+/// only from a context that is already on the host main thread.
 pub trait HostGui: Send + Sync {
     /// Calls CLAP `host_gui.resize_hints_changed`. `[main-thread]`
     fn resize_hints_changed(&self) {}

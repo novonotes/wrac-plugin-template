@@ -12,15 +12,19 @@ mod entry;
 mod events;
 mod factory;
 mod host_gui;
+mod host_latency;
+mod host_lifecycle;
 mod host_state;
+mod host_tail;
 mod params;
 mod process_buffer;
 
 pub use api::{
-    ActivateContext, ActiveProcessor, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo,
-    AudioPortType, DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext,
-    HostFamily, HostGui, HostParams, HostState, HostVersion, HostWindow, InactiveProcessor,
-    NoteDialects, NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo, ParamValueEvent,
+    ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor,
+    AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, DetectedHost, GuiApi,
+    GuiConfig, GuiResizeHints, GuiSize, HostContext, HostFamily, HostGui, HostLifecycle,
+    HostParams, HostState, HostTail, HostVersion, HostWindow, InactiveProcessor, NoteDialects,
+    NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo, ParamValueEvent,
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginFormat,
     PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginInstance,
     PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
