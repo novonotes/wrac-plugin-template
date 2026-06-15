@@ -8,9 +8,6 @@ repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
 build = "build.rs"
 
-[package.metadata.wrac]
-manifest = "wrac-plugin.toml"
-
 [lib]
 crate-type = ["rlib", "staticlib", "cdylib"]
 

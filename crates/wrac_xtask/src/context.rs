@@ -37,8 +37,8 @@ impl Context {
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.wrapper_dir.clone());
-        // Plugin identity is sourced from wrac-plugin.toml, with legacy Cargo
-        // metadata supported only as a migration fallback.
+        // Plugin identity is sourced from wrac-plugin.toml so product metadata
+        // stays out of Cargo package metadata.
         let metadata =
             PluginMetadata::read_discovered(&package.manifest_path, &package.plugin_root)?;
 
@@ -179,9 +179,6 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginP
         let has_manifest = wrac_manifest::discover_manifest(&manifest_path, &plugin_root)
             .map(|source| match source {
                 wrac_manifest::ManifestSource::Dedicated(path) => path.exists(),
-                wrac_manifest::ManifestSource::LegacyCargoMetadata(_) => {
-                    package.metadata.get("wrac").is_some()
-                }
             })
             .unwrap_or(false);
         if !has_manifest {
