@@ -155,6 +155,8 @@ pub(crate) enum Commands {
         after_help = LAUNCH_AFTER_HELP
     )]
     Launch(LaunchArgs),
+    #[command(about = "Run repository static quality checks.")]
+    Quality,
     #[command(about = "Remove generated build artifacts managed by xtask.")]
     Clean(CleanArgs),
 }

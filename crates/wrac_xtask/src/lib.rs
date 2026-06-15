@@ -17,6 +17,7 @@ mod context;
 mod metadata;
 mod plan;
 mod profile;
+mod quality;
 pub mod targets;
 mod util;
 mod validation;
@@ -75,6 +76,7 @@ pub enum WracCommand {
     Uninstall(UninstallOptions),
     Validate(ValidateOptions),
     Launch(LaunchOptions),
+    Quality,
     Clean(CleanOptions),
 }
 
@@ -172,6 +174,9 @@ impl WracWorkspace {
             }
             WracCommand::Launch(options) => {
                 self.run_launch(options)?;
+            }
+            WracCommand::Quality => {
+                quality::quality(&self.config.root)?;
             }
             WracCommand::Clean(options) => {
                 self.run_clean(options)?;
@@ -367,6 +372,7 @@ impl From<cli::Commands> for WracCommand {
                 release: args.release,
                 plugin_id: args.plugin_id,
             }),
+            cli::Commands::Quality => Self::Quality,
             cli::Commands::Clean(args) => Self::Clean(CleanOptions {
                 package: args.package,
                 all: args.all,

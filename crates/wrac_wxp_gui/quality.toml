@@ -1,0 +1,4 @@
+[file_length]
+allow = [
+    { path = "src/controller.rs", reason = "Existing WebView controller lifecycle and platform integration are coupled in this file. Splitting it should be handled separately with UI smoke checks." },
+]
