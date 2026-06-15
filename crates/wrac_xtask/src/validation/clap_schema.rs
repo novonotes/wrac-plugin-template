@@ -151,14 +151,14 @@ unsafe fn read_plugin_schema(
     }
     let _plugin_guard = ClapPluginGuard { plugin };
 
-    if let Some(init_plugin) = unsafe { (*plugin).init } {
-        if !unsafe { init_plugin(plugin) } {
-            return Err(format!(
-                "CLAP plugin init failed for plugin id={}",
-                plugin_id.to_string_lossy()
-            )
-            .into());
-        }
+    if let Some(init_plugin) = unsafe { (*plugin).init }
+        && !unsafe { init_plugin(plugin) }
+    {
+        return Err(format!(
+            "CLAP plugin init failed for plugin id={}",
+            plugin_id.to_string_lossy()
+        )
+        .into());
     }
 
     // Read only the host-visible schema used by the current release-policy checks.

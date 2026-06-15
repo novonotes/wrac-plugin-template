@@ -134,30 +134,20 @@ pub struct CleanOptions {
     pub all: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WracInstallScope {
+    #[default]
     Default,
     User,
     System,
 }
 
-impl Default for WracInstallScope {
-    fn default() -> Self {
-        Self::Default
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WracUninstallScope {
+    #[default]
     All,
     User,
     System,
-}
-
-impl Default for WracUninstallScope {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 impl WracWorkspace {
