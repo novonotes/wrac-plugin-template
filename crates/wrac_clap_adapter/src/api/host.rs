@@ -12,9 +12,11 @@ use crate::{GuiSize, NoteDialects, PluginResult};
 /// `MainThread` naming because the long-term contract is for the adapter to turn these
 /// into queued/coalesced host requests.
 pub trait HostParams: Send + Sync {
-    /// Calls CLAP `host_params.request_flush`. `[thread-safe & control-thread]`
+    /// Calls CLAP `host_params.request_flush`. `[non-audio control path]`
     ///
-    /// CLAP marks this callback `!audio-thread`; do not call it from realtime code.
+    /// CLAP allows this from any non-audio thread. WRAC keeps the product-facing
+    /// contract narrower because wrapper hosts may not implement the native CLAP
+    /// threading contract exactly.
     fn request_flush(&self);
 
     /// Calls CLAP `host_params.rescan`. `[main-thread]`
@@ -62,14 +64,18 @@ pub trait HostNotePorts: Send + Sync {
 }
 
 /// Requests CLAP core host actions.
+///
+/// These calls are forwarded directly to the host. Native CLAP marks them as
+/// thread-safe, but product code should prefer non-realtime control paths unless it
+/// is transparently forwarding an inner plugin request.
 pub trait HostLifecycle: Send + Sync {
-    /// Calls CLAP `host.request_restart`. `[thread-safe & control-thread]`
+    /// Calls CLAP `host.request_restart`. `[non-audio control path]`
     fn request_restart(&self);
 
-    /// Calls CLAP `host.request_process`. `[thread-safe]`
+    /// Calls CLAP `host.request_process`. `[thread-safe forwarding path]`
     fn request_process(&self);
 
-    /// Calls CLAP `host.request_callback`. `[thread-safe]`
+    /// Calls CLAP `host.request_callback`. `[thread-safe forwarding path]`
     ///
     /// The host is expected to schedule a later `PluginInstance::on_main_thread` call.
     fn request_callback(&self);
@@ -87,31 +93,30 @@ pub trait HostTail: Send + 'static {
 /// Requests the host to resize the GUI client area on behalf of the product.
 ///
 /// This trait is `Send + Sync` because it is stored inside the shared plugin context,
-/// not because every method is meaningful from every thread. Call `request_resize` only
-/// from the product's GUI event path.
+/// not because every method is meaningful from every thread. Call GUI host callbacks
+/// only from the product's GUI event or GUI lifecycle path; several wrapper hosts are
+/// less permissive than native CLAP here.
 ///
-/// `resize_hints_changed` and `closed` currently call CLAP `[main-thread]` host
-/// callbacks directly. The adapter does not marshal them yet, so call those methods
-/// only from a context that is already on the host main thread.
 pub trait HostGui: Send + Sync {
-    /// Calls CLAP `host_gui.resize_hints_changed`. `[main-thread]`
+    /// Calls CLAP `host_gui.resize_hints_changed`. `[GUI lifecycle path]`
     fn resize_hints_changed(&self) {}
 
-    /// Calls CLAP `host_gui.request_resize`. `[thread-safe & control-thread]`
+    /// Calls CLAP `host_gui.request_resize`. `[GUI event path]`
     ///
-    /// Product code should normally call this from its GUI event path.
+    /// Product code should call this from its GUI event path even though native
+    /// CLAP permits broader use.
     fn request_resize(&self, size: GuiSize) -> PluginResult<()>;
 
-    /// Calls CLAP `host_gui.request_show`. `[thread-safe]`
+    /// Calls CLAP `host_gui.request_show`. `[GUI event path]`
     fn request_show(&self) -> bool {
         false
     }
 
-    /// Calls CLAP `host_gui.request_hide`. `[thread-safe]`
+    /// Calls CLAP `host_gui.request_hide`. `[GUI event path]`
     fn request_hide(&self) -> bool {
         false
     }
 
-    /// Calls CLAP `host_gui.closed`. `[main-thread]`
+    /// Calls CLAP `host_gui.closed`. `[GUI lifecycle path]`
     fn closed(&self, _was_destroyed: bool) {}
 }
