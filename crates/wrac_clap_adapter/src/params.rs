@@ -35,6 +35,20 @@ impl HostParamsProxy {
 }
 
 impl HostParams for HostParamsProxy {
+    fn request_flush(&self) {
+        let Some(params) = self.host_params else {
+            log::debug!("host_params.request_flush: host params extension unavailable");
+            return;
+        };
+
+        if let Some(request_flush) = params.request_flush {
+            unsafe {
+                request_flush(params.host);
+            }
+        } else {
+            log::debug!("host_params.request_flush: host request_flush callback unavailable");
+        }
+    }
     fn rescan(&self, flags: u32) {
         let Some(params) = self.host_params else {
             log::debug!("host_params.rescan: host params extension unavailable");
@@ -62,21 +76,6 @@ impl HostParams for HostParamsProxy {
             }
         } else {
             log::debug!("host_params.clear: host clear callback unavailable");
-        }
-    }
-
-    fn request_flush(&self) {
-        let Some(params) = self.host_params else {
-            log::debug!("host_params.request_flush: host params extension unavailable");
-            return;
-        };
-
-        if let Some(request_flush) = params.request_flush {
-            unsafe {
-                request_flush(params.host);
-            }
-        } else {
-            log::debug!("host_params.request_flush: host request_flush callback unavailable");
         }
     }
 }

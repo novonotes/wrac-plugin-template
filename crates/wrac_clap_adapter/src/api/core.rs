@@ -1,18 +1,41 @@
 use std::sync::Arc;
 
 use crate::{
-    ActiveProcessor, HostGui, HostParams, HostState, InactiveProcessor, PluginAudioPortsExtension,
-    PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginResult,
-    PluginStateExtension, PluginTailExtension,
+    ActiveProcessor, HostGui, HostLifecycle, HostParams, HostState, HostTail, InactiveProcessor,
+    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiExtension,
+    PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension,
+    PluginResult, PluginStateExtension, PluginTailExtension,
 };
 use wrac_host_context::HostContext;
 
-#[derive(Debug, Clone, Copy)]
 pub struct ActivateContext {
     pub sample_rate: f64,
     pub min_frames_count: u32,
     pub max_frames_count: u32,
+    pub host_tail: Option<Box<dyn HostTail>>,
+}
+
+pub struct ActivateResult {
+    pub processor: Box<dyn ActiveProcessor>,
+    pub notifications: ActivateNotifications,
+}
+
+impl ActivateResult {
+    pub fn new(processor: Box<dyn ActiveProcessor>) -> Self {
+        Self {
+            processor,
+            notifications: ActivateNotifications::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ActivateNotifications {
+    /// Requests `clap_host_latency.changed` during the current CLAP activate call.
+    ///
+    /// The adapter converts this flag to the host callback only while CLAP marks the
+    /// plugin as `[being-activated]`.
+    pub latency_changed: bool,
 }
 
 /// Per-instance environment passed from the adapter to the product instance.
@@ -22,6 +45,7 @@ pub struct ActivateContext {
 pub struct PluginInstanceContext {
     pub host_params: Arc<dyn HostParams>,
     pub host_state: Arc<dyn HostState>,
+    pub host_lifecycle: Arc<dyn HostLifecycle>,
     pub host_gui: Arc<dyn HostGui>,
     pub host_context: HostContext,
 }
@@ -50,7 +74,7 @@ pub trait PluginInstance: Send + 'static {
         &mut self,
         context: ActivateContext,
         processor: Box<dyn InactiveProcessor>,
-    ) -> PluginResult<Box<dyn ActiveProcessor>>;
+    ) -> PluginResult<ActivateResult>;
 
     /// Called from the plugin deactivation or destruction callback. `[control-thread]`
     fn deactivate(
