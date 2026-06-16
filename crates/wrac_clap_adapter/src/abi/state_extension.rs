@@ -4,7 +4,6 @@ use clap_sys::stream::{clap_istream, clap_ostream};
 
 use super::PluginInstanceState;
 use super::ffi::{ffi_bool, read_stream_to_end, write_stream};
-use crate::State;
 
 pub(super) static STATE: clap_plugin_state = clap_plugin_state {
     save: Some(state_save),
@@ -69,7 +68,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             return false;
         };
 
-        if instance.state.is_none() {
+        let Some(state_support) = instance.state.as_ref() else {
             log::debug!("state.load: plugin has no state support");
             return false;
         };
@@ -78,7 +77,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: rejected lifecycle re-entry");
             return false;
         };
-        if let Err(error) = instance.core.lock().restore_state(State { bytes }) {
+        if let Err(error) = state_support.restore_state(crate::State { bytes }) {
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }

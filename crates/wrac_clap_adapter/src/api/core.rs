@@ -4,7 +4,7 @@ use crate::{
     ActiveProcessor, HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState,
     HostTail, InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
-    PluginRenderExtension, PluginResult, PluginStateExtension, PluginTailExtension, State,
+    PluginRenderExtension, PluginResult, PluginStateExtension, PluginTailExtension,
 };
 use wrac_host_context::HostContext;
 
@@ -87,14 +87,6 @@ pub trait PluginInstance: Send + 'static {
     /// Called from CLAP `plugin.on_main_thread`, usually after `HostLifecycle::request_callback`.
     /// `[main-thread]`
     fn on_main_thread(&mut self) {}
-
-    /// Restores plugin state through the serialized lifecycle lane.
-    ///
-    /// Called from CLAP `state.load`. `[control-thread]`
-    fn restore_state(&mut self, state: State) -> PluginResult<()> {
-        let _ = state;
-        Ok(())
-    }
 
     /// Returns the CLAP audio-ports extension during plugin instance creation.
     ///
