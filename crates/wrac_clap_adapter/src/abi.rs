@@ -147,6 +147,7 @@ pub(crate) struct PluginInstanceState {
     processor_busy: AtomicBool,
     processor_active: AtomicBool,
     lifecycle_busy: AtomicBool,
+    lifecycle_thread: Mutex<Option<ThreadId>>,
     rt_process_depth: AtomicU32,
     rt_flush_depth: AtomicU32,
     rt_processor_contention: AtomicBool,
@@ -296,6 +297,7 @@ impl PluginInstanceState {
             processor_busy: AtomicBool::new(false),
             processor_active: AtomicBool::new(false),
             lifecycle_busy: AtomicBool::new(false),
+            lifecycle_thread: Mutex::new(None),
             rt_process_depth: AtomicU32::new(0),
             rt_flush_depth: AtomicU32::new(0),
             rt_processor_contention: AtomicBool::new(false),
@@ -468,6 +470,11 @@ impl PluginInstanceState {
         self.processor_active.load(Ordering::Acquire)
     }
 
+    pub(crate) fn is_in_realtime_callback(&self) -> bool {
+        self.rt_process_depth.load(Ordering::Acquire) > 0
+            || self.rt_flush_depth.load(Ordering::Acquire) > 0
+    }
+
     fn take_processor_blocking(&self) -> Option<Box<dyn ActiveProcessor>> {
         loop {
             if let Some(processor) = self.try_take_processor() {
@@ -498,7 +505,13 @@ impl PluginInstanceState {
         self.lifecycle_busy
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .ok()
-            .map(|_| LifecycleGuard(&self.lifecycle_busy))
+            .map(|_| {
+                *self.lifecycle_thread.lock() = Some(std::thread::current().id());
+                LifecycleGuard {
+                    busy: &self.lifecycle_busy,
+                    thread: &self.lifecycle_thread,
+                }
+            })
     }
 
     fn enter_lifecycle_blocking(&self) -> LifecycleGuard<'_> {
@@ -509,6 +522,19 @@ impl PluginInstanceState {
             // `destroy()` is a callback that can afford to wait. Releasing without
             // waiting would leave out-of-order wrapper lifecycle callbacks holding
             // stale adapter state.
+            std::thread::yield_now();
+        }
+    }
+
+    pub(crate) fn enter_lifecycle_blocking_or_reject_reentry(&self) -> Option<LifecycleGuard<'_>> {
+        let current = std::thread::current().id();
+        loop {
+            if let Some(guard) = self.try_enter_lifecycle() {
+                return Some(guard);
+            }
+            if matches!(*self.lifecycle_thread.lock(), Some(owner) if owner == current) {
+                return None;
+            }
             std::thread::yield_now();
         }
     }
@@ -551,11 +577,15 @@ unsafe fn clap_host_name(host: *const clap_host) -> Option<String> {
     )
 }
 
-struct LifecycleGuard<'a>(&'a AtomicBool);
+pub(crate) struct LifecycleGuard<'a> {
+    busy: &'a AtomicBool,
+    thread: &'a Mutex<Option<ThreadId>>,
+}
 
 impl Drop for LifecycleGuard<'_> {
     fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+        *self.thread.lock() = None;
+        self.busy.store(false, Ordering::Release);
     }
 }
 

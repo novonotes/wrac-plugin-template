@@ -60,17 +60,25 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: missing plugin instance");
             return false;
         };
+        if instance.is_in_realtime_callback() {
+            wrac_log::rtwarn!("state.load: rejected from realtime callback");
+            return false;
+        }
         let Some(bytes) = (unsafe { read_stream_to_end(stream, MAX_STATE_BYTES) }) else {
             log::warn!("state.load: failed to read state stream");
             return false;
         };
 
-        let Some(state_support) = instance.state.as_ref() else {
+        if instance.state.is_none() {
             log::debug!("state.load: plugin has no state support");
             return false;
         };
         let byte_len = bytes.len();
-        if let Err(error) = state_support.restore_state(State { bytes }) {
+        let Some(_guard) = instance.enter_lifecycle_blocking_or_reject_reentry() else {
+            log::warn!("state.load: rejected lifecycle re-entry");
+            return false;
+        };
+        if let Err(error) = instance.core.lock().restore_state(State { bytes }) {
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }
