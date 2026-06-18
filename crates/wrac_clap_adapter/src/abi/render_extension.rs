@@ -18,7 +18,11 @@ unsafe extern "C" fn render_has_hard_realtime_requirement(plugin: *const clap_pl
             log::warn!("render.has_hard_realtime_requirement: missing plugin instance");
             return false;
         };
-        let Some(render) = instance.render.as_ref() else {
+        let Some(render) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.render.as_ref())
+        else {
             log::warn!("render.has_hard_realtime_requirement: plugin has no render support");
             return false;
         };
@@ -32,7 +36,11 @@ unsafe extern "C" fn render_set(plugin: *const clap_plugin, mode: clap_plugin_re
             log::warn!("render.set: missing plugin instance mode={mode}");
             return false;
         };
-        let Some(render) = instance.render.as_ref() else {
+        let Some(render) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.render.as_ref())
+        else {
             log::warn!("render.set: plugin has no render support mode={mode}");
             return false;
         };

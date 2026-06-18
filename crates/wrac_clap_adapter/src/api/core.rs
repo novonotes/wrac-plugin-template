@@ -61,7 +61,7 @@ pub struct PluginInstanceContext {
 pub trait PluginInstance: Send + 'static {
     /// Initializes the processor lifecycle in its inactive state.
     ///
-    /// The adapter calls this once during plugin instance creation. It may call
+    /// The adapter calls this once during plugin initialization. It may call
     /// it again after `activate` returns an error, because `activate` consumes
     /// the previous inactive processor before attempting to create an active one.
     /// Implementations must therefore return a fresh inactive processor each time.
@@ -92,64 +92,64 @@ pub trait PluginInstance: Send + 'static {
     /// `[main-thread]`
     fn on_main_thread(&mut self) {}
 
-    /// Returns the CLAP audio-ports extension during plugin instance creation.
+    /// Returns the CLAP audio-ports extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPortsExtension>> {
         None
     }
 
-    /// Returns the CLAP configurable-audio-ports extension during plugin instance creation.
+    /// Returns the CLAP configurable-audio-ports extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPortsExtension>> {
         None
     }
 
-    /// Returns the CLAP note-ports extension during plugin instance creation.
+    /// Returns the CLAP note-ports extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn note_ports(&self) -> Option<Arc<dyn PluginNotePortsExtension>> {
         None
     }
 
-    /// Returns the parameter query surface during plugin instance creation.
+    /// Returns the parameter query surface during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host. Plugins without
+    /// Called once from `plugin.init` before CLAP callbacks are exposed to the host. Plugins without
     /// parameters return a query object whose count is zero.
     fn params(&self) -> Arc<dyn PluginParamsQuery>;
 
-    /// Returns the CLAP state extension during plugin instance creation.
+    /// Returns the CLAP state extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn state(&self) -> Option<Arc<dyn PluginStateExtension>> {
         None
     }
 
-    /// Returns the CLAP GUI extension during plugin instance creation.
+    /// Returns the CLAP GUI extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         None
     }
 
-    /// Returns the CLAP render extension during plugin instance creation.
+    /// Returns the CLAP render extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn render(&self) -> Option<Arc<dyn PluginRenderExtension>> {
         None
     }
 
-    /// Returns the CLAP tail extension during plugin instance creation.
+    /// Returns the CLAP tail extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn tail(&self) -> Option<Arc<dyn PluginTailExtension>> {
         None
     }
 
-    /// Returns the CLAP latency extension during plugin instance creation.
+    /// Returns the CLAP latency extension during plugin initialization.
     ///
-    /// Called once before CLAP callbacks are exposed to the host.
+    /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
     fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
         None
     }

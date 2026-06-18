@@ -23,7 +23,11 @@ unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: boo
             wrac_log::rtwarn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
-        let Some(audio_ports) = instance.audio_ports.as_ref() else {
+        let Some(audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.audio_ports.as_ref())
+        else {
             wrac_log::rtwarn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
             return 0;
         };
@@ -50,7 +54,11 @@ unsafe extern "C" fn audio_ports_get(
             );
             return false;
         };
-        let Some(audio_ports) = instance.audio_ports.as_ref() else {
+        let Some(audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.audio_ports.as_ref())
+        else {
             wrac_log::rtwarn!(
                 "audio_ports.get: plugin has no audio ports index={index} is_input={is_input}"
             );

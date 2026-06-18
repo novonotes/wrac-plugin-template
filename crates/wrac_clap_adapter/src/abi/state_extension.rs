@@ -14,7 +14,7 @@ const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 // State callbacks may arrive while the plugin is active, depending on the host format.
 // Waiting for or giving up on the `PluginInstance` write lock here could silently drop a project save,
-// so only the thread-safe state capability fixed at instance creation is called.
+// so only the thread-safe state capability fixed during plugin initialization is called.
 unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_ostream) -> bool {
     ffi_bool(|| {
         if stream.is_null() {
@@ -25,7 +25,11 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.save: missing plugin instance");
             return false;
         };
-        let Some(state_support) = instance.state.as_ref() else {
+        let Some(state_support) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.state.as_ref())
+        else {
             log::debug!("state.save: plugin has no state support");
             return false;
         };
@@ -68,7 +72,11 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             return false;
         };
 
-        let Some(state_support) = instance.state.as_ref() else {
+        let Some(state_support) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.state.as_ref())
+        else {
             log::debug!("state.load: plugin has no state support");
             return false;
         };

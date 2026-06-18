@@ -31,7 +31,7 @@ pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
 };
 
 // VST3/AU/AAX wrappers may invoke parameter queries outside the CLAP `[main-thread]` assumption.
-// The parameters capability reads the Arc fixed at instance creation and does not touch
+// The parameters capability reads the Arc fixed during plugin initialization and does not touch
 // GUI/runtime ownership or lifecycle mutation.
 unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
@@ -39,7 +39,11 @@ unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
             log::warn!("params.count: missing plugin instance");
             return 0;
         };
-        let count = instance.parameters.count();
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!("params.count: plugin instance is not initialized");
+            return 0;
+        };
+        let count = runtime.parameters.count();
         log::debug!(
             "params.count: count={count} thread={:?}",
             std::thread::current().id()
@@ -62,7 +66,11 @@ unsafe extern "C" fn params_get_info(
             log::warn!("params.get_info: missing plugin instance index={param_index}");
             return false;
         };
-        let Some(info) = instance.parameters.get_info(param_index) else {
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!("params.get_info: plugin instance is not initialized index={param_index}");
+            return false;
+        };
+        let Some(info) = runtime.parameters.get_info(param_index) else {
             log::warn!("params.get_info: invalid index={param_index}");
             return false;
         };
@@ -121,7 +129,11 @@ unsafe extern "C" fn params_get_value(
             log::warn!("params.get_value: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Ok(value) = instance.parameters.get_value(param_id) else {
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!("params.get_value: plugin instance is not initialized param_id={param_id}");
+            return false;
+        };
+        let Ok(value) = runtime.parameters.get_value(param_id) else {
             log::warn!("params.get_value: invalid param_id={param_id}");
             return false;
         };
@@ -148,7 +160,13 @@ unsafe extern "C" fn params_value_to_text(
             log::warn!("params.value_to_text: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Ok(text) = instance.parameters.value_to_text(param_id, value) else {
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!(
+                "params.value_to_text: plugin instance is not initialized param_id={param_id}"
+            );
+            return false;
+        };
+        let Ok(text) = runtime.parameters.value_to_text(param_id, value) else {
             log::warn!("params.value_to_text: invalid param_id={param_id} value={value}");
             return false;
         };
@@ -179,7 +197,13 @@ unsafe extern "C" fn params_text_to_value(
             log::warn!("params.text_to_value: invalid utf8 param_id={param_id}");
             return false;
         };
-        let Ok(value) = instance.parameters.text_to_value(param_id, text) else {
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!(
+                "params.text_to_value: plugin instance is not initialized param_id={param_id}"
+            );
+            return false;
+        };
+        let Ok(value) = runtime.parameters.text_to_value(param_id, text) else {
             log::warn!("params.text_to_value: invalid param_id={param_id} text={text}");
             return false;
         };

@@ -43,6 +43,12 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 
 Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.
 
+## Instance lifecycle
+
+`clap.plugin-factory.create_plugin` creates only the CLAP ABI shell. Product instance construction is deferred until `plugin.init`, where CLAP and clap-wrapper initialize the plugin-facing lifecycle. Capability objects such as ports, parameters, state, GUI, latency, and tail are frozen during `plugin.init` so later host callbacks can answer without taking the product lifecycle lock.
+
+Calls that arrive before capability freeze do not wait for initialization to complete. They fail fast, return `null`/`false`/`0`, or no-op depending on the CLAP callback shape. Product-held host extension proxies also remain inert until capability freeze is complete, preventing init-time host callbacks from observing half-initialized plugin capabilities. Teardown callbacks are the exception: `deactivate` and `destroy` wait for in-flight processing access to finish so the adapter can reclaim processors before the host releases the instance.
+
 ## Limitations
 
 This crate is provided as part of an implementation example, not as a general-purpose framework. Future changes will not provide API backwards compatibility or migration support.

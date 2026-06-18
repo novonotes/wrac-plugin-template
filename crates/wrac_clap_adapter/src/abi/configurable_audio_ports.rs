@@ -45,7 +45,11 @@ unsafe extern "C" fn configurable_audio_ports_can_apply_configuration(
             return false;
         };
 
-        let Some(configurable_audio_ports) = instance.configurable_audio_ports.as_ref() else {
+        let Some(configurable_audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.configurable_audio_ports.as_ref())
+        else {
             log::debug!(
                 "configurable_audio_ports.can_apply: plugin has no configurable audio ports"
             );
@@ -76,7 +80,11 @@ unsafe extern "C" fn configurable_audio_ports_apply_configuration(
             return false;
         };
 
-        let Some(configurable_audio_ports) = instance.configurable_audio_ports.as_ref() else {
+        let Some(configurable_audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.configurable_audio_ports.as_ref())
+        else {
             log::debug!("configurable_audio_ports.apply: plugin has no configurable audio ports");
             return false;
         };

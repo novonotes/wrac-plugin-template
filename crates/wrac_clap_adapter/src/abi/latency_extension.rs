@@ -18,7 +18,11 @@ unsafe extern "C" fn latency_get(plugin: *const clap_plugin) -> u32 {
             log::warn!("latency.get: missing plugin instance");
             return 0;
         };
-        let Some(latency) = instance.latency.as_ref() else {
+        let Some(latency) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.latency.as_ref())
+        else {
             // The implementation error is reported at plugin creation by a debug assertion and
             // this one release warning. `latency.get` can be polled continuously by wrappers/hosts,
             // so keep the ABI fallback visible without flooding logs.

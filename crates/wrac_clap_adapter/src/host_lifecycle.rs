@@ -1,21 +1,40 @@
 use clap_sys::host::clap_host;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::HostLifecycle;
 
 pub(crate) struct HostLifecycleProxy {
     callbacks: HostLifecycleCallbacks,
+    initialized: Arc<AtomicBool>,
 }
 
 impl HostLifecycleProxy {
-    pub(crate) fn new(host: *const clap_host) -> Self {
+    pub(crate) fn new(host: *const clap_host, initialized: Arc<AtomicBool>) -> Self {
         Self {
             callbacks: HostLifecycleCallbacks::new(host),
+            initialized,
+        }
+    }
+
+    fn is_available(&self, callback_name: &'static str) -> bool {
+        if self.initialized.load(Ordering::Acquire) {
+            true
+        } else {
+            log::debug!("host.{callback_name}: host lifecycle unavailable before plugin.init");
+            false
         }
     }
 }
 
 impl HostLifecycle for HostLifecycleProxy {
     fn request_restart(&self) {
+        if !self.is_available("request_restart") {
+            return;
+        }
+
         let Some(request_restart) = self.callbacks.request_restart else {
             log::debug!("host.request_restart: callback unavailable");
             return;
@@ -27,6 +46,10 @@ impl HostLifecycle for HostLifecycleProxy {
     }
 
     fn request_process(&self) {
+        if !self.is_available("request_process") {
+            return;
+        }
+
         let Some(request_process) = self.callbacks.request_process else {
             log::debug!("host.request_process: callback unavailable");
             return;
@@ -38,6 +61,10 @@ impl HostLifecycle for HostLifecycleProxy {
     }
 
     fn request_callback(&self) {
+        if !self.is_available("request_callback") {
+            return;
+        }
+
         let Some(request_callback) = self.callbacks.request_callback else {
             log::debug!("host.request_callback: callback unavailable");
             return;
@@ -57,8 +84,9 @@ struct HostLifecycleCallbacks {
     request_callback: Option<unsafe extern "C" fn(host: *const clap_host)>,
 }
 
-// The CLAP host pointer is owned by the host for the plugin instance lifetime. The public trait
-// mirrors CLAP's host lifecycle callbacks and does not add scheduling or thread correction.
+// The CLAP host pointer is owned by the host for the plugin instance lifetime. Lifecycle
+// callbacks are gated until capability freeze completes so product constructors cannot trigger
+// init-time host re-entry before plugin extensions are visible.
 unsafe impl Send for HostLifecycleCallbacks {}
 unsafe impl Sync for HostLifecycleCallbacks {}
 

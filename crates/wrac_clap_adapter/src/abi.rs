@@ -6,8 +6,8 @@
 use std::cell::UnsafeCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use clap_sys::ext::audio_ports::CLAP_EXT_AUDIO_PORTS;
@@ -107,28 +107,32 @@ impl Drop for RtDepthGuard<'_> {
 /// Key design: separate the "lifecycle lock" from "capabilities read directly by
 /// host-facing callbacks". The `core` lock is used only by `activate`/`deactivate`,
 /// which move processor ownership. Parameter/state/port queries read `Arc`s frozen at
-/// instance creation. Without this separation, a wrapper that re-enters a query during
+/// plugin initialization. Without this separation, a wrapper that re-enters a query during
 /// `activate()` would fail to acquire the core lock and return "no parameters" or "state
 /// save failed" to the host — no crash, but project data and routing can be corrupted.
+///
+/// Lifecycle callbacks that create runtime state fail fast on re-entry instead of waiting.
+/// Waiting from pre-init or init-time host callbacks can deadlock with wrapper formats whose
+/// native object is still being constructed. Teardown is the exception: `deactivate` and
+/// `destroy` wait so they can finish reclaiming processors before the host releases the object.
 pub(crate) struct PluginInstanceState {
     plugin: clap_plugin,
     registration: &'static EntryRegistration,
-    // Owner of the processor lifecycle; only activate/deactivate take this lock.
-    core: Mutex<Box<dyn PluginInstance>>,
-    // Capability presence is frozen at instance creation. Coupling it to runtime state
-    // would make extensions appear to disappear transiently during queries.
-    capabilities: PluginCapabilities,
-    audio_ports: Option<Arc<dyn PluginAudioPortsExtension>>,
-    configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPortsExtension>>,
-    note_ports: Option<Arc<dyn PluginNotePortsExtension>>,
-    parameters: Arc<dyn PluginParamsQuery>,
-    state: Option<Arc<dyn PluginStateExtension>>,
-    gui: Option<Arc<dyn PluginGuiExtension>>,
-    render: Option<Arc<dyn PluginRenderExtension>>,
-    tail: Option<Arc<dyn PluginTailExtension>>,
-    latency: Option<Arc<dyn PluginLatencyExtension>>,
+    plugin_id: String,
+    clap_host_name: Option<String>,
+    // Owner of the product instance lifecycle. It is intentionally empty until
+    // `plugin.init`, because CLAP forbids host extension access before that callback.
+    core: Mutex<Option<Box<dyn PluginInstance>>>,
+    // Capability presence is frozen during `plugin.init`, before host callbacks may query
+    // extensions. Coupling it to later runtime state would make extensions appear transient.
+    runtime: OnceLock<PluginRuntime>,
     host_latency: HostLatencyProxy,
     host_tail: HostTailFactory,
+    // Host extension proxies are passed to product code before the product instance exists.
+    // Keep extension lookups inert until capability freeze completes. CLAP permits
+    // `get_extension` during `plugin.init`; allowing product constructors to trigger host
+    // extension callbacks earlier could make a re-entrant host cache half-initialized plugin
+    // capabilities.
     host_extensions_initialized: Arc<AtomicBool>,
     host_context: HostContext,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
@@ -139,6 +143,11 @@ pub(crate) struct PluginInstanceState {
     // that move between host threads within one GUI session.
     gui_lifecycle_thread: Mutex<Option<ThreadId>>,
     host_params: Arc<HostParamsProxy>,
+    host_state: Arc<HostStateProxy>,
+    host_audio_ports: Arc<HostAudioPortsProxy>,
+    host_note_ports: Arc<HostNotePortsProxy>,
+    host_lifecycle: Arc<HostLifecycleProxy>,
+    host_gui: Arc<HostGuiProxy>,
     // To preserve soundness even when a wrapper violates thread/lifecycle annotations,
     // the RT path never takes a lock — only a callback that wins the atomic guard
     // constructs a `&mut` to the active or inactive processor.
@@ -165,6 +174,19 @@ pub(crate) struct PluginCapabilities {
     latency: bool,
 }
 
+struct PluginRuntime {
+    capabilities: PluginCapabilities,
+    audio_ports: Option<Arc<dyn PluginAudioPortsExtension>>,
+    configurable_audio_ports: Option<Arc<dyn PluginConfigurableAudioPortsExtension>>,
+    note_ports: Option<Arc<dyn PluginNotePortsExtension>>,
+    parameters: Arc<dyn PluginParamsQuery>,
+    state: Option<Arc<dyn PluginStateExtension>>,
+    gui: Option<Arc<dyn PluginGuiExtension>>,
+    render: Option<Arc<dyn PluginRenderExtension>>,
+    tail: Option<Arc<dyn PluginTailExtension>>,
+    latency: Option<Arc<dyn PluginLatencyExtension>>,
+}
+
 // Safety: CLAP shares the same opaque plugin pointer across callbacks. Adapter state is
 // shared via locks and atomics, so Rust aliasing rules are never violated even when the
 // host's thread annotations or callback ordering breaks down.
@@ -185,77 +207,23 @@ impl PluginInstanceState {
             host,
             host_extensions_initialized.clone(),
         ));
-        // Pass as a safe proxy so product GUI code can hold it without knowing about
-        // host pointers or CLAP event lifetimes.
-        let context = PluginInstanceContext {
-            host_params: host_params.clone(),
-            host_state: Arc::new(HostStateProxy::new(
-                host,
-                host_extensions_initialized.clone(),
-            )),
-            host_audio_ports: Arc::new(HostAudioPortsProxy::new(
-                host,
-                host_extensions_initialized.clone(),
-            )),
-            host_note_ports: Arc::new(HostNotePortsProxy::new(
-                host,
-                host_extensions_initialized.clone(),
-            )),
-            host_lifecycle: Arc::new(HostLifecycleProxy::new(host)),
-            host_gui: Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone())),
-            host_context: host_context.clone(),
-        };
-        let mut core = registration
-            .entry
-            .plugin_factory()?
-            .create_plugin(plugin_id, context)?;
-        // Product construction initializes logging. Emit immediately afterward so
-        // wrapper/host routing is visible before capability queries or GUI attachment.
-        log::info!(
-            "factory.create_plugin: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
-            host_context.host.display_name,
-            host_context.host.process_name,
-            host_context.plugin_format.as_str(),
-            clap_host_name.as_deref().unwrap_or("")
-        );
-        // Freeze capabilities here, before callbacks begin. Waiting on the core lock
-        // inside get_extension would make us dependent on host re-entry order. The Arc
-        // is just an entry point; the source of truth remains in the plugin's store.
-        let audio_ports = core.audio_ports();
-        let configurable_audio_ports = core.configurable_audio_ports();
-        let note_ports = core.note_ports();
-        let parameters = core.params();
-        let inactive_processor = match core.initialize_processor() {
-            Ok(processor) => processor,
-            Err(error) => {
-                log::warn!("factory.create_plugin: inactive processor creation failed: {error}");
-                return None;
-            }
-        };
-        let state = core.state();
-        let gui = core.gui();
-        let render = core.render();
-        let tail = core.tail();
-        let latency = core.latency();
-        debug_assert!(
-            latency.is_some(),
-            "plugins should provide a latency extension because wrapper builds, especially AAX, expect it during activation; return zero latency when no delay is required"
-        );
-        if cfg!(not(debug_assertions)) && latency.is_none() {
-            log::warn!(
-                "factory.create_plugin: plugin has no latency extension; exposing zero-latency wrapper fallback"
-            );
-        }
-        let capabilities = PluginCapabilities {
-            audio_ports: audio_ports.is_some(),
-            configurable_audio_ports: configurable_audio_ports.is_some(),
-            note_ports: note_ports.is_some(),
-            state: state.is_some(),
-            gui: gui.is_some(),
-            render: render.is_some(),
-            tail: tail.is_some(),
-            latency: latency.is_some(),
-        };
+        let host_state = Arc::new(HostStateProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
+        let host_audio_ports = Arc::new(HostAudioPortsProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
+        let host_note_ports = Arc::new(HostNotePortsProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
+        let host_lifecycle = Arc::new(HostLifecycleProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
+        let host_gui = Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone()));
         let storage = registration.storage();
 
         Some(Box::new(Self {
@@ -274,17 +242,10 @@ impl PluginInstanceState {
                 on_main_thread: Some(plugin_on_main_thread),
             },
             registration,
-            core: Mutex::new(core),
-            capabilities,
-            audio_ports,
-            configurable_audio_ports,
-            note_ports,
-            parameters,
-            state,
-            gui,
-            render,
-            tail,
-            latency,
+            plugin_id: plugin_id.to_string(),
+            clap_host_name,
+            core: Mutex::new(None),
+            runtime: OnceLock::new(),
             host_latency: HostLatencyProxy::new(host, host_extensions_initialized.clone()),
             host_tail: HostTailFactory::new(host, host_extensions_initialized.clone()),
             host_extensions_initialized,
@@ -292,7 +253,12 @@ impl PluginInstanceState {
             gui_callback_busy: Mutex::new(()),
             gui_lifecycle_thread: Mutex::new(None),
             host_params,
-            inactive_processor: UnsafeCell::new(Some(inactive_processor)),
+            host_state,
+            host_audio_ports,
+            host_note_ports,
+            host_lifecycle,
+            host_gui,
+            inactive_processor: UnsafeCell::new(None),
             processor: UnsafeCell::new(None),
             processor_busy: AtomicBool::new(false),
             processor_active: AtomicBool::new(false),
@@ -861,7 +827,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
             if attach_in_adapter {
                 registration.entry.detach_main_thread();
             }
-            log::warn!("factory.create_plugin: product factory returned no plugin core");
+            log::warn!("factory.create_plugin: failed to allocate plugin instance state");
             return ptr::null();
         };
         let instance_ptr = (&mut *instance) as *mut PluginInstanceState;
@@ -878,6 +844,100 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
             log::warn!("plugin.init: missing plugin instance");
             return false;
         };
+        let Some(_guard) = instance.try_enter_lifecycle() else {
+            log::warn!("plugin.init: lifecycle is busy");
+            return false;
+        };
+        if instance.runtime.get().is_some() || instance.core.lock().is_some() {
+            log::warn!("plugin.init: plugin instance is already initialized");
+            return false;
+        }
+        let context = PluginInstanceContext {
+            host_params: instance.host_params.clone(),
+            host_state: instance.host_state.clone(),
+            host_audio_ports: instance.host_audio_ports.clone(),
+            host_note_ports: instance.host_note_ports.clone(),
+            host_lifecycle: instance.host_lifecycle.clone(),
+            host_gui: instance.host_gui.clone(),
+            host_context: instance.host_context.clone(),
+        };
+        let Some(mut core) = instance
+            .registration
+            .entry
+            .plugin_factory()
+            .and_then(|factory| factory.create_plugin(&instance.plugin_id, context))
+        else {
+            log::warn!("plugin.init: product factory returned no plugin core");
+            return false;
+        };
+        // Product construction initializes logging. Emit immediately afterward so
+        // wrapper/host routing is visible before capability queries or GUI attachment.
+        log::info!(
+            "plugin.init: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
+            instance.host_context.host.display_name,
+            instance.host_context.host.process_name,
+            instance.host_context.plugin_format.as_str(),
+            instance.clap_host_name.as_deref().unwrap_or("")
+        );
+
+        // Freeze capabilities during CLAP init. Host extension queries are allowed from this
+        // point onward, and later get_extension callbacks can answer without taking the core lock.
+        let audio_ports = core.audio_ports();
+        let configurable_audio_ports = core.configurable_audio_ports();
+        let note_ports = core.note_ports();
+        let parameters = core.params();
+        let inactive_processor = match core.initialize_processor() {
+            Ok(processor) => processor,
+            Err(error) => {
+                log::warn!("plugin.init: inactive processor creation failed: {error}");
+                return false;
+            }
+        };
+        let state = core.state();
+        let gui = core.gui();
+        let render = core.render();
+        let tail = core.tail();
+        let latency = core.latency();
+        debug_assert!(
+            latency.is_some(),
+            "plugins should provide a latency extension because wrapper builds, especially AAX, expect it during activation; return zero latency when no delay is required"
+        );
+        if cfg!(not(debug_assertions)) && latency.is_none() {
+            log::warn!(
+                "plugin.init: plugin has no latency extension; exposing zero-latency wrapper fallback"
+            );
+        }
+        let capabilities = PluginCapabilities {
+            audio_ports: audio_ports.is_some(),
+            configurable_audio_ports: configurable_audio_ports.is_some(),
+            note_ports: note_ports.is_some(),
+            state: state.is_some(),
+            gui: gui.is_some(),
+            render: render.is_some(),
+            tail: tail.is_some(),
+            latency: latency.is_some(),
+        };
+        let runtime = PluginRuntime {
+            capabilities,
+            audio_ports,
+            configurable_audio_ports,
+            note_ports,
+            parameters,
+            state,
+            gui,
+            render,
+            tail,
+            latency,
+        };
+        if instance.runtime.set(runtime).is_err() {
+            log::warn!("plugin.init: runtime was already initialized");
+            return false;
+        }
+        instance.put_inactive_processor_blocking(inactive_processor);
+        *instance.core.lock() = Some(core);
+        // Product-held host extension proxies become live only after plugin capabilities are
+        // frozen. This keeps legal init-time `get_extension` re-entry from observing a
+        // partially initialized runtime.
         instance
             .host_extensions_initialized
             .store(true, Ordering::Release);
@@ -898,7 +958,11 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
             .host_extensions_initialized
             .store(false, Ordering::Release);
 
-        if let Some(gui) = &instance.gui {
+        if let Some(gui) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.gui.clone())
+        {
             if let Some(_gui_callback) = instance.gui_callback_busy.try_lock() {
                 if instance.enter_gui_lifecycle_thread("destroy") {
                     gui.main_thread().destroy();
@@ -912,15 +976,28 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         }
 
         if let Some(processor) = instance.take_processor_blocking() {
-            match instance.core.lock().deactivate(processor) {
-                Ok(inactive) => drop(inactive),
-                Err(error) => log::warn!("plugin.destroy: plugin deactivate failed: {error}"),
+            let mut core = instance.core.lock();
+            if let Some(core) = core.as_mut() {
+                match core.deactivate(processor) {
+                    Ok(inactive) => drop(inactive),
+                    Err(error) => log::warn!("plugin.destroy: plugin deactivate failed: {error}"),
+                }
+            } else {
+                log::warn!("plugin.destroy: plugin core is not initialized");
+                drop(processor);
             }
-        } else if let Some(inactive) = instance.take_inactive_processor_blocking() {
+        } else {
+            let inactive = if instance.runtime.get().is_some() {
+                instance.take_inactive_processor_blocking()
+            } else {
+                instance.try_take_inactive_processor().flatten()
+            };
             drop(inactive);
         }
 
-        instance.core.lock().destroy();
+        if let Some(core) = instance.core.lock().as_mut() {
+            core.destroy();
+        }
 
         drop(guard);
         let data = unsafe { (*plugin).plugin_data } as *mut PluginInstanceState;
@@ -952,6 +1029,10 @@ unsafe extern "C" fn plugin_activate(
             log::warn!("plugin.activate: processor already exists or audio callback is busy");
             return false;
         }
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!("plugin.activate: plugin instance is not initialized");
+            return false;
+        };
 
         let Some(inactive_processor) = instance.take_inactive_processor_blocking() else {
             log::warn!("plugin.activate: inactive processor is unavailable");
@@ -959,12 +1040,17 @@ unsafe extern "C" fn plugin_activate(
         };
 
         let mut core = instance.core.lock();
+        let Some(core) = core.as_mut() else {
+            log::warn!("plugin.activate: plugin core is not initialized");
+            drop(inactive_processor);
+            return false;
+        };
         let processor = match core.activate(
             ActivateContext {
                 sample_rate,
                 min_frames_count,
                 max_frames_count,
-                host_tail: instance
+                host_tail: runtime
                     .capabilities
                     .tail
                     .then(|| instance.host_tail.create_handle())
@@ -974,7 +1060,7 @@ unsafe extern "C" fn plugin_activate(
         ) {
             Ok(result) => {
                 if result.notifications.latency_changed {
-                    if instance.capabilities.latency {
+                    if runtime.capabilities.latency {
                         instance.host_latency.changed();
                     } else {
                         log::warn!(
@@ -1012,7 +1098,13 @@ unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         // concurrently, wait here to avoid missing the teardown.
         let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
-            match instance.core.lock().deactivate(processor) {
+            let mut core = instance.core.lock();
+            let Some(core) = core.as_mut() else {
+                log::warn!("plugin.deactivate: plugin core is not initialized");
+                drop(processor);
+                return;
+            };
+            match core.deactivate(processor) {
                 Ok(inactive) => instance.put_inactive_processor_blocking(inactive),
                 Err(error) => {
                     log::warn!("plugin.deactivate: plugin deactivate failed: {error}");
@@ -1139,24 +1231,30 @@ unsafe extern "C" fn plugin_get_extension(
             wrac_log::rtwarn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
-        if id == CLAP_EXT_AUDIO_PORTS && instance.capabilities.audio_ports {
+        let Some(runtime) = instance.runtime.get() else {
+            // Some wrapper backends may probe from native object construction paths. Returning
+            // null keeps those calls non-blocking and avoids exposing half-frozen capabilities.
+            wrac_log::rtwarn!("plugin.get_extension: plugin instance is not initialized");
+            return ptr::null();
+        };
+        if id == CLAP_EXT_AUDIO_PORTS && runtime.capabilities.audio_ports {
             &audio_ports::AUDIO_PORTS as *const _ as *const c_void
         } else if (id == CLAP_EXT_CONFIGURABLE_AUDIO_PORTS
             || id == CLAP_EXT_CONFIGURABLE_AUDIO_PORTS_COMPAT)
-            && instance.capabilities.configurable_audio_ports
+            && runtime.capabilities.configurable_audio_ports
         {
             &configurable_audio_ports::CONFIGURABLE_AUDIO_PORTS as *const _ as *const c_void
-        } else if id == CLAP_EXT_NOTE_PORTS && instance.capabilities.note_ports {
+        } else if id == CLAP_EXT_NOTE_PORTS && runtime.capabilities.note_ports {
             &note_ports::NOTE_PORTS as *const _ as *const c_void
         } else if id == CLAP_EXT_PARAMS {
             &params_extension::PARAMS as *const _ as *const c_void
-        } else if id == CLAP_EXT_STATE && instance.capabilities.state {
+        } else if id == CLAP_EXT_STATE && runtime.capabilities.state {
             &state_extension::STATE as *const _ as *const c_void
-        } else if id == CLAP_EXT_GUI && instance.capabilities.gui {
+        } else if id == CLAP_EXT_GUI && runtime.capabilities.gui {
             &gui_extension::GUI as *const _ as *const c_void
-        } else if id == CLAP_EXT_RENDER && instance.capabilities.render {
+        } else if id == CLAP_EXT_RENDER && runtime.capabilities.render {
             &render_extension::RENDER as *const _ as *const c_void
-        } else if id == CLAP_EXT_TAIL && instance.capabilities.tail {
+        } else if id == CLAP_EXT_TAIL && runtime.capabilities.tail {
             &tail_extension::TAIL as *const _ as *const c_void
         } else if id == CLAP_EXT_LATENCY {
             // Keep this pointer non-null even when `PluginInstance::latency()` returned
@@ -1164,7 +1262,7 @@ unsafe extern "C" fn plugin_get_extension(
             // unconditionally during activation, so exposing capability absence as a
             // null CLAP extension pointer can crash before WRAC code gets a chance to
             // diagnose the product bug. The product-facing contract is still enforced
-            // at instance creation by the debug assertion above; this fallback exists
+            // during plugin initialization by the debug assertion above; this fallback exists
             // only to keep release wrapper builds from failing at the ABI boundary.
             &latency_extension::LATENCY as *const _ as *const c_void
         } else if id == CLAP_PLUGIN_AS_VST3 {
@@ -1181,7 +1279,12 @@ unsafe extern "C" fn plugin_on_main_thread(plugin: *const clap_plugin) {
             log::warn!("plugin.on_main_thread: missing plugin instance");
             return;
         };
-        instance.core.lock().on_main_thread();
+        let mut core = instance.core.lock();
+        let Some(core) = core.as_mut() else {
+            log::warn!("plugin.on_main_thread: plugin core is not initialized");
+            return;
+        };
+        core.on_main_thread();
     });
 }
 
@@ -1222,7 +1325,10 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
         },
     };
     static ZERO_LATENCY_REGISTRATION: EntryRegistration =
@@ -1232,7 +1338,10 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: true,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
         },
     };
     static ACTIVATE_LATENCY_CHANGED_REGISTRATION: EntryRegistration =
@@ -1242,20 +1351,50 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: true,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
         },
     };
     static REQUEST_HOST_PORTS_ENTRY: TestEntry = TestEntry {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: true,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
+        },
+    };
+    static REQUEST_HOST_PORTS_DURING_CREATE_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_lifecycle_during_create: true,
+            request_host_ports: false,
+            request_host_ports_during_create: true,
+            count_create_plugin: false,
+        },
+    };
+    static DEFER_CREATE_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
+            request_host_ports: false,
+            request_host_ports_during_create: false,
+            count_create_plugin: true,
         },
     };
     static REQUEST_HOST_LIFECYCLE_REGISTRATION: EntryRegistration =
         EntryRegistration::new(&REQUEST_HOST_LIFECYCLE_ENTRY);
     static REQUEST_HOST_PORTS_REGISTRATION: EntryRegistration =
         EntryRegistration::new(&REQUEST_HOST_PORTS_ENTRY);
+    static REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&REQUEST_HOST_PORTS_DURING_CREATE_ENTRY);
+    static DEFER_CREATE_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&DEFER_CREATE_ENTRY);
 
     static LATENCY_CHANGED_COUNT: AtomicU32 = AtomicU32::new(0);
     static REQUEST_RESTART_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -1267,10 +1406,12 @@ mod tests {
     static NOTE_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
     static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
     static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
+    static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
 
     #[test]
     fn zero_latency_exposes_latency_extension() {
         let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
         let extension = unsafe {
             plugin_get_extension(
                 &instance.plugin as *const clap_plugin,
@@ -1325,6 +1466,7 @@ mod tests {
     fn plugin_on_main_thread_calls_instance_hook() {
         ON_MAIN_THREAD_COUNT.store(0, Ordering::Relaxed);
         let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
 
         unsafe {
             plugin_on_main_thread(&instance.plugin as *const clap_plugin);
@@ -1337,6 +1479,7 @@ mod tests {
     fn plugin_destroy_calls_instance_hook() {
         DESTROY_COUNT.store(0, Ordering::Relaxed);
         let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
         let plugin = &instance.plugin as *const clap_plugin;
         let _instance = Box::into_raw(instance);
 
@@ -1345,6 +1488,16 @@ mod tests {
         }
 
         assert_eq!(DESTROY_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn factory_create_plugin_defers_product_construction_until_plugin_init() {
+        CREATE_PLUGIN_COUNT.store(0, Ordering::Relaxed);
+        let instance = test_instance(&DEFER_CREATE_REGISTRATION, ptr::null());
+
+        assert_eq!(CREATE_PLUGIN_COUNT.load(Ordering::Relaxed), 0);
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+        assert_eq!(CREATE_PLUGIN_COUNT.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -1377,6 +1530,34 @@ mod tests {
         assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn product_construction_keeps_host_extension_proxies_inert() {
+        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.store(0, Ordering::Relaxed);
+        AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        let host_counts = HostCallbackCounts::default();
+        let host = test_host_with_callback_counts(&host_counts);
+        let instance = test_instance(&REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION, &host);
+
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+
+        assert_eq!(host_counts.request_restart.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.request_process.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.request_callback.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(AUDIO_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
+    }
+
     fn test_instance(
         registration: &'static EntryRegistration,
         host: *const clap_host,
@@ -1401,6 +1582,29 @@ mod tests {
 
     fn test_host_with_get_extension_count(count: &AtomicU32) -> clap_host {
         test_host_with_data((count as *const AtomicU32).cast_mut().cast())
+    }
+
+    #[derive(Default)]
+    struct HostCallbackCounts {
+        get_extension: AtomicU32,
+        request_restart: AtomicU32,
+        request_process: AtomicU32,
+        request_callback: AtomicU32,
+    }
+
+    fn test_host_with_callback_counts(counts: &HostCallbackCounts) -> clap_host {
+        clap_host {
+            clap_version: CLAP_VERSION,
+            host_data: (counts as *const HostCallbackCounts).cast_mut().cast(),
+            name: c"Test Host".as_ptr(),
+            vendor: c"Test Vendor".as_ptr(),
+            url: c"https://example.invalid".as_ptr(),
+            version: c"0.0.0".as_ptr(),
+            get_extension: Some(test_host_get_extension_with_callback_counts),
+            request_restart: Some(test_host_request_restart_with_callback_counts),
+            request_process: Some(test_host_request_process_with_callback_counts),
+            request_callback: Some(test_host_request_callback_with_callback_counts),
+        }
     }
 
     fn test_host_with_data(host_data: *mut std::ffi::c_void) -> clap_host {
@@ -1443,6 +1647,19 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn test_host_get_extension_with_callback_counts(
+        host: *const clap_host,
+        extension_id: *const std::ffi::c_char,
+    ) -> *const std::ffi::c_void {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.get_extension.fetch_add(1, Ordering::Relaxed);
+        }
+        unsafe { test_host_get_extension(ptr::null(), extension_id) }
+    }
+
     unsafe extern "C" fn test_host_latency_changed(_host: *const clap_host) {
         LATENCY_CHANGED_COUNT.fetch_add(1, Ordering::Relaxed);
     }
@@ -1457,6 +1674,33 @@ mod tests {
 
     unsafe extern "C" fn test_host_request_callback(_host: *const clap_host) {
         REQUEST_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "C" fn test_host_request_restart_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_restart.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe extern "C" fn test_host_request_process_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_process.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe extern "C" fn test_host_request_callback_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_callback.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     static TEST_HOST_LATENCY: clap_host_latency = clap_host_latency {
@@ -1527,7 +1771,10 @@ mod tests {
     struct TestFactory {
         activate_latency_changed: bool,
         request_host_lifecycle: bool,
+        request_host_lifecycle_during_create: bool,
         request_host_ports: bool,
+        request_host_ports_during_create: bool,
+        count_create_plugin: bool,
     }
 
     impl PluginFactory for TestFactory {
@@ -1544,6 +1791,29 @@ mod tests {
             plugin_id: &str,
             context: PluginInstanceContext,
         ) -> Option<Box<dyn PluginInstance>> {
+            if self.count_create_plugin {
+                CREATE_PLUGIN_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+            if self.request_host_lifecycle_during_create {
+                context.host_lifecycle.request_restart();
+                context.host_lifecycle.request_process();
+                context.host_lifecycle.request_callback();
+            }
+            if self.request_host_ports_during_create {
+                assert!(
+                    !context
+                        .host_audio_ports
+                        .is_rescan_flag_supported(CLAP_AUDIO_PORTS_RESCAN_NAMES)
+                );
+                context
+                    .host_audio_ports
+                    .rescan(CLAP_AUDIO_PORTS_RESCAN_NAMES);
+                assert_eq!(
+                    context.host_note_ports.supported_dialects(),
+                    NoteDialects::default()
+                );
+                context.host_note_ports.rescan(CLAP_NOTE_PORTS_RESCAN_NAMES);
+            }
             (plugin_id == TEST_DESCRIPTOR.id).then(|| {
                 Box::new(TestPlugin {
                     activate_latency_changed: self.activate_latency_changed,
