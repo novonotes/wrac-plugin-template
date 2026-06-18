@@ -1400,10 +1400,6 @@ mod tests {
     static REQUEST_RESTART_COUNT: AtomicU32 = AtomicU32::new(0);
     static REQUEST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
     static REQUEST_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
-    static AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT: AtomicU32 = AtomicU32::new(0);
-    static AUDIO_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
-    static NOTE_PORTS_SUPPORTED_DIALECTS_COUNT: AtomicU32 = AtomicU32::new(0);
-    static NOTE_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
     static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
     static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
     static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -1502,40 +1498,36 @@ mod tests {
 
     #[test]
     fn activate_forwards_host_port_requests() {
-        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.store(0, Ordering::Relaxed);
-        AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
-        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
-        NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
-        let host_get_extension_count = AtomicU32::new(0);
-        let host = test_host_with_get_extension_count(&host_get_extension_count);
+        let host_counts = HostCallbackCounts::default();
+        let host = test_host_with_callback_counts(&host_counts);
         let instance = test_instance(&REQUEST_HOST_PORTS_REGISTRATION, &host);
-        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 0);
 
         assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
-        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 0);
         let activated =
             unsafe { plugin_activate(&instance.plugin as *const clap_plugin, 48_000.0, 1, 512) };
 
         assert!(activated);
-        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 2);
+        assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 2);
         assert_eq!(
-            AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
+            host_counts
+                .audio_ports_is_rescan_flag_supported
+                .load(Ordering::Relaxed),
             1
         );
-        assert_eq!(AUDIO_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(host_counts.audio_ports_rescan.load(Ordering::Relaxed), 1);
         assert_eq!(
-            NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.load(Ordering::Relaxed),
+            host_counts
+                .note_ports_supported_dialects
+                .load(Ordering::Relaxed),
             1
         );
-        assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
+        assert_eq!(host_counts.note_ports_rescan.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn product_construction_keeps_host_extension_proxies_inert() {
-        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.store(0, Ordering::Relaxed);
-        AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
-        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
-        NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
         let host_counts = HostCallbackCounts::default();
         let host = test_host_with_callback_counts(&host_counts);
         let instance = test_instance(&REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION, &host);
@@ -1547,15 +1539,19 @@ mod tests {
         assert_eq!(host_counts.request_callback.load(Ordering::Relaxed), 0);
         assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 0);
         assert_eq!(
-            AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
+            host_counts
+                .audio_ports_is_rescan_flag_supported
+                .load(Ordering::Relaxed),
             0
         );
-        assert_eq!(AUDIO_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.audio_ports_rescan.load(Ordering::Relaxed), 0);
         assert_eq!(
-            NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.load(Ordering::Relaxed),
+            host_counts
+                .note_ports_supported_dialects
+                .load(Ordering::Relaxed),
             0
         );
-        assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.note_ports_rescan.load(Ordering::Relaxed), 0);
     }
 
     fn test_instance(
@@ -1590,6 +1586,10 @@ mod tests {
         request_restart: AtomicU32,
         request_process: AtomicU32,
         request_callback: AtomicU32,
+        audio_ports_is_rescan_flag_supported: AtomicU32,
+        audio_ports_rescan: AtomicU32,
+        note_ports_supported_dialects: AtomicU32,
+        note_ports_rescan: AtomicU32,
     }
 
     fn test_host_with_callback_counts(counts: &HostCallbackCounts) -> clap_host {
@@ -1657,7 +1657,20 @@ mod tests {
         } {
             counts.get_extension.fetch_add(1, Ordering::Relaxed);
         }
-        unsafe { test_host_get_extension(ptr::null(), extension_id) }
+        if extension_id.is_null() {
+            return ptr::null();
+        }
+
+        let id = unsafe { std::ffi::CStr::from_ptr(extension_id) };
+        if id == CLAP_EXT_LATENCY {
+            (&TEST_HOST_LATENCY as *const clap_host_latency).cast()
+        } else if id == CLAP_EXT_AUDIO_PORTS {
+            (&COUNTED_TEST_HOST_AUDIO_PORTS as *const clap_host_audio_ports).cast()
+        } else if id == CLAP_EXT_NOTE_PORTS {
+            (&COUNTED_TEST_HOST_NOTE_PORTS as *const clap_host_note_ports).cast()
+        } else {
+            ptr::null()
+        }
     }
 
     unsafe extern "C" fn test_host_latency_changed(_host: *const clap_host) {
@@ -1711,31 +1724,82 @@ mod tests {
         _host: *const clap_host,
         flag: u32,
     ) -> bool {
-        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.fetch_add(1, Ordering::Relaxed);
         flag == CLAP_AUDIO_PORTS_RESCAN_NAMES
     }
 
-    unsafe extern "C" fn test_host_audio_ports_rescan(_host: *const clap_host, _flags: u32) {
-        AUDIO_PORTS_RESCAN_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
+    unsafe extern "C" fn test_host_audio_ports_rescan(_host: *const clap_host, _flags: u32) {}
 
     static TEST_HOST_AUDIO_PORTS: clap_host_audio_ports = clap_host_audio_ports {
         is_rescan_flag_supported: Some(test_host_audio_ports_is_rescan_flag_supported),
         rescan: Some(test_host_audio_ports_rescan),
     };
 
+    unsafe extern "C" fn counted_test_host_audio_ports_is_rescan_flag_supported(
+        host: *const clap_host,
+        flag: u32,
+    ) -> bool {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts
+                .audio_ports_is_rescan_flag_supported
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        flag == CLAP_AUDIO_PORTS_RESCAN_NAMES
+    }
+
+    unsafe extern "C" fn counted_test_host_audio_ports_rescan(host: *const clap_host, _flags: u32) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.audio_ports_rescan.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    static COUNTED_TEST_HOST_AUDIO_PORTS: clap_host_audio_ports = clap_host_audio_ports {
+        is_rescan_flag_supported: Some(counted_test_host_audio_ports_is_rescan_flag_supported),
+        rescan: Some(counted_test_host_audio_ports_rescan),
+    };
+
     unsafe extern "C" fn test_host_note_ports_supported_dialects(_host: *const clap_host) -> u32 {
-        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.fetch_add(1, Ordering::Relaxed);
         CLAP_NOTE_DIALECT_CLAP
     }
 
-    unsafe extern "C" fn test_host_note_ports_rescan(_host: *const clap_host, _flags: u32) {
-        NOTE_PORTS_RESCAN_COUNT.fetch_add(1, Ordering::Relaxed);
-    }
+    unsafe extern "C" fn test_host_note_ports_rescan(_host: *const clap_host, _flags: u32) {}
 
     static TEST_HOST_NOTE_PORTS: clap_host_note_ports = clap_host_note_ports {
         supported_dialects: Some(test_host_note_ports_supported_dialects),
         rescan: Some(test_host_note_ports_rescan),
+    };
+
+    unsafe extern "C" fn counted_test_host_note_ports_supported_dialects(
+        host: *const clap_host,
+    ) -> u32 {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts
+                .note_ports_supported_dialects
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        CLAP_NOTE_DIALECT_CLAP
+    }
+
+    unsafe extern "C" fn counted_test_host_note_ports_rescan(host: *const clap_host, _flags: u32) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.note_ports_rescan.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    static COUNTED_TEST_HOST_NOTE_PORTS: clap_host_note_ports = clap_host_note_ports {
+        supported_dialects: Some(counted_test_host_note_ports_supported_dialects),
+        rescan: Some(counted_test_host_note_ports_rescan),
     };
 
     static TEST_DESCRIPTOR: PluginDescriptor = PluginDescriptor {
