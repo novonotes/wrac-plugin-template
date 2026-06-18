@@ -219,7 +219,10 @@ impl PluginInstanceState {
             host,
             host_extensions_initialized.clone(),
         ));
-        let host_lifecycle = Arc::new(HostLifecycleProxy::new(host));
+        let host_lifecycle = Arc::new(HostLifecycleProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+        ));
         let host_gui = Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone()));
         let storage = registration.storage();
 
@@ -1322,6 +1325,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
             request_host_ports_during_create: false,
             count_create_plugin: false,
@@ -1334,6 +1338,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: true,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
             request_host_ports_during_create: false,
             count_create_plugin: false,
@@ -1346,6 +1351,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: true,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
             request_host_ports_during_create: false,
             count_create_plugin: false,
@@ -1355,6 +1361,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: true,
             request_host_ports_during_create: false,
             count_create_plugin: false,
@@ -1364,6 +1371,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: true,
             request_host_ports: false,
             request_host_ports_during_create: true,
             count_create_plugin: false,
@@ -1373,6 +1381,7 @@ mod tests {
         factory: TestFactory {
             activate_latency_changed: false,
             request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
             request_host_ports: false,
             request_host_ports_during_create: false,
             count_create_plugin: true,
@@ -1527,13 +1536,16 @@ mod tests {
         AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
         NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
         NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
-        let host_get_extension_count = AtomicU32::new(0);
-        let host = test_host_with_get_extension_count(&host_get_extension_count);
+        let host_counts = HostCallbackCounts::default();
+        let host = test_host_with_callback_counts(&host_counts);
         let instance = test_instance(&REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION, &host);
 
         assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
 
-        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.request_restart.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.request_process.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.request_callback.load(Ordering::Relaxed), 0);
+        assert_eq!(host_counts.get_extension.load(Ordering::Relaxed), 0);
         assert_eq!(
             AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
             0
@@ -1570,6 +1582,29 @@ mod tests {
 
     fn test_host_with_get_extension_count(count: &AtomicU32) -> clap_host {
         test_host_with_data((count as *const AtomicU32).cast_mut().cast())
+    }
+
+    #[derive(Default)]
+    struct HostCallbackCounts {
+        get_extension: AtomicU32,
+        request_restart: AtomicU32,
+        request_process: AtomicU32,
+        request_callback: AtomicU32,
+    }
+
+    fn test_host_with_callback_counts(counts: &HostCallbackCounts) -> clap_host {
+        clap_host {
+            clap_version: CLAP_VERSION,
+            host_data: (counts as *const HostCallbackCounts).cast_mut().cast(),
+            name: c"Test Host".as_ptr(),
+            vendor: c"Test Vendor".as_ptr(),
+            url: c"https://example.invalid".as_ptr(),
+            version: c"0.0.0".as_ptr(),
+            get_extension: Some(test_host_get_extension_with_callback_counts),
+            request_restart: Some(test_host_request_restart_with_callback_counts),
+            request_process: Some(test_host_request_process_with_callback_counts),
+            request_callback: Some(test_host_request_callback_with_callback_counts),
+        }
     }
 
     fn test_host_with_data(host_data: *mut std::ffi::c_void) -> clap_host {
@@ -1612,6 +1647,19 @@ mod tests {
         }
     }
 
+    unsafe extern "C" fn test_host_get_extension_with_callback_counts(
+        host: *const clap_host,
+        extension_id: *const std::ffi::c_char,
+    ) -> *const std::ffi::c_void {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.get_extension.fetch_add(1, Ordering::Relaxed);
+        }
+        unsafe { test_host_get_extension(ptr::null(), extension_id) }
+    }
+
     unsafe extern "C" fn test_host_latency_changed(_host: *const clap_host) {
         LATENCY_CHANGED_COUNT.fetch_add(1, Ordering::Relaxed);
     }
@@ -1626,6 +1674,33 @@ mod tests {
 
     unsafe extern "C" fn test_host_request_callback(_host: *const clap_host) {
         REQUEST_CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+
+    unsafe extern "C" fn test_host_request_restart_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_restart.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe extern "C" fn test_host_request_process_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_process.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    unsafe extern "C" fn test_host_request_callback_with_callback_counts(host: *const clap_host) {
+        if let Some(counts) = unsafe {
+            host.as_ref()
+                .and_then(|host| host.host_data.cast::<HostCallbackCounts>().as_ref())
+        } {
+            counts.request_callback.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     static TEST_HOST_LATENCY: clap_host_latency = clap_host_latency {
@@ -1696,6 +1771,7 @@ mod tests {
     struct TestFactory {
         activate_latency_changed: bool,
         request_host_lifecycle: bool,
+        request_host_lifecycle_during_create: bool,
         request_host_ports: bool,
         request_host_ports_during_create: bool,
         count_create_plugin: bool,
@@ -1717,6 +1793,11 @@ mod tests {
         ) -> Option<Box<dyn PluginInstance>> {
             if self.count_create_plugin {
                 CREATE_PLUGIN_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+            if self.request_host_lifecycle_during_create {
+                context.host_lifecycle.request_restart();
+                context.host_lifecycle.request_process();
+                context.host_lifecycle.request_callback();
             }
             if self.request_host_ports_during_create {
                 assert!(
