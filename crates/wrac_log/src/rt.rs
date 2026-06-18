@@ -71,7 +71,8 @@ pub(crate) fn start_drain_if_enabled() {
 /// Writes one realtime log record into the fixed-size global buffer.
 ///
 /// This function is public so the exported `rt*` macros can call it through
-/// `$crate`; normal plugin code should call those macros instead.
+/// `$crate`. Plugin code should not call or rely on this function directly; use
+/// the `rt*` logging macros instead.
 pub fn write_rt_log(level: Level, target: &'static str, args: fmt::Arguments<'_>) {
     rt_log().write_fmt(level, target, args);
 }

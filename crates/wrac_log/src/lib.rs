@@ -14,6 +14,8 @@ pub use file_logger::{
 /// Macro support function used by the realtime log macros.
 ///
 /// This remains public because exported macros refer to it through `$crate`.
+/// Plugin code should not call or rely on this symbol directly; use the `rt*`
+/// logging macros instead.
 pub use rt::write_rt_log as __write_rt_log;
 pub use rt::{RtDrainConfig, drain_rt_logs_once, init_rt_log_drain_once};
 

@@ -52,7 +52,9 @@ pub use process_buffer::{
 /// Macro support items used by [`export_clap_entry!`].
 ///
 /// These items stay public because exported macros must refer to them through
-/// `$crate`, but plugin code should use the safe API reexports above instead.
+/// `$crate`. They are not part of the plugin authoring API: plugin code should
+/// not import, call, or rely on them directly. Use the safe API reexports above
+/// and the exported macros instead.
 pub mod __private {
     pub use crate::entry::EntryRegistration;
 
