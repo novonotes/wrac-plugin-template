@@ -920,6 +920,8 @@ unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
             drop(inactive);
         }
 
+        instance.core.lock().destroy();
+
         drop(guard);
         let data = unsafe { (*plugin).plugin_data } as *mut PluginInstanceState;
         unsafe {
@@ -1203,7 +1205,7 @@ mod tests {
     use clap_sys::version::CLAP_VERSION;
 
     use super::{
-        PluginInstanceState, plugin_activate, plugin_get_extension, plugin_init,
+        PluginInstanceState, plugin_activate, plugin_destroy, plugin_get_extension, plugin_init,
         plugin_on_main_thread,
     };
     use crate::entry::EntryRegistration;
@@ -1264,6 +1266,7 @@ mod tests {
     static NOTE_PORTS_SUPPORTED_DIALECTS_COUNT: AtomicU32 = AtomicU32::new(0);
     static NOTE_PORTS_RESCAN_COUNT: AtomicU32 = AtomicU32::new(0);
     static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
+    static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
 
     #[test]
     fn zero_latency_exposes_latency_extension() {
@@ -1328,6 +1331,20 @@ mod tests {
         }
 
         assert_eq!(ON_MAIN_THREAD_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn plugin_destroy_calls_instance_hook() {
+        DESTROY_COUNT.store(0, Ordering::Relaxed);
+        let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+        let plugin = &instance.plugin as *const clap_plugin;
+        let _instance = Box::into_raw(instance);
+
+        unsafe {
+            plugin_destroy(plugin);
+        }
+
+        assert_eq!(DESTROY_COUNT.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -1589,6 +1606,10 @@ mod tests {
             _processor: Box<dyn ActiveProcessor>,
         ) -> PluginResult<Box<dyn InactiveProcessor>> {
             Ok(Box::new(TestInactiveProcessor))
+        }
+
+        fn destroy(&mut self) {
+            DESTROY_COUNT.fetch_add(1, Ordering::Relaxed);
         }
 
         fn on_main_thread(&mut self) {
