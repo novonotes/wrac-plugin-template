@@ -45,9 +45,9 @@ Each trait is a thin Rust representation of the corresponding CLAP C ABI. This c
 
 ## Instance lifecycle
 
-`clap.plugin-factory.create_plugin` creates only the CLAP ABI shell. Product instance construction is deferred until `plugin.init`, where CLAP and clap-wrapper make host extensions available. Capability objects such as ports, parameters, state, GUI, latency, and tail are frozen during `plugin.init` so later host callbacks can answer without taking the product lifecycle lock.
+`clap.plugin-factory.create_plugin` creates only the CLAP ABI shell. Product instance construction is deferred until `plugin.init`, where CLAP and clap-wrapper initialize the plugin-facing lifecycle. Capability objects such as ports, parameters, state, GUI, latency, and tail are frozen during `plugin.init` so later host callbacks can answer without taking the product lifecycle lock.
 
-Calls that arrive before initialization do not wait for initialization to complete. They fail fast, return `null`/`false`/`0`, or no-op depending on the CLAP callback shape. This keeps wrapper construction paths from deadlocking if a native VST3/AU/AAX host re-enters the wrapper while its native object is still being built. Teardown callbacks are the exception: `deactivate` and `destroy` wait for in-flight processing access to finish so the adapter can reclaim processors before the host releases the instance.
+Calls that arrive before capability freeze do not wait for initialization to complete. They fail fast, return `null`/`false`/`0`, or no-op depending on the CLAP callback shape. Product-held host extension proxies also remain inert until capability freeze is complete, preventing init-time host callbacks from observing half-initialized plugin capabilities. Teardown callbacks are the exception: `deactivate` and `destroy` wait for in-flight processing access to finish so the adapter can reclaim processors before the host releases the instance.
 
 ## Limitations
 

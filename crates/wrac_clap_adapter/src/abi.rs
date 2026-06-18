@@ -129,8 +129,10 @@ pub(crate) struct PluginInstanceState {
     host_latency: HostLatencyProxy,
     host_tail: HostTailFactory,
     // Host extension proxies are passed to product code before the product instance exists.
-    // Keep them inert until `plugin.init` starts, where CLAP and clap-wrapper both make host
-    // extensions available. Calls made earlier are rejected/no-op rather than waiting.
+    // Keep extension lookups inert until capability freeze completes. CLAP permits
+    // `get_extension` during `plugin.init`; allowing product constructors to trigger host
+    // extension callbacks earlier could make a re-entrant host cache half-initialized plugin
+    // capabilities.
     host_extensions_initialized: Arc<AtomicBool>,
     host_context: HostContext,
     // Re-entry guard for GUI mutation callbacks. Fails immediately on re-entry to avoid
@@ -847,15 +849,6 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
             log::warn!("plugin.init: plugin instance is already initialized");
             return false;
         }
-        // Product construction happens inside `plugin.init` so constructors may receive
-        // host proxies only after clap-wrapper has entered the CLAP initialization phase.
-        // The proxies still avoid blocking: if a backend cannot serve an init-time host
-        // callback, the call resolves as unavailable instead of waiting for initialization
-        // to complete.
-        instance
-            .host_extensions_initialized
-            .store(true, Ordering::Release);
-
         let context = PluginInstanceContext {
             host_params: instance.host_params.clone(),
             host_state: instance.host_state.clone(),
@@ -872,9 +865,6 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
             .and_then(|factory| factory.create_plugin(&instance.plugin_id, context))
         else {
             log::warn!("plugin.init: product factory returned no plugin core");
-            instance
-                .host_extensions_initialized
-                .store(false, Ordering::Release);
             return false;
         };
         // Product construction initializes logging. Emit immediately afterward so
@@ -897,9 +887,6 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
             Ok(processor) => processor,
             Err(error) => {
                 log::warn!("plugin.init: inactive processor creation failed: {error}");
-                instance
-                    .host_extensions_initialized
-                    .store(false, Ordering::Release);
                 return false;
             }
         };
@@ -941,13 +928,16 @@ unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
         };
         if instance.runtime.set(runtime).is_err() {
             log::warn!("plugin.init: runtime was already initialized");
-            instance
-                .host_extensions_initialized
-                .store(false, Ordering::Release);
             return false;
         }
         instance.put_inactive_processor_blocking(inactive_processor);
         *instance.core.lock() = Some(core);
+        // Product-held host extension proxies become live only after plugin capabilities are
+        // frozen. This keeps legal init-time `get_extension` re-entry from observing a
+        // partially initialized runtime.
+        instance
+            .host_extensions_initialized
+            .store(true, Ordering::Release);
         true
     })
 }
@@ -1333,6 +1323,7 @@ mod tests {
             activate_latency_changed: false,
             request_host_lifecycle: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
             count_create_plugin: false,
         },
     };
@@ -1344,6 +1335,7 @@ mod tests {
             activate_latency_changed: true,
             request_host_lifecycle: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
             count_create_plugin: false,
         },
     };
@@ -1355,6 +1347,7 @@ mod tests {
             activate_latency_changed: false,
             request_host_lifecycle: true,
             request_host_ports: false,
+            request_host_ports_during_create: false,
             count_create_plugin: false,
         },
     };
@@ -1363,6 +1356,16 @@ mod tests {
             activate_latency_changed: false,
             request_host_lifecycle: false,
             request_host_ports: true,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
+        },
+    };
+    static REQUEST_HOST_PORTS_DURING_CREATE_ENTRY: TestEntry = TestEntry {
+        factory: TestFactory {
+            activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_ports: false,
+            request_host_ports_during_create: true,
             count_create_plugin: false,
         },
     };
@@ -1371,6 +1374,7 @@ mod tests {
             activate_latency_changed: false,
             request_host_lifecycle: false,
             request_host_ports: false,
+            request_host_ports_during_create: false,
             count_create_plugin: true,
         },
     };
@@ -1378,6 +1382,8 @@ mod tests {
         EntryRegistration::new(&REQUEST_HOST_LIFECYCLE_ENTRY);
     static REQUEST_HOST_PORTS_REGISTRATION: EntryRegistration =
         EntryRegistration::new(&REQUEST_HOST_PORTS_ENTRY);
+    static REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION: EntryRegistration =
+        EntryRegistration::new(&REQUEST_HOST_PORTS_DURING_CREATE_ENTRY);
     static DEFER_CREATE_REGISTRATION: EntryRegistration =
         EntryRegistration::new(&DEFER_CREATE_ENTRY);
 
@@ -1513,6 +1519,31 @@ mod tests {
             1
         );
         assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn product_construction_keeps_host_extension_proxies_inert() {
+        AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.store(0, Ordering::Relaxed);
+        AUDIO_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.store(0, Ordering::Relaxed);
+        NOTE_PORTS_RESCAN_COUNT.store(0, Ordering::Relaxed);
+        let host_get_extension_count = AtomicU32::new(0);
+        let host = test_host_with_get_extension_count(&host_get_extension_count);
+        let instance = test_instance(&REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION, &host);
+
+        assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+
+        assert_eq!(host_get_extension_count.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            AUDIO_PORTS_IS_RESCAN_FLAG_SUPPORTED_COUNT.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(AUDIO_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            NOTE_PORTS_SUPPORTED_DIALECTS_COUNT.load(Ordering::Relaxed),
+            0
+        );
+        assert_eq!(NOTE_PORTS_RESCAN_COUNT.load(Ordering::Relaxed), 0);
     }
 
     fn test_instance(
@@ -1666,6 +1697,7 @@ mod tests {
         activate_latency_changed: bool,
         request_host_lifecycle: bool,
         request_host_ports: bool,
+        request_host_ports_during_create: bool,
         count_create_plugin: bool,
     }
 
@@ -1685,6 +1717,21 @@ mod tests {
         ) -> Option<Box<dyn PluginInstance>> {
             if self.count_create_plugin {
                 CREATE_PLUGIN_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+            if self.request_host_ports_during_create {
+                assert!(
+                    !context
+                        .host_audio_ports
+                        .is_rescan_flag_supported(CLAP_AUDIO_PORTS_RESCAN_NAMES)
+                );
+                context
+                    .host_audio_ports
+                    .rescan(CLAP_AUDIO_PORTS_RESCAN_NAMES);
+                assert_eq!(
+                    context.host_note_ports.supported_dialects(),
+                    NoteDialects::default()
+                );
+                context.host_note_ports.rescan(CLAP_NOTE_PORTS_RESCAN_NAMES);
             }
             (plugin_id == TEST_DESCRIPTOR.id).then(|| {
                 Box::new(TestPlugin {
