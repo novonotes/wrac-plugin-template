@@ -14,11 +14,11 @@ resolver = "2"
 
 [workspace.dependencies]
 clap-sys = "0.5.0"
-novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
-run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
+novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "e0b0db34d976459853f34c85b017a55ef92559aa" }
+run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "e0b0db34d976459853f34c85b017a55ef92559aa" }
 wrac_clap_adapter = { path = "crates/wrac_clap_adapter" }
 wrac_manifest = { path = "crates/wrac_manifest" }
 wrac_host_context = { path = "crates/wrac_host_context" }
 wrac_log = { path = "crates/wrac_log" }
 wrac_wxp_gui = { path = "crates/wrac_wxp_gui" }
-wxp = { git = "https://github.com/novonotes/wxp.git", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
+wxp = { git = "https://github.com/novonotes/wxp.git", rev = "e0b0db34d976459853f34c85b017a55ef92559aa" }

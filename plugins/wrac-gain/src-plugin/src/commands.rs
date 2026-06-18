@@ -13,7 +13,7 @@ use wrac_clap_adapter::{HostContext, HostFamily, HostGui, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };
-use wxp::{Channel, WxpCommandHandler};
+use wxp::WxpCommandHandler;
 
 use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload};
 use crate::plugin::{
@@ -226,7 +226,7 @@ pub(crate) fn register_commands(
     {
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("subscribe_parameters", move |ctx| {
-            let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
             let subscription_id = gui_notifier.subscribe_parameters(channel);
             Ok::<_, String>(json!({
                 "ok": true,
@@ -238,7 +238,7 @@ pub(crate) fn register_commands(
     {
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("subscribe_editor_page", move |ctx| {
-            let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
             let subscription_id = gui_notifier.subscribe_editor_page(channel);
             Ok::<_, String>(json!({
                 "ok": true,
