@@ -49,7 +49,10 @@ pub use process_buffer::{
     AudioPortPairs, AudioProcessBuffer,
 };
 
-#[doc(hidden)]
+/// Macro support items used by [`export_clap_entry!`].
+///
+/// These items stay public because exported macros must refer to them through
+/// `$crate`, but plugin code should use the safe API reexports above instead.
 pub mod __private {
     pub use crate::entry::EntryRegistration;
 
@@ -74,14 +77,32 @@ pub mod __private {
         revision: ::clap_sys::version::CLAP_VERSION.revision,
     };
 
+    /// Initializes the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// `plugin_path` must be a valid CLAP plugin path pointer provided by the host for
+    /// the duration of this call.
     pub unsafe fn entry_init(registration: &'static EntryRegistration, plugin_path: usize) -> bool {
         unsafe { crate::abi::entry_init(registration, plugin_path as *const ::std::ffi::c_char) }
     }
 
+    /// Deinitializes the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure this is called according to the CLAP entry lifecycle,
+    /// after initialization and while no plugin factory call is active.
     pub unsafe fn entry_deinit(registration: &'static EntryRegistration) {
         unsafe { crate::abi::entry_deinit(registration) }
     }
 
+    /// Returns a factory pointer from the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// `factory_id` must be a valid CLAP factory identifier pointer provided by the
+    /// host for the duration of this call.
     pub unsafe fn entry_get_factory(
         registration: &'static EntryRegistration,
         factory_id: usize,

@@ -11,7 +11,9 @@ pub use file_logger::{
     RecentLogFilesOptions, collect_recent_log_files, current_log_dir, current_log_file, init_impl,
     init_test,
 };
-#[doc(hidden)]
+/// Macro support function used by the realtime log macros.
+///
+/// This remains public because exported macros refer to it through `$crate`.
 pub use rt::write_rt_log as __write_rt_log;
 pub use rt::{RtDrainConfig, drain_rt_logs_once, init_rt_log_drain_once};
 
