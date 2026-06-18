@@ -84,6 +84,10 @@ pub trait PluginInstance: Send + 'static {
         processor: Box<dyn ActiveProcessor>,
     ) -> PluginResult<Box<dyn InactiveProcessor>>;
 
+    /// Called from the plugin destruction callback after processor teardown.
+    /// `[main-thread & !active]`
+    fn destroy(&mut self) {}
+
     /// Called from CLAP `plugin.on_main_thread`, usually after `HostLifecycle::request_callback`.
     /// `[main-thread]`
     fn on_main_thread(&mut self) {}
