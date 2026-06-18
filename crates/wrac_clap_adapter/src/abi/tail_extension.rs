@@ -14,7 +14,11 @@ unsafe extern "C" fn tail_get(plugin: *const clap_plugin) -> u32 {
             wrac_log::rtwarn!("tail.get: missing plugin instance");
             return 0;
         };
-        let Some(tail) = instance.tail.as_ref() else {
+        let Some(tail) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.tail.as_ref())
+        else {
             wrac_log::rtwarn!("tail.get: plugin has no tail support");
             return 0;
         };

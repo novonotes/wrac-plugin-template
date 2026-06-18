@@ -329,7 +329,10 @@ unsafe fn plugin_gui_query(plugin: *const clap_plugin) -> Option<Arc<dyn PluginG
         log::warn!("gui.query: missing plugin instance");
         return None;
     };
-    let gui = instance.gui.clone();
+    let gui = instance
+        .runtime
+        .get()
+        .and_then(|runtime| runtime.gui.clone());
     if gui.is_none() {
         log::debug!("gui.query: plugin has no GUI");
     }
@@ -370,7 +373,11 @@ unsafe fn plugin_gui_mutation(
     };
     // Extract only the capability handle to avoid coupling GUI callbacks to the
     // `PluginInstance` lifecycle/state lock (the GUI runtime has its own thread rules).
-    let Some(gui) = instance.gui.clone() else {
+    let Some(gui) = instance
+        .runtime
+        .get()
+        .and_then(|runtime| runtime.gui.clone())
+    else {
         log::debug!("gui.{callback_name}: plugin has no GUI");
         return None;
     };

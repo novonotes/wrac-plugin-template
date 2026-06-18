@@ -15,7 +15,11 @@ unsafe extern "C" fn note_ports_count(plugin: *const clap_plugin, is_input: bool
             wrac_log::rtwarn!("note_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
-        let Some(note_ports) = instance.note_ports.as_ref() else {
+        let Some(note_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.note_ports.as_ref())
+        else {
             return 0;
         };
         note_ports.note_port_count(is_input)
@@ -41,7 +45,11 @@ unsafe extern "C" fn note_ports_get(
             );
             return false;
         };
-        let Some(note_ports) = instance.note_ports.as_ref() else {
+        let Some(note_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.note_ports.as_ref())
+        else {
             return false;
         };
         let port = note_ports.note_port_info(index, is_input).or_else(|| {
