@@ -813,7 +813,7 @@ fn print_plan(graph: &TaskGraph, ordered: &[NodeIndex], dry_run: bool) {
                 .neighbors_directed(*index, Direction::Incoming)
                 .map(|dep| graph.graph[dep].id.to_string())
                 .collect::<Vec<_>>();
-            (!deps.is_empty()).then(|| (index, deps))
+            (!deps.is_empty()).then_some((index, deps))
         })
         .collect::<Vec<_>>();
     if !dependencies.is_empty() {
