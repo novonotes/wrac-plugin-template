@@ -12,7 +12,8 @@ use crate::context::Context;
 use crate::profile::BuildProfile;
 use crate::targets::{Platform, ValidateTarget};
 use crate::util::{
-    copy_path, ensure_exists, remove_if_exists, run, run_output, run_with_optional_xcbeautify,
+    copy_path, ensure_exists, print_section, print_skip, print_success, remove_if_exists,
+    run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
 };
 use crate::validation::validate_wrac_rules;
 
@@ -82,31 +83,35 @@ pub(crate) fn validate_plugin_target(
                 .skip_test_filter
                 .as_deref()
             {
-                println!(
-                    "CLAP validator skip filter: {filter} ({})",
-                    ctx.metadata
-                        .validation
-                        .clap_validator
-                        .skip_reason
-                        .as_deref()
-                        .unwrap_or("no reason provided")
+                let reason = ctx
+                    .metadata
+                    .validation
+                    .clap_validator
+                    .skip_reason
+                    .as_deref()
+                    .unwrap_or("no reason provided");
+                print_skip(
+                    ctx.output_language,
+                    &format!("CLAP validator skip filter: {filter} ({reason})"),
+                    &format!("CLAP validator skip filter: {filter} ({reason})"),
                 );
                 command
                     .arg("--test-filter")
                     .arg(filter)
                     .arg("--invert-filter");
             }
-            run(command.current_dir(&ctx.root))?;
+            run_with_language(command.current_dir(&ctx.root), ctx.output_language)?;
         }
         ValidateTarget::Vst3 => {
             let vst3 = ctx.vst3_bundle(profile);
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
-            let output = run_output(
+            let output = run_output_with_language(
                 Command::new(validator)
                     .env("WRAC_PLUGIN_VALIDATOR", "1")
                     .arg(&vst3)
                     .current_dir(&ctx.root),
+                ctx.output_language,
             )?;
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -131,14 +136,17 @@ pub(crate) fn validate_plugin_target(
                 .status();
 
             for plugin in &ctx.metadata.plugins {
-                run(Command::new("/usr/bin/auval")
-                    .args([
-                        "-v",
-                        &plugin.auv2_type,
-                        &plugin.auv2_subtype,
-                        &ctx.metadata.auv2_manufacturer_code,
-                    ])
-                    .current_dir(&ctx.root))?;
+                run_with_language(
+                    Command::new("/usr/bin/auval")
+                        .args([
+                            "-v",
+                            &plugin.auv2_type,
+                            &plugin.auv2_subtype,
+                            &ctx.metadata.auv2_manufacturer_code,
+                        ])
+                        .current_dir(&ctx.root),
+                    ctx.output_language,
+                )?;
             }
         }
         ValidateTarget::Aax => {
@@ -175,7 +183,11 @@ fn validate_vst3_component_ids(
         .into());
     }
 
-    println!("VST3 component IDs match plugins.vst3_component_id");
+    print_success(
+        ctx.output_language,
+        "VST3 component IDs match plugins.vst3_component_id",
+        "VST3 component ID は plugins.vst3_component_id と一致",
+    );
     Ok(())
 }
 
@@ -203,19 +215,34 @@ fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
     fs::create_dir_all(&results_dir)?;
     let aax = stage_aax_for_validator(&results_dir, aax)?;
 
-    println!("Running AAX validator for: {}", aax.display());
+    print_section(ctx.output_language, "AAX validator", "AAX validator");
     println!(
-        "AAX validation runs {} selected validator tests.",
+        "  {}: {}",
+        match ctx.output_language {
+            crate::XtaskOutputLanguage::English => "Target",
+            crate::XtaskOutputLanguage::Japanese => "対象",
+        },
+        aax.display()
+    );
+    println!(
+        "  {}: {}",
+        match ctx.output_language {
+            crate::XtaskOutputLanguage::English => "Selected tests",
+            crate::XtaskOutputLanguage::Japanese => "実行 test",
+        },
         AAX_VALIDATOR_REQUIRED_TESTS.len()
     );
     for (test_id, reason) in AAX_VALIDATOR_SKIPPED_TESTS {
-        println!("Skipping {test_id}: {reason}.");
+        print_skip(
+            ctx.output_language,
+            &format!("Skipping {test_id}: {reason}."),
+            &format!("{test_id}: {reason}"),
+        );
     }
-    println!();
 
     run_aax_validator_dtt(ctx, &aax, &results_dir)?;
 
-    assert_aax_validator_results(&results_dir)
+    assert_aax_validator_results(ctx, &results_dir)
 }
 
 fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Result<()> {
@@ -223,7 +250,7 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
     let aax_search_dir = aax
         .parent()
         .ok_or_else(|| format!("AAX bundle path has no parent directory: {}", aax.display()))?;
-    println!("========== Running command ==========");
+    print_section(ctx.output_language, "Running command", "コマンド実行");
     println!("$ {}", dtt.display());
 
     for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
@@ -331,7 +358,7 @@ fn find_aax_validator_dtt_result(test_dir: &Path, test_id: &str) -> Result<PathB
     }
 }
 
-fn assert_aax_validator_results(results_dir: &Path) -> Result<()> {
+fn assert_aax_validator_results(ctx: &Context, results_dir: &Path) -> Result<()> {
     let mut failed = Vec::new();
     for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
         let result_path = aax_validator_result_path(results_dir, index, test_id);
@@ -340,11 +367,24 @@ fn assert_aax_validator_results(results_dir: &Path) -> Result<()> {
         // and artifacts can be audited against.
         let status = aax_validator_result_status(&result_path)?;
         if status == "E_COMPLETED_PASS" {
-            println!("AAX validator PASS: {test_id}");
+            print_success(
+                ctx.output_language,
+                &format!("AAX validator PASS: {test_id}"),
+                &format!("AAX validator 成功: {test_id}"),
+            );
         } else {
             println!(
-                "AAX validator FAIL: {test_id} ({status}); see {}",
-                result_path.display()
+                "  ❌ {}",
+                match ctx.output_language {
+                    crate::XtaskOutputLanguage::English => format!(
+                        "AAX validator FAIL: {test_id} ({status}); see {}",
+                        result_path.display()
+                    ),
+                    crate::XtaskOutputLanguage::Japanese => format!(
+                        "AAX validator 失敗: {test_id} ({status}); 詳細 {}",
+                        result_path.display()
+                    ),
+                }
             );
             failed.push(format!("{test_id} ({status})"));
         }
@@ -366,7 +406,7 @@ fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result
             return Ok(child.wait_with_output()?);
         }
         if started_at.elapsed() >= timeout {
-            // Keep timeouts outside `run()` so failed DTT processes still have their
+            // Keep timeouts outside `run_with_language()` so failed DTT processes still have their
             // stdout/stderr printed. That output is usually the only clue when the
             // validator hangs while loading a bundle.
             child.kill()?;
@@ -551,10 +591,13 @@ fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
-        run(Command::new("chmod")
-            .arg("+x")
-            .arg(&dtt)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("chmod")
+                .arg("+x")
+                .arg(&dtt)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
     Ok(dtt)
 }
@@ -623,20 +666,26 @@ fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
         // Windows validator downloads are zip archives. GitHub-hosted Windows runners
         // provide 7-Zip, and using it here avoids relying on tar implementations that
         // only support tar streams.
-        run(Command::new("7z")
-            .arg("x")
-            .arg(&archive)
-            .arg(format!("-o{}", extracted_root.display()))
-            .arg("-y")
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("7z")
+                .arg("x")
+                .arg(&archive)
+                .arg(format!("-o{}", extracted_root.display()))
+                .arg("-y")
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     } else {
-        run(Command::new("tar")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("--strip-components=1")
-            .arg("-C")
-            .arg(&extracted_root)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("tar")
+                .arg("-xf")
+                .arg(&archive)
+                .arg("--strip-components=1")
+                .arg("-C")
+                .arg(&extracted_root)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
     Ok(extracted_root)
 }
@@ -700,37 +749,49 @@ fn ensure_clap_validator(ctx: &Context) -> Result<PathBuf> {
         let url = format!(
             "https://github.com/free-audio/clap-validator/releases/download/{CLAP_VALIDATOR_VERSION}/{archive_name}"
         );
-        run(Command::new("curl")
-            .args(["-L", "--fail", "-o"])
-            .arg(&archive)
-            .arg(url)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("curl")
+                .args(["-L", "--fail", "-o"])
+                .arg(&archive)
+                .arg(url)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
 
     if archive_name.ends_with(".zip") {
         // Windows runners provide bsdtar as `tar`, and it can extract zip files.
         // Using it here keeps argument passing identical to the tar.gz path.
-        run(Command::new("tar")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&validator_dir)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("tar")
+                .arg("-xf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(&validator_dir)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     } else {
-        run(Command::new("tar")
-            .args(["-xzf"])
-            .arg(&archive)
-            .arg("-C")
-            .arg(&validator_dir)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("tar")
+                .args(["-xzf"])
+                .arg(&archive)
+                .arg("-C")
+                .arg(&validator_dir)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
 
     ensure_exists(&validator, "CLAP validator")?;
     if ctx.platform != Platform::Windows {
-        run(Command::new("chmod")
-            .arg("+x")
-            .arg(&validator)
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new("chmod")
+                .arg("+x")
+                .arg(&validator)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
     Ok(validator)
 }
@@ -804,7 +865,7 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     if ctx.platform == Platform::Macos {
         configure.arg("-G").arg("Xcode");
     }
-    run(configure.current_dir(&ctx.root))?;
+    run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
 
     let mut build = Command::new("cmake");
     build
@@ -824,9 +885,9 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
 
     let build = build.current_dir(&ctx.root);
     if ctx.platform == Platform::Macos {
-        run_with_optional_xcbeautify(build)?;
+        run_with_optional_xcbeautify_language(build, ctx.output_language)?;
     } else {
-        run(build)?;
+        run_with_language(build, ctx.output_language)?;
     }
 
     if validator.exists() {

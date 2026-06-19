@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use crate::Result;
 use crate::context::Context;
 use crate::targets::{PluginFormat, PluginTarget, Target, ValidateTarget};
+use crate::{Result, XtaskOutputLanguage};
 
 pub(super) fn resolve_build_targets_from_metadata(
     ctx: &Context,
@@ -103,11 +103,18 @@ fn filter_platform_targets(ctx: &Context, targets: Vec<Target>) -> Vec<Target> {
         .filter(|target| {
             let supported = ctx.platform.supports_target(*target);
             if !supported {
-                println!(
-                    "Skipping {}: not supported on {}.",
-                    target.display(),
-                    ctx.platform.display()
-                );
+                match ctx.output_language {
+                    XtaskOutputLanguage::English => println!(
+                        "  ⏭️ Skipping {}: not supported on {}.",
+                        target.display(),
+                        ctx.platform.display()
+                    ),
+                    XtaskOutputLanguage::Japanese => println!(
+                        "  ⏭️ スキップ {}: {} では未対応",
+                        target.display(),
+                        ctx.platform.display()
+                    ),
+                }
             }
             supported
         })

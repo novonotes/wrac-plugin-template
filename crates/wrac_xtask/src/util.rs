@@ -7,7 +7,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::Result;
+use crate::{Result, XtaskOutputLanguage};
 
 pub(crate) fn copy_path(from: &Path, to: &Path) -> Result<()> {
     if from.is_dir() {
@@ -41,30 +41,30 @@ pub(crate) fn ensure_exists(path: &Path, description: &str) -> Result<()> {
     }
 }
 
-pub(crate) fn run(command: &mut Command) -> Result<()> {
+pub(crate) fn run_with_language(
+    command: &mut Command,
+    language: XtaskOutputLanguage,
+) -> Result<()> {
     // xtask is a build orchestrator, so seeing the exact external command on failure is important.
     // Run directly via Command without a shell, but print in a form that humans can re-run easily.
-    println!();
-    println!("========== Running command ==========");
+    print_section(language, "Running command", "コマンド実行");
     println!("$ {}", format_command(command));
     let status = command.status()?;
     if !status.success() {
-        return Err(format!(
-            "command failed with status {status}: {}",
-            format_command(command)
-        )
-        .into());
+        return Err(command_failed_message(language, status, &format_command(command)).into());
     }
     Ok(())
 }
 
-pub(crate) fn run_with_optional_xcbeautify(command: &mut Command) -> Result<()> {
+pub(crate) fn run_with_optional_xcbeautify_language(
+    command: &mut Command,
+    language: XtaskOutputLanguage,
+) -> Result<()> {
     if !command_exists("xcbeautify") {
-        return run(command);
+        return run_with_language(command, language);
     }
 
-    println!();
-    println!("========== Running command ==========");
+    print_section(language, "Running command", "コマンド実行");
     println!("$ {} 2>&1 | xcbeautify", format_command(command));
 
     let mut child = command
@@ -74,17 +74,17 @@ pub(crate) fn run_with_optional_xcbeautify(command: &mut Command) -> Result<()> 
     let stdout = child
         .stdout
         .take()
-        .ok_or("failed to capture command stdout")?;
+        .ok_or_else(|| capture_failed_message(language, "stdout"))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or("failed to capture command stderr")?;
+        .ok_or_else(|| capture_failed_message(language, "stderr"))?;
 
     let mut formatter = Command::new("xcbeautify").stdin(Stdio::piped()).spawn()?;
     let formatter_stdin = formatter
         .stdin
         .take()
-        .ok_or("failed to open xcbeautify stdin")?;
+        .ok_or_else(|| xcbeautify_stdin_failed_message(language))?;
     let formatter_stdin = Arc::new(Mutex::new(formatter_stdin));
 
     let stdout_thread = pipe_to_formatter(stdout, Arc::clone(&formatter_stdin));
@@ -93,22 +93,26 @@ pub(crate) fn run_with_optional_xcbeautify(command: &mut Command) -> Result<()> 
     let status = child.wait()?;
     stdout_thread
         .join()
-        .map_err(|_| "stdout pipe thread panicked")??;
+        .map_err(|_| pipe_thread_panicked_message(language, "stdout"))??;
     stderr_thread
         .join()
-        .map_err(|_| "stderr pipe thread panicked")??;
+        .map_err(|_| pipe_thread_panicked_message(language, "stderr"))??;
     drop(formatter_stdin);
 
     let formatter_status = formatter.wait()?;
     if !status.success() {
-        return Err(format!(
-            "command failed with status {status}: {}",
-            format_command(command)
-        )
-        .into());
+        return Err(command_failed_message(language, status, &format_command(command)).into());
     }
     if !formatter_status.success() {
-        return Err(format!("xcbeautify failed with status {formatter_status}").into());
+        return Err(match language {
+            XtaskOutputLanguage::English => {
+                format!("xcbeautify failed with status {formatter_status}")
+            }
+            XtaskOutputLanguage::Japanese => {
+                format!("xcbeautify が失敗しました status={formatter_status}")
+            }
+        }
+        .into());
     }
     Ok(())
 }
@@ -144,20 +148,87 @@ where
     })
 }
 
-pub(crate) fn run_output(command: &mut Command) -> Result<Output> {
-    println!();
-    println!("========== Running command ==========");
+pub(crate) fn run_output_with_language(
+    command: &mut Command,
+    language: XtaskOutputLanguage,
+) -> Result<Output> {
+    print_section(language, "Running command", "コマンド実行");
     println!("$ {}", format_command(command));
     let output = command.output()?;
     if !output.status.success() {
-        return Err(format!(
-            "command failed with status {}: {}",
-            output.status,
-            format_command(command)
-        )
-        .into());
+        return Err(
+            command_failed_message(language, output.status, &format_command(command)).into(),
+        );
     }
     Ok(output)
+}
+
+pub(crate) fn print_section(language: XtaskOutputLanguage, english: &str, japanese: &str) {
+    println!();
+    println!(
+        "== {} ==",
+        match language {
+            XtaskOutputLanguage::English => english,
+            XtaskOutputLanguage::Japanese => japanese,
+        }
+    );
+    println!();
+}
+
+pub(crate) fn print_success(language: XtaskOutputLanguage, english: &str, japanese: &str) {
+    println!(
+        "  ✅ {}",
+        match language {
+            XtaskOutputLanguage::English => english,
+            XtaskOutputLanguage::Japanese => japanese,
+        }
+    );
+}
+
+pub(crate) fn print_skip(language: XtaskOutputLanguage, english: &str, japanese: &str) {
+    println!(
+        "  ⏭️ {}",
+        match language {
+            XtaskOutputLanguage::English => english,
+            XtaskOutputLanguage::Japanese => japanese,
+        }
+    );
+}
+
+fn command_failed_message(
+    language: XtaskOutputLanguage,
+    status: std::process::ExitStatus,
+    command: &str,
+) -> String {
+    match language {
+        XtaskOutputLanguage::English => format!("command failed with status {status}: {command}"),
+        XtaskOutputLanguage::Japanese => {
+            format!("コマンドが失敗しました status={status}: {command}")
+        }
+    }
+}
+
+fn capture_failed_message(language: XtaskOutputLanguage, stream: &str) -> String {
+    match language {
+        XtaskOutputLanguage::English => format!("failed to capture command {stream}"),
+        XtaskOutputLanguage::Japanese => {
+            format!("コマンドの {stream} を capture できませんでした")
+        }
+    }
+}
+
+fn xcbeautify_stdin_failed_message(language: XtaskOutputLanguage) -> String {
+    match language {
+        XtaskOutputLanguage::English => "failed to open xcbeautify stdin".to_string(),
+        XtaskOutputLanguage::Japanese => "xcbeautify stdin を開けませんでした".to_string(),
+    }
+}
+
+fn pipe_thread_panicked_message(language: XtaskOutputLanguage, stream: &str) -> String {
+    match language {
+        XtaskOutputLanguage::English => format!("{stream} pipe thread panicked"),
+        XtaskOutputLanguage::Japanese => format!("{stream} pipe thread が panic しました"),
+    }
 }
 
 fn format_command(command: &Command) -> String {

@@ -6,15 +6,15 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::Result;
 use crate::context::Context;
 use crate::metadata::PluginProductMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::util::{
-    ensure_exists, env_value_or, on_off, remove_if_exists, run, run_output,
-    run_with_optional_xcbeautify,
+    ensure_exists, env_value_or, on_off, print_section, print_skip, remove_if_exists,
+    run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
 };
+use crate::{Result, XtaskOutputLanguage};
 
 use super::{
     aax_sdk_root, codesign, codesign_nested_macos_bundle, ensure_aax_sdk_input,
@@ -23,16 +23,27 @@ use super::{
 };
 
 pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
-    println!("Building GUI...");
+    print_section(ctx.output_language, "Build GUI", "GUI ビルド");
     let package_json = ctx.gui_dir().join("package.json");
     if !package_json.exists() {
-        println!("No src-gui/package.json found; skipping GUI build.");
+        print_skip(
+            ctx.output_language,
+            "No src-gui/package.json found; skipping GUI build.",
+            "src-gui/package.json がないため GUI ビルドをスキップ",
+        );
         return Ok(());
     }
     if !has_package_script(&package_json, "build")? {
-        println!(
-            "No build script found in {}; skipping GUI build.",
-            package_json.display()
+        print_skip(
+            ctx.output_language,
+            &format!(
+                "No build script found in {}; skipping GUI build.",
+                package_json.display()
+            ),
+            &format!(
+                "{} に build script がないため GUI ビルドをスキップ",
+                package_json.display()
+            ),
         );
         return Ok(());
     }
@@ -40,12 +51,18 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     if !is_pnpm_workspace(ctx) {
         // Standalone template projects keep the frontend package under src-gui
         // without a repository-level package.json.
-        run(Command::new(command_for_platform(ctx.platform, "npm"))
-            .arg("install")
-            .current_dir(ctx.gui_dir()))?;
-        run(Command::new(command_for_platform(ctx.platform, "npm"))
-            .args(["run", "build"])
-            .current_dir(ctx.gui_dir()))?;
+        run_with_language(
+            Command::new(command_for_platform(ctx.platform, "npm"))
+                .arg("install")
+                .current_dir(ctx.gui_dir()),
+            ctx.output_language,
+        )?;
+        run_with_language(
+            Command::new(command_for_platform(ctx.platform, "npm"))
+                .args(["run", "build"])
+                .current_dir(ctx.gui_dir()),
+            ctx.output_language,
+        )?;
         return Ok(());
     }
 
@@ -53,17 +70,26 @@ pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
     let dependency_names = workspace_dependency_names(&package);
     // build.rs embeds src-gui/dist into the plugin binary. Workspace packages such as
     // @novonotes/webview-bridge also need their dist before the GUI typecheck runs.
-    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
-        .arg("install")
-        .current_dir(&ctx.root))?;
+    run_with_language(
+        Command::new(command_for_platform(ctx.platform, "pnpm"))
+            .arg("install")
+            .current_dir(&ctx.root),
+        ctx.output_language,
+    )?;
     for dependency_name in dependency_names {
-        run(Command::new(command_for_platform(ctx.platform, "pnpm"))
-            .args(["--filter", &dependency_name, "run", "--if-present", "build"])
-            .current_dir(&ctx.root))?;
+        run_with_language(
+            Command::new(command_for_platform(ctx.platform, "pnpm"))
+                .args(["--filter", &dependency_name, "run", "--if-present", "build"])
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
     }
-    run(Command::new(command_for_platform(ctx.platform, "pnpm"))
-        .args(["--filter", &package_name, "run", "build"])
-        .current_dir(&ctx.root))?;
+    run_with_language(
+        Command::new(command_for_platform(ctx.platform, "pnpm"))
+            .args(["--filter", &package_name, "run", "build"])
+            .current_dir(&ctx.root),
+        ctx.output_language,
+    )?;
     Ok(())
 }
 
@@ -177,7 +203,11 @@ pub(crate) fn build_rust_plugin(
     profile: BuildProfile,
     build: RustPluginBuild,
 ) -> Result<()> {
-    println!("Building Rust plugin ({})...", build.label());
+    print_section(
+        ctx.output_language,
+        &format!("Build Rust plugin ({})", build.label()),
+        &format!("Rust plugin ビルド ({})", build.label()),
+    );
     let mut command = Command::new("cargo");
     command
         .arg("build")
@@ -195,7 +225,7 @@ pub(crate) fn build_rust_plugin(
             env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
         );
     }
-    run(command.current_dir(&ctx.root))?;
+    run_with_language(command.current_dir(&ctx.root), ctx.output_language)?;
 
     ensure_exists(
         &build.dynamic_library(ctx, profile),
@@ -210,7 +240,7 @@ pub(crate) fn build_rust_plugin(
 }
 
 pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
-    println!("Packaging CLAP...");
+    print_section(ctx.output_language, "Package CLAP", "CLAP packaging");
     let bundle = ctx.clap_bundle(profile);
     remove_if_exists(&bundle)?;
     fs::create_dir_all(ctx.plugins_dir(profile))?;
@@ -232,12 +262,15 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
                 ctx.dynamic_library(profile),
                 macos.join(&ctx.metadata.bundle_name),
             )?;
-            run(Command::new("install_name_tool")
-                .arg("-id")
-                .arg(format!("@loader_path/{}", ctx.metadata.bundle_name))
-                .arg(macos.join(&ctx.metadata.bundle_name))
-                .current_dir(&ctx.root))?;
-            codesign(&bundle)?;
+            run_with_language(
+                Command::new("install_name_tool")
+                    .arg("-id")
+                    .arg(format!("@loader_path/{}", ctx.metadata.bundle_name))
+                    .arg(macos.join(&ctx.metadata.bundle_name))
+                    .current_dir(&ctx.root),
+                ctx.output_language,
+            )?;
+            codesign(&bundle, ctx.output_language)?;
         }
         Platform::Windows | Platform::Linux => {
             // On Windows/Linux the CLAP artifact is a dynamic library with the .clap extension.
@@ -445,10 +478,18 @@ pub(crate) fn configure_wrapper(
     }
 
     if cmake_configure_is_current(&build_dir, &args, &ctx.wrapper_dir)? {
-        println!(
-            "CMake configure is up to date for {} ({})",
-            build.purpose(),
-            profile.cmake_config()
+        print_skip(
+            ctx.output_language,
+            &format!(
+                "CMake configure is up to date for {} ({})",
+                build.purpose(),
+                profile.cmake_config()
+            ),
+            &format!(
+                "CMake configure は最新です: {} ({})",
+                build.purpose(),
+                profile.cmake_config()
+            ),
         );
         return Ok(());
     }
@@ -461,7 +502,7 @@ pub(crate) fn configure_wrapper(
             env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
         );
     }
-    run(configure.current_dir(&ctx.root))?;
+    run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
     write_cmake_configure_stamp(&build_dir, &args, &ctx.wrapper_dir)?;
     Ok(())
 }
@@ -499,9 +540,9 @@ pub(crate) fn build_wrapper_target(
 
         let build_cmd = build_cmd.current_dir(&ctx.root);
         if ctx.platform == Platform::Macos {
-            run_with_optional_xcbeautify(build_cmd)?;
+            run_with_optional_xcbeautify_language(build_cmd, ctx.output_language)?;
         } else {
-            run(build_cmd)?;
+            run_with_language(build_cmd, ctx.output_language)?;
         }
     }
 
@@ -510,14 +551,14 @@ pub(crate) fn build_wrapper_target(
             ensure_exists(&ctx.vst3_bundle(profile), "VST3 artifact")?;
             if ctx.platform == Platform::Macos {
                 // macOS hosts may reject unsigned bundles; apply an ad-hoc signature for development.
-                codesign_nested_macos_bundle(&ctx.vst3_bundle(profile))?;
+                codesign_nested_macos_bundle(&ctx.vst3_bundle(profile), ctx.output_language)?;
             }
         }
         WrapperTarget::Au => {
             for artifact in ctx.au_bundles(profile) {
                 ensure_exists(&artifact, "AU artifact")?;
                 // AU components are loaded via AudioComponentRegistrar, so they must be signed even for local builds.
-                codesign_nested_macos_bundle(&artifact)?;
+                codesign_nested_macos_bundle(&artifact, ctx.output_language)?;
             }
         }
         WrapperTarget::Aax => {
@@ -525,7 +566,7 @@ pub(crate) fn build_wrapper_target(
             if ctx.platform == Platform::Macos {
                 // AAX developer validation loads the bundle directly, so keep the
                 // local artifact ad-hoc signed before the validator sees it.
-                codesign_nested_macos_bundle(&ctx.aax_bundle(profile))?;
+                codesign_nested_macos_bundle(&ctx.aax_bundle(profile), ctx.output_language)?;
             }
         }
         WrapperTarget::Standalone => {
@@ -534,7 +575,7 @@ pub(crate) fn build_wrapper_target(
                 ensure_exists(&artifact, "standalone artifact")?;
                 if ctx.platform == Platform::Macos {
                     // Apply the same Gatekeeper/loader treatment to the standalone app as to plugin bundles.
-                    codesign_nested_macos_bundle(&artifact)?;
+                    codesign_nested_macos_bundle(&artifact, ctx.output_language)?;
                 }
             }
         }
@@ -608,7 +649,7 @@ fn windows_cmake_generator() -> Result<String> {
 
     ensure_visual_studio_msbuild_available()?;
     let generator = latest_cmake_visual_studio_generator()?;
-    println!("Using CMake generator: {generator}");
+    println!("  ✅ CMake generator: {generator}");
     Ok(generator)
 }
 
@@ -623,7 +664,7 @@ fn ensure_visual_studio_msbuild_available() -> Result<()> {
         "-property",
         "installationPath",
     ]);
-    let output = run_output(&mut vswhere)?;
+    let output = run_output_with_language(&mut vswhere, XtaskOutputLanguage::English)?;
     let installation_path = String::from_utf8(output.stdout)?;
     if installation_path.trim().is_empty() {
         return Err("Visual Studio with MSBuild was not found by vswhere".into());
@@ -645,7 +686,10 @@ fn vswhere_command() -> PathBuf {
 }
 
 fn latest_cmake_visual_studio_generator() -> Result<String> {
-    let output = run_output(Command::new("cmake").arg("--help"))?;
+    let output = run_output_with_language(
+        Command::new("cmake").arg("--help"),
+        XtaskOutputLanguage::English,
+    )?;
     let help = String::from_utf8(output.stdout)?;
     select_latest_visual_studio_generator(&help)
         .ok_or_else(|| "CMake does not list any Visual Studio generator".into())
