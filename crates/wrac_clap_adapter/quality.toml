@@ -1,4 +1,0 @@
-[file_length]
-allow = [
-    { path = "src/abi.rs", reason = "Existing CLAP ABI dispatch code keeps closely related raw callback wiring together. Splitting it should be handled separately with focused regression coverage." },
-]
