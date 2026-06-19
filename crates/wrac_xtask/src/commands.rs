@@ -121,15 +121,15 @@ pub(crate) fn uninstall_plugin_target(
     let mut missing = 0usize;
     for path in installed_artifacts(ctx, scope, target)? {
         if !path.exists() {
-            println!("Not found: {}", path.display());
+            println!("  なし: {}", path.display());
             missing += 1;
             continue;
         }
 
         if dry_run {
-            println!("Would remove: {}", path.display());
+            println!("  削除予定: {}", path.display());
         } else {
-            println!("Removing: {}", path.display());
+            println!("  削除: {}", path.display());
             remove_if_exists(&path)?;
         }
         removed += 1;

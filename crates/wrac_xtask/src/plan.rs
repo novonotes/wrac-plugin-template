@@ -117,11 +117,11 @@ enum TaskKind {
 impl TaskKind {
     fn label(&self) -> String {
         match self {
-            Self::Clean => "clean generated artifacts".to_string(),
-            Self::BuildGui => "build GUI".to_string(),
-            Self::BuildRustDefault => "build Rust plugin library".to_string(),
-            Self::BuildRustStandalone => "build Rust standalone library".to_string(),
-            Self::PackageClap => "package CLAP bundle".to_string(),
+            Self::Clean => "生成済み成果物を削除".to_string(),
+            Self::BuildGui => "GUI をビルド".to_string(),
+            Self::BuildRustDefault => "Rust プラグインライブラリをビルド".to_string(),
+            Self::BuildRustStandalone => "Rust standalone ライブラリをビルド".to_string(),
+            Self::PackageClap => "CLAP bundle をパッケージ".to_string(),
             Self::ConfigureWrapperPlugins { vst3, au } => {
                 let mut formats = Vec::new();
                 if *vst3 {
@@ -130,30 +130,30 @@ impl TaskKind {
                 if *au {
                     formats.push("AU");
                 }
-                format!("configure clap-wrapper ({})", formats.join(", "))
+                format!("clap-wrapper を設定 ({})", formats.join(", "))
             }
-            Self::ConfigureWrapperAax => "configure clap-wrapper (AAX)".to_string(),
-            Self::ConfigureWrapperStandalone => "configure clap-wrapper (standalone)".to_string(),
-            Self::BuildVst3Bundle => "build VST3 bundle".to_string(),
-            Self::BuildAuBundle => "build AU bundle".to_string(),
-            Self::BuildAaxBundle => "build AAX bundle".to_string(),
+            Self::ConfigureWrapperAax => "clap-wrapper を設定 (AAX)".to_string(),
+            Self::ConfigureWrapperStandalone => "clap-wrapper を設定 (standalone)".to_string(),
+            Self::BuildVst3Bundle => "VST3 bundle をビルド".to_string(),
+            Self::BuildAuBundle => "AU bundle をビルド".to_string(),
+            Self::BuildAaxBundle => "AAX bundle をビルド".to_string(),
             Self::BuildStandaloneBundle { plugin_id } => match plugin_id {
-                Some(plugin_id) => format!("build standalone artifact ({plugin_id})"),
-                None => "build standalone artifact".to_string(),
+                Some(plugin_id) => format!("standalone 成果物をビルド ({plugin_id})"),
+                None => "standalone 成果物をビルド".to_string(),
             },
             Self::CheckInstallScope { target, scope } => {
-                format!("check install scope for {} ({scope:?})", target.display())
+                format!("{} のインストール先を確認 ({scope:?})", target.display())
             }
             Self::InstallBundle { target, scope } => {
-                format!("install {} ({scope:?})", target.display())
+                format!("{} をインストール ({scope:?})", target.display())
             }
             Self::UninstallBundle {
                 target, dry_run, ..
             } => {
                 if *dry_run {
-                    format!("plan uninstall {}", target.display())
+                    format!("{} のアンインストール内容を確認", target.display())
                 } else {
-                    format!("uninstall {}", target.display())
+                    format!("{} をアンインストール", target.display())
                 }
             }
             Self::ValidateWracRules { targets } => {
@@ -162,9 +162,9 @@ impl TaskKind {
                     .map(|target| target.display())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("run WRAC production-readiness checks ({targets})")
+                format!("WRAC production-readiness checks を実行 ({targets})")
             }
-            Self::ValidateBundle { target } => format!("validate {}", target.display()),
+            Self::ValidateBundle { target } => format!("{} を検証", target.display()),
         }
     }
 }
@@ -665,32 +665,37 @@ fn execute_plan(
             .map(|dep| graph.graph[dep].id.to_string())
             .collect::<Vec<_>>();
         if !failed_deps.is_empty() {
+            println!("{}\n  ⏭️ スキップ", graph.graph[index].id);
             println!(
-                "SKIP {}: depends on {}",
-                graph.graph[index].id,
+                "  理由: 依存タスクが失敗またはスキップされました ({})",
                 failed_deps.join(", ")
             );
+            println!();
             statuses.insert(index, TaskStatus::Skipped);
             continue;
         }
 
         println!(
-            "TASK {}: {}",
+            "{}\n  {}",
             graph.graph[index].id,
             graph.graph[index].label()
         );
         match run_task(ctx, profile, &graph.graph[index].kind) {
             Ok(()) => {
+                println!("  ✅ 完了");
+                println!();
                 statuses.insert(index, TaskStatus::Ok);
             }
             Err(err) => {
-                println!("FAILED {}: {err}", graph.graph[index].id);
+                println!("  ❌ 失敗");
+                println!("  Error: {err}");
                 statuses.insert(index, TaskStatus::Failed);
                 failures.push(format!("{}: {err}", graph.graph[index].id));
                 if matches!(policy, FailurePolicy::FailFast) {
                     print_summary(&graph, &statuses);
                     return Err(failures.join("\n").into());
                 }
+                println!();
             }
         }
     }
@@ -768,13 +773,17 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
             let (removed, missing) = uninstall_plugin_target(ctx, *scope, *target, *dry_run)?;
             if *dry_run {
                 println!(
-                    "Uninstall dry run complete for {}: {removed} would be removed, {missing} not found",
-                    target.display()
+                    "  内訳: {} {}、{}",
+                    target.display(),
+                    count_with_unit(removed, "件削除予定"),
+                    count_with_unit(missing, "件なし"),
                 );
             } else {
                 println!(
-                    "Uninstall complete for {}: {removed} removed, {missing} not found",
-                    target.display()
+                    "  内訳: {} {}、{}",
+                    target.display(),
+                    count_with_unit(removed, "件削除"),
+                    count_with_unit(missing, "件なし"),
                 );
             }
             Ok(())
@@ -787,28 +796,36 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
 }
 
 fn print_plan(graph: &TaskGraph, ordered: &[NodeIndex], dry_run: bool) {
-    println!("Plan:");
+    println!("== 実行計画 ==\n");
     for (position, index) in ordered.iter().enumerate() {
         println!(
-            "  {}. {} - {}",
+            "{}. {}  {}",
             position + 1,
             graph.graph[*index].id,
             graph.graph[*index].label()
         );
     }
-    println!("Dependencies:");
-    for index in ordered {
-        let deps = graph
-            .graph
-            .neighbors_directed(*index, Direction::Incoming)
-            .map(|dep| graph.graph[dep].id.to_string())
-            .collect::<Vec<_>>();
-        if !deps.is_empty() {
-            println!("  {} <- {}", graph.graph[*index].id, deps.join(", "));
-        }
+    let dependencies = ordered
+        .iter()
+        .filter_map(|index| {
+            let deps = graph
+                .graph
+                .neighbors_directed(*index, Direction::Incoming)
+                .map(|dep| graph.graph[dep].id.to_string())
+                .collect::<Vec<_>>();
+            (!deps.is_empty()).then(|| (index, deps))
+        })
+        .collect::<Vec<_>>();
+    if !dependencies.is_empty() {
+        println!("\n== 依存関係 ==\n");
+    }
+    for (index, deps) in dependencies {
+        println!("{} <- {}", graph.graph[*index].id, deps.join(", "));
     }
     if dry_run {
-        println!("Nothing was executed because --dry-run was set.");
+        println!("\n--dry-run が指定されているため、実行はスキップしました。");
+    } else {
+        println!("\n== 実行 ==\n");
     }
 }
 
@@ -818,16 +835,31 @@ fn print_summary(graph: &TaskGraph, statuses: &HashMap<NodeIndex, TaskStatus>) {
         *counts.entry(*status).or_default() += 1;
     }
     println!(
-        "Task summary: {} ok, {} failed, {} skipped",
+        "== 結果 ==\n\n✅ 成功 {} / ❌ 失敗 {} / ⏭️ スキップ {}",
         counts.get(&TaskStatus::Ok).copied().unwrap_or(0),
         counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
         counts.get(&TaskStatus::Skipped).copied().unwrap_or(0)
     );
     for (index, status) in statuses {
         if matches!(status, TaskStatus::Failed | TaskStatus::Skipped) {
-            println!("  {status:?}: {}", graph.graph[*index].id);
+            println!("{}: {}", status.label(), graph.graph[*index].id);
         }
     }
+}
+
+impl TaskStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Planned => "未実行",
+            Self::Ok => "成功",
+            Self::Failed => "失敗",
+            Self::Skipped => "スキップ",
+        }
+    }
+}
+
+fn count_with_unit(count: usize, unit: &str) -> String {
+    format!("{count}{unit}")
 }
 
 fn package_task_id(ctx: &Context, task: &str) -> TaskId {
