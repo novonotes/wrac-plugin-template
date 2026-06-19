@@ -757,7 +757,11 @@ fn execute_plan(
             .map(|dep| graph.graph[dep].id.to_string())
             .collect::<Vec<_>>();
         if !failed_deps.is_empty() {
-            println!("{}\n  ⏭️ スキップ", graph.graph[index].id);
+            println!(
+                "{}\n  ⏭️ {}",
+                graph.graph[index].id,
+                skipped_label(language)
+            );
             println!("  {}", skip_reason(language, &failed_deps));
             println!();
             statuses.insert(index, TaskStatus::Skipped);
