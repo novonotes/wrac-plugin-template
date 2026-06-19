@@ -45,6 +45,14 @@ pub struct XtaskConfig {
     pub wrapper_dir: PathBuf,
     pub target_namespace: String,
     pub default_aax_sdk_root: Option<PathBuf>,
+    pub output_language: XtaskOutputLanguage,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum XtaskOutputLanguage {
+    #[default]
+    English,
+    Japanese,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

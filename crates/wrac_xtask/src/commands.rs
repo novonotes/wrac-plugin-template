@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
+use crate::XtaskOutputLanguage;
 use crate::cli::{InstallScope, UninstallScope};
 use crate::context::Context;
 use crate::metadata::PluginMetadata;
@@ -121,20 +122,53 @@ pub(crate) fn uninstall_plugin_target(
     let mut missing = 0usize;
     for path in installed_artifacts(ctx, scope, target)? {
         if !path.exists() {
-            println!("  なし: {}", path.display());
+            println!(
+                "  {}: {}",
+                missing_label(ctx.output_language),
+                path.display()
+            );
             missing += 1;
             continue;
         }
 
         if dry_run {
-            println!("  削除予定: {}", path.display());
+            println!(
+                "  {}: {}",
+                would_remove_label(ctx.output_language),
+                path.display()
+            );
         } else {
-            println!("  削除: {}", path.display());
+            println!(
+                "  {}: {}",
+                removing_label(ctx.output_language),
+                path.display()
+            );
             remove_if_exists(&path)?;
         }
         removed += 1;
     }
     Ok((removed, missing))
+}
+
+fn missing_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Not found",
+        XtaskOutputLanguage::Japanese => "なし",
+    }
+}
+
+fn would_remove_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Would remove",
+        XtaskOutputLanguage::Japanese => "削除予定",
+    }
+}
+
+fn removing_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Removing",
+        XtaskOutputLanguage::Japanese => "削除",
+    }
 }
 
 pub(crate) fn install_dir(
