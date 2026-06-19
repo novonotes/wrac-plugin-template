@@ -4,13 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Result;
+use crate::XtaskOutputLanguage;
 use crate::cli::{InstallScope, UninstallScope};
 use crate::context::Context;
 use crate::metadata::PluginMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target};
 use crate::util::{
-    common_program_files, copy_path, ensure_exists, home_dir, local_app_data, remove_if_exists, run,
+    common_program_files, copy_path, ensure_exists, home_dir, local_app_data, print_section,
+    print_success, remove_if_exists, run_with_language,
 };
 
 mod build;
@@ -39,10 +41,20 @@ pub(crate) fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&st
         .into());
     }
 
-    println!("Launching standalone artifact: {}", artifact.display());
+    print_section(ctx.output_language, "Launch standalone", "standalone 起動");
+    print_success(
+        ctx.output_language,
+        &format!("Launching standalone artifact: {}", artifact.display()),
+        &format!("standalone artifact: {}", artifact.display()),
+    );
     match ctx.platform {
-        Platform::Macos => run(Command::new("open").arg("-W").arg("-n").arg(&artifact))?,
-        Platform::Windows | Platform::Linux => run(&mut Command::new(&artifact))?,
+        Platform::Macos => run_with_language(
+            Command::new("open").arg("-W").arg("-n").arg(&artifact),
+            ctx.output_language,
+        )?,
+        Platform::Windows | Platform::Linux => {
+            run_with_language(&mut Command::new(&artifact), ctx.output_language)?
+        }
     }
     Ok(())
 }
@@ -92,19 +104,22 @@ pub(crate) fn install_plugin_target(
         PluginTarget::Clap => install_artifact(
             &ctx.clap_bundle(profile),
             &install_dir(ctx, scope, PluginFormat::Clap)?,
+            ctx.output_language,
         )?,
         PluginTarget::Vst3 => install_artifact(
             &ctx.vst3_bundle(profile),
             &install_dir(ctx, scope, PluginFormat::Vst3)?,
+            ctx.output_language,
         )?,
         PluginTarget::Aax => install_artifact(
             &ctx.aax_bundle(profile),
             &install_dir(ctx, scope, PluginFormat::Aax)?,
+            ctx.output_language,
         )?,
         PluginTarget::Au => {
             let install_dir = install_dir(ctx, scope, PluginFormat::Au)?;
             for artifact in ctx.au_bundles(profile) {
-                install_artifact(&artifact, &install_dir)?;
+                install_artifact(&artifact, &install_dir, ctx.output_language)?;
             }
         }
     }
@@ -121,20 +136,53 @@ pub(crate) fn uninstall_plugin_target(
     let mut missing = 0usize;
     for path in installed_artifacts(ctx, scope, target)? {
         if !path.exists() {
-            println!("Not found: {}", path.display());
+            println!(
+                "  {}: {}",
+                missing_label(ctx.output_language),
+                path.display()
+            );
             missing += 1;
             continue;
         }
 
         if dry_run {
-            println!("Would remove: {}", path.display());
+            println!(
+                "  {}: {}",
+                would_remove_label(ctx.output_language),
+                path.display()
+            );
         } else {
-            println!("Removing: {}", path.display());
+            println!(
+                "  {}: {}",
+                removing_label(ctx.output_language),
+                path.display()
+            );
             remove_if_exists(&path)?;
         }
         removed += 1;
     }
     Ok((removed, missing))
+}
+
+fn missing_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Not found",
+        XtaskOutputLanguage::Japanese => "なし",
+    }
+}
+
+fn would_remove_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Would remove",
+        XtaskOutputLanguage::Japanese => "削除予定",
+    }
+}
+
+fn removing_label(language: XtaskOutputLanguage) -> &'static str {
+    match language {
+        XtaskOutputLanguage::English => "Removing",
+        XtaskOutputLanguage::Japanese => "削除",
+    }
 }
 
 pub(crate) fn install_dir(
@@ -219,7 +267,11 @@ pub(crate) fn install_dir(
     Ok(dir)
 }
 
-pub(crate) fn install_artifact(artifact: &Path, destination_dir: &Path) -> Result<()> {
+pub(crate) fn install_artifact(
+    artifact: &Path,
+    destination_dir: &Path,
+    language: XtaskOutputLanguage,
+) -> Result<()> {
     ensure_exists(artifact, "install artifact")?;
     fs::create_dir_all(destination_dir)?;
     let destination = destination_dir.join(
@@ -231,7 +283,11 @@ pub(crate) fn install_artifact(artifact: &Path, destination_dir: &Path) -> Resul
     // Remove the destination first, then copy the whole artifact so the installed result matches the build output exactly.
     remove_if_exists(&destination)?;
     copy_path(artifact, &destination)?;
-    println!("Installed: {}", destination.display());
+    print_success(
+        language,
+        &format!("Installed: {}", destination.display()),
+        &format!("インストール: {}", destination.display()),
+    );
     Ok(())
 }
 
@@ -396,20 +452,21 @@ pub(crate) fn print_outputs(
     targets: &[Target],
     standalone_plugin_id: Option<&str>,
 ) -> Result<()> {
+    print_section(ctx.output_language, "Artifacts", "成果物");
     for target in targets {
         match target {
-            Target::Clap => println!("CLAP: {}", ctx.clap_bundle(profile).display()),
-            Target::Vst3 => println!("VST3: {}", ctx.vst3_bundle(profile).display()),
-            Target::Aax => println!("AAX: {}", ctx.aax_bundle(profile).display()),
+            Target::Clap => println!("  ✅ CLAP: {}", ctx.clap_bundle(profile).display()),
+            Target::Vst3 => println!("  ✅ VST3: {}", ctx.vst3_bundle(profile).display()),
+            Target::Aax => println!("  ✅ AAX: {}", ctx.aax_bundle(profile).display()),
             Target::Au => {
                 for artifact in ctx.au_bundles(profile) {
-                    println!("AU: {}", artifact.display());
+                    println!("  ✅ AU: {}", artifact.display());
                 }
             }
             Target::Standalone => {
                 for (_, plugin) in standalone_products(ctx, standalone_plugin_id)? {
                     let artifact = ctx.standalone_artifact_for(profile, plugin);
-                    println!("Standalone: {}", artifact.display());
+                    println!("  ✅ Standalone: {}", artifact.display());
                 }
             }
         }
@@ -458,17 +515,20 @@ fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     )
 }
 
-fn codesign(path: &Path) -> Result<()> {
-    run(Command::new("codesign")
-        .arg("--force")
-        .arg("--sign")
-        .arg("-")
-        .arg("--timestamp=none")
-        .arg(path))?;
+fn codesign(path: &Path, language: XtaskOutputLanguage) -> Result<()> {
+    run_with_language(
+        Command::new("codesign")
+            .arg("--force")
+            .arg("--sign")
+            .arg("-")
+            .arg("--timestamp=none")
+            .arg(path),
+        language,
+    )?;
     Ok(())
 }
 
-fn codesign_nested_macos_bundle(bundle: &Path) -> Result<()> {
+fn codesign_nested_macos_bundle(bundle: &Path, language: XtaskOutputLanguage) -> Result<()> {
     let plugins_dir = bundle.join("Contents").join("PlugIns");
     if plugins_dir.exists() {
         for entry in fs::read_dir(&plugins_dir)? {
@@ -477,11 +537,11 @@ fn codesign_nested_macos_bundle(bundle: &Path) -> Result<()> {
                 .extension()
                 .is_some_and(|extension| extension == "clap")
             {
-                codesign(&path)?;
+                codesign(&path, language)?;
             }
         }
     }
-    codesign(bundle)?;
+    codesign(bundle, language)?;
     Ok(())
 }
 

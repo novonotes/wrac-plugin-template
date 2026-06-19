@@ -38,12 +38,18 @@ pub(crate) fn validate_wrac_rules(
 
     // Print the full matrix first. CI logs need to show checks that passed, were disabled,
     // or were skipped; the final error only contains checks that failed.
-    report::print_check_results(&results);
+    report::print_check_results(&results, ctx.output_language);
     let violations = report::failed_violations(&results);
     if violations.is_empty() {
-        println!("WRAC production-readiness checks: passed");
+        println!(
+            "\n  ✅ {}",
+            match ctx.output_language {
+                crate::XtaskOutputLanguage::English => "WRAC production-readiness checks: passed",
+                crate::XtaskOutputLanguage::Japanese => "WRAC production-readiness check: 成功",
+            }
+        );
         return Ok(());
     }
 
-    Err(report::failure_message(&violations).into())
+    Err(report::failure_message(&violations, ctx.output_language).into())
 }

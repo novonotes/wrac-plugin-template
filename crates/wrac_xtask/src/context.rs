@@ -5,7 +5,7 @@ use cargo_metadata::MetadataCommand;
 use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
-use crate::{Result, WracPluginPackage, XtaskConfig};
+use crate::{Result, WracPluginPackage, XtaskConfig, XtaskOutputLanguage};
 
 pub(crate) struct Context {
     pub(crate) root: PathBuf,
@@ -16,6 +16,7 @@ pub(crate) struct Context {
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
     pub(crate) default_aax_sdk_root: Option<PathBuf>,
+    pub(crate) output_language: XtaskOutputLanguage,
     pub(crate) metadata: PluginMetadata,
 }
 
@@ -51,6 +52,7 @@ impl Context {
             target_dir,
             wrapper_dir,
             default_aax_sdk_root: config.default_aax_sdk_root.clone(),
+            output_language: config.output_language,
             metadata,
         })
     }

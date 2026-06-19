@@ -6,6 +6,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 
 use crate::Result;
+use crate::XtaskOutputLanguage;
 use crate::cli::{BuildArgs, InstallArgs, UninstallArgs, ValidateArgs};
 use crate::commands::{
     RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
@@ -17,8 +18,14 @@ use crate::context::Context;
 use crate::profile::BuildProfile;
 use crate::targets::{PluginTarget, Target, ValidateTarget};
 
+mod output;
 mod target_resolution;
 
+use self::output::{
+    completed_label, dependencies_heading, dry_run_message, execution_heading, failed_label,
+    plan_heading, result_heading, skip_reason, skipped_label, status_label, success_label,
+    uninstall_summary,
+};
 use self::target_resolution::{
     resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
     resolve_validate_targets_from_metadata,
@@ -69,8 +76,8 @@ struct Task {
 }
 
 impl Task {
-    fn label(&self) -> String {
-        self.kind.label()
+    fn label(&self, language: XtaskOutputLanguage) -> String {
+        self.kind.label(language)
     }
 }
 
@@ -115,14 +122,29 @@ enum TaskKind {
 }
 
 impl TaskKind {
-    fn label(&self) -> String {
-        match self {
-            Self::Clean => "clean generated artifacts".to_string(),
-            Self::BuildGui => "build GUI".to_string(),
-            Self::BuildRustDefault => "build Rust plugin library".to_string(),
-            Self::BuildRustStandalone => "build Rust standalone library".to_string(),
-            Self::PackageClap => "package CLAP bundle".to_string(),
-            Self::ConfigureWrapperPlugins { vst3, au } => {
+    fn label(&self, language: XtaskOutputLanguage) -> String {
+        match (language, self) {
+            (XtaskOutputLanguage::English, Self::Clean) => "clean generated artifacts".to_string(),
+            (XtaskOutputLanguage::Japanese, Self::Clean) => "生成済み成果物を削除".to_string(),
+            (XtaskOutputLanguage::English, Self::BuildGui) => "build GUI".to_string(),
+            (XtaskOutputLanguage::Japanese, Self::BuildGui) => "GUI をビルド".to_string(),
+            (XtaskOutputLanguage::English, Self::BuildRustDefault) => {
+                "build Rust plugin library".to_string()
+            }
+            (XtaskOutputLanguage::Japanese, Self::BuildRustDefault) => {
+                "Rust プラグインライブラリをビルド".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::BuildRustStandalone) => {
+                "build Rust standalone library".to_string()
+            }
+            (XtaskOutputLanguage::Japanese, Self::BuildRustStandalone) => {
+                "Rust standalone ライブラリをビルド".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::PackageClap) => "package CLAP bundle".to_string(),
+            (XtaskOutputLanguage::Japanese, Self::PackageClap) => {
+                "CLAP bundle をパッケージ".to_string()
+            }
+            (language, Self::ConfigureWrapperPlugins { vst3, au }) => {
                 let mut formats = Vec::new();
                 if *vst3 {
                     formats.push("VST3");
@@ -130,41 +152,110 @@ impl TaskKind {
                 if *au {
                     formats.push("AU");
                 }
-                format!("configure clap-wrapper ({})", formats.join(", "))
+                match language {
+                    XtaskOutputLanguage::English => {
+                        format!("configure clap-wrapper ({})", formats.join(", "))
+                    }
+                    XtaskOutputLanguage::Japanese => {
+                        format!("clap-wrapper を設定 ({})", formats.join(", "))
+                    }
+                }
             }
-            Self::ConfigureWrapperAax => "configure clap-wrapper (AAX)".to_string(),
-            Self::ConfigureWrapperStandalone => "configure clap-wrapper (standalone)".to_string(),
-            Self::BuildVst3Bundle => "build VST3 bundle".to_string(),
-            Self::BuildAuBundle => "build AU bundle".to_string(),
-            Self::BuildAaxBundle => "build AAX bundle".to_string(),
-            Self::BuildStandaloneBundle { plugin_id } => match plugin_id {
-                Some(plugin_id) => format!("build standalone artifact ({plugin_id})"),
-                None => "build standalone artifact".to_string(),
-            },
-            Self::CheckInstallScope { target, scope } => {
+            (XtaskOutputLanguage::English, Self::ConfigureWrapperAax) => {
+                "configure clap-wrapper (AAX)".to_string()
+            }
+            (XtaskOutputLanguage::Japanese, Self::ConfigureWrapperAax) => {
+                "clap-wrapper を設定 (AAX)".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::ConfigureWrapperStandalone) => {
+                "configure clap-wrapper (standalone)".to_string()
+            }
+            (XtaskOutputLanguage::Japanese, Self::ConfigureWrapperStandalone) => {
+                "clap-wrapper を設定 (standalone)".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::BuildVst3Bundle) => {
+                "build VST3 bundle".to_string()
+            }
+            (XtaskOutputLanguage::Japanese, Self::BuildVst3Bundle) => {
+                "VST3 bundle をビルド".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::BuildAuBundle) => "build AU bundle".to_string(),
+            (XtaskOutputLanguage::Japanese, Self::BuildAuBundle) => {
+                "AU bundle をビルド".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::BuildAaxBundle) => "build AAX bundle".to_string(),
+            (XtaskOutputLanguage::Japanese, Self::BuildAaxBundle) => {
+                "AAX bundle をビルド".to_string()
+            }
+            (XtaskOutputLanguage::English, Self::BuildStandaloneBundle { plugin_id }) => {
+                match plugin_id {
+                    Some(plugin_id) => format!("build standalone artifact ({plugin_id})"),
+                    None => "build standalone artifact".to_string(),
+                }
+            }
+            (XtaskOutputLanguage::Japanese, Self::BuildStandaloneBundle { plugin_id }) => {
+                match plugin_id {
+                    Some(plugin_id) => format!("standalone 成果物をビルド ({plugin_id})"),
+                    None => "standalone 成果物をビルド".to_string(),
+                }
+            }
+            (XtaskOutputLanguage::English, Self::CheckInstallScope { target, scope }) => {
                 format!("check install scope for {} ({scope:?})", target.display())
             }
-            Self::InstallBundle { target, scope } => {
+            (XtaskOutputLanguage::Japanese, Self::CheckInstallScope { target, scope }) => {
+                format!("{} のインストール先を確認 ({scope:?})", target.display())
+            }
+            (XtaskOutputLanguage::English, Self::InstallBundle { target, scope }) => {
                 format!("install {} ({scope:?})", target.display())
             }
-            Self::UninstallBundle {
-                target, dry_run, ..
-            } => {
+            (XtaskOutputLanguage::Japanese, Self::InstallBundle { target, scope }) => {
+                format!("{} をインストール ({scope:?})", target.display())
+            }
+            (
+                XtaskOutputLanguage::English,
+                Self::UninstallBundle {
+                    target, dry_run, ..
+                },
+            ) => {
                 if *dry_run {
                     format!("plan uninstall {}", target.display())
                 } else {
                     format!("uninstall {}", target.display())
                 }
             }
-            Self::ValidateWracRules { targets } => {
+            (
+                XtaskOutputLanguage::Japanese,
+                Self::UninstallBundle {
+                    target, dry_run, ..
+                },
+            ) => {
+                if *dry_run {
+                    format!("{} のアンインストール内容を確認", target.display())
+                } else {
+                    format!("{} をアンインストール", target.display())
+                }
+            }
+            (language, Self::ValidateWracRules { targets }) => {
                 let targets = targets
                     .iter()
                     .map(|target| target.display())
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("run WRAC production-readiness checks ({targets})")
+                match language {
+                    XtaskOutputLanguage::English => {
+                        format!("run WRAC production-readiness checks ({targets})")
+                    }
+                    XtaskOutputLanguage::Japanese => {
+                        format!("WRAC production-readiness checks を実行 ({targets})")
+                    }
+                }
             }
-            Self::ValidateBundle { target } => format!("validate {}", target.display()),
+            (XtaskOutputLanguage::English, Self::ValidateBundle { target }) => {
+                format!("validate {}", target.display())
+            }
+            (XtaskOutputLanguage::Japanese, Self::ValidateBundle { target }) => {
+                format!("{} を検証", target.display())
+            }
         }
     }
 }
@@ -638,7 +729,8 @@ fn execute_plan(
     policy: FailurePolicy,
 ) -> Result<()> {
     let ordered = graph.ordered()?;
-    print_plan(&graph, &ordered, dry_run);
+    let language = ctx.output_language;
+    print_plan(&graph, &ordered, dry_run, language);
     if dry_run {
         return Ok(());
     }
@@ -666,36 +758,42 @@ fn execute_plan(
             .collect::<Vec<_>>();
         if !failed_deps.is_empty() {
             println!(
-                "SKIP {}: depends on {}",
+                "{}\n  ⏭️ {}",
                 graph.graph[index].id,
-                failed_deps.join(", ")
+                skipped_label(language)
             );
+            println!("  {}", skip_reason(language, &failed_deps));
+            println!();
             statuses.insert(index, TaskStatus::Skipped);
             continue;
         }
 
         println!(
-            "TASK {}: {}",
+            "{}\n  {}",
             graph.graph[index].id,
-            graph.graph[index].label()
+            graph.graph[index].label(language)
         );
         match run_task(ctx, profile, &graph.graph[index].kind) {
             Ok(()) => {
+                println!("  ✅ {}", completed_label(language));
+                println!();
                 statuses.insert(index, TaskStatus::Ok);
             }
             Err(err) => {
-                println!("FAILED {}: {err}", graph.graph[index].id);
+                println!("  ❌ {}", failed_label(language));
+                println!("  Error: {err}");
                 statuses.insert(index, TaskStatus::Failed);
                 failures.push(format!("{}: {err}", graph.graph[index].id));
                 if matches!(policy, FailurePolicy::FailFast) {
-                    print_summary(&graph, &statuses);
+                    print_summary(&graph, &statuses, language);
                     return Err(failures.join("\n").into());
                 }
+                println!();
             }
         }
     }
 
-    print_summary(&graph, &statuses);
+    print_summary(&graph, &statuses, language);
     if failures.is_empty() {
         Ok(())
     } else {
@@ -768,13 +866,13 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
             let (removed, missing) = uninstall_plugin_target(ctx, *scope, *target, *dry_run)?;
             if *dry_run {
                 println!(
-                    "Uninstall dry run complete for {}: {removed} would be removed, {missing} not found",
-                    target.display()
+                    "  {}",
+                    uninstall_summary(ctx.output_language, *target, removed, missing, true)
                 );
             } else {
                 println!(
-                    "Uninstall complete for {}: {removed} removed, {missing} not found",
-                    target.display()
+                    "  {}",
+                    uninstall_summary(ctx.output_language, *target, removed, missing, false)
                 );
             }
             Ok(())
@@ -786,46 +884,71 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
     }
 }
 
-fn print_plan(graph: &TaskGraph, ordered: &[NodeIndex], dry_run: bool) {
-    println!("Plan:");
+fn print_plan(
+    graph: &TaskGraph,
+    ordered: &[NodeIndex],
+    dry_run: bool,
+    language: XtaskOutputLanguage,
+) {
+    println!("== {} ==\n", plan_heading(language));
     for (position, index) in ordered.iter().enumerate() {
         println!(
-            "  {}. {} - {}",
+            "{}. {}  {}",
             position + 1,
             graph.graph[*index].id,
-            graph.graph[*index].label()
+            graph.graph[*index].label(language)
         );
     }
-    println!("Dependencies:");
-    for index in ordered {
-        let deps = graph
-            .graph
-            .neighbors_directed(*index, Direction::Incoming)
-            .map(|dep| graph.graph[dep].id.to_string())
-            .collect::<Vec<_>>();
-        if !deps.is_empty() {
-            println!("  {} <- {}", graph.graph[*index].id, deps.join(", "));
-        }
+    let dependencies = ordered
+        .iter()
+        .filter_map(|index| {
+            let deps = graph
+                .graph
+                .neighbors_directed(*index, Direction::Incoming)
+                .map(|dep| graph.graph[dep].id.to_string())
+                .collect::<Vec<_>>();
+            (!deps.is_empty()).then_some((index, deps))
+        })
+        .collect::<Vec<_>>();
+    if !dependencies.is_empty() {
+        println!("\n== {} ==\n", dependencies_heading(language));
+    }
+    for (index, deps) in dependencies {
+        println!("{} <- {}", graph.graph[*index].id, deps.join(", "));
     }
     if dry_run {
-        println!("Nothing was executed because --dry-run was set.");
+        println!("\n{}", dry_run_message(language));
+    } else {
+        println!("\n== {} ==\n", execution_heading(language));
     }
 }
 
-fn print_summary(graph: &TaskGraph, statuses: &HashMap<NodeIndex, TaskStatus>) {
+fn print_summary(
+    graph: &TaskGraph,
+    statuses: &HashMap<NodeIndex, TaskStatus>,
+    language: XtaskOutputLanguage,
+) {
     let mut counts = HashMap::<TaskStatus, usize>::new();
     for status in statuses.values() {
         *counts.entry(*status).or_default() += 1;
     }
     println!(
-        "Task summary: {} ok, {} failed, {} skipped",
+        "== {} ==\n\n✅ {} {} / ❌ {} {} / ⏭️ {} {}",
+        result_heading(language),
+        success_label(language),
         counts.get(&TaskStatus::Ok).copied().unwrap_or(0),
+        failed_label(language),
         counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
+        skipped_label(language),
         counts.get(&TaskStatus::Skipped).copied().unwrap_or(0)
     );
     for (index, status) in statuses {
         if matches!(status, TaskStatus::Failed | TaskStatus::Skipped) {
-            println!("  {status:?}: {}", graph.graph[*index].id);
+            println!(
+                "{}: {}",
+                status_label(language, *status),
+                graph.graph[*index].id
+            );
         }
     }
 }

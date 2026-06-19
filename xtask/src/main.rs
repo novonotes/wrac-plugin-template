@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use wrac_xtask::{WracWorkspace, XtaskConfig};
+use wrac_xtask::{WracWorkspace, XtaskConfig, XtaskOutputLanguage};
 
 fn main() -> wrac_xtask::Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -17,6 +17,7 @@ fn main() -> wrac_xtask::Result<()> {
         wrapper_dir: root.join("clap_wrapper_builder"),
         target_namespace: "wrac-plugins".to_string(),
         default_aax_sdk_root: None,
+        output_language: XtaskOutputLanguage::English,
         root,
     })?;
     workspace.run(wrac_xtask::command_from_args())
