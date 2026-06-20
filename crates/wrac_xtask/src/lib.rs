@@ -7,6 +7,7 @@
 
 use std::env;
 use std::error::Error;
+use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -398,8 +399,11 @@ fn load_workspace_dotenv(config: &XtaskConfig) -> Result<()> {
     // `.env` is for project-local machine paths such as the AAX SDK. Do not
     // override the process environment so CI variables and one-off shell
     // overrides keep higher precedence than the repository-local file.
-    for entry in dotenvy::from_path_iter(&path)? {
-        let (key, value) = entry?;
+    let contents = fs::read_to_string(&path)?;
+    for (line_index, line) in contents.lines().enumerate() {
+        let Some((key, value)) = parse_dotenv_line(line, line_index + 1)? else {
+            continue;
+        };
         if env::var_os(&key).is_none() {
             // xtask loads .env before starting worker threads or subprocesses.
             // Mutating the process environment at this point lets the existing
@@ -410,6 +414,52 @@ fn load_workspace_dotenv(config: &XtaskConfig) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_dotenv_line(line: &str, line_number: usize) -> Result<Option<(String, String)>> {
+    if line.trim().is_empty() || line.trim_start().starts_with('#') {
+        return Ok(None);
+    }
+
+    let dotenv_line = format!("{line}\n");
+    let mut entries = dotenvy::from_read_iter(dotenv_line.as_bytes());
+    match entries.next() {
+        Some(Ok(entry)) => return Ok(Some(entry)),
+        Some(Err(_)) => {}
+        None => return Ok(None),
+    }
+
+    // dotenvy rejects unquoted Windows paths such as `AAX_SDK_ROOT=C:\Avid\...`
+    // because the colon starts a shell-style substitution. These local paths are
+    // common in repository .env files, so accept plain KEY=VALUE as a fallback.
+    let Some((key, value)) = line.split_once('=') else {
+        return Err(format!("failed to parse .env line {line_number}: {line}").into());
+    };
+    let key = key
+        .trim_start()
+        .strip_prefix("export ")
+        .unwrap_or_else(|| key.trim_start())
+        .trim();
+    if key.is_empty()
+        || !key
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+    {
+        return Err(format!("failed to parse .env line {line_number}: {line}").into());
+    }
+
+    let value = value.trim();
+    let value = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value);
+
+    Ok(Some((key.to_string(), value.to_string())))
 }
 
 fn selected_packages(
@@ -510,5 +560,38 @@ impl From<UninstallScope> for WracUninstallScope {
             UninstallScope::User => Self::User,
             UninstallScope::System => Self::System,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_dotenv_line;
+
+    #[test]
+    fn parse_dotenv_line_accepts_unquoted_windows_path() {
+        let parsed = parse_dotenv_line(
+            r"PULSUS_HOT_RELOAD_CLAP_BUNDLE_PATH=C:\Users\admin\Plugin.clap",
+            1,
+        )
+        .expect("Windows path should parse");
+
+        assert_eq!(
+            parsed,
+            Some((
+                "PULSUS_HOT_RELOAD_CLAP_BUNDLE_PATH".to_string(),
+                r"C:\Users\admin\Plugin.clap".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_dotenv_line_accepts_quoted_windows_path() {
+        let parsed = parse_dotenv_line(r#"AAX_SDK_ROOT="C:\Avid SDK""#, 1)
+            .expect("quoted dotenv value should parse");
+
+        assert_eq!(
+            parsed,
+            Some(("AAX_SDK_ROOT".to_string(), r"C:\Avid SDK".to_string()))
+        );
     }
 }
