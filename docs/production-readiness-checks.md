@@ -6,6 +6,22 @@ Production-readiness checks are WRAC-specific checks run by `cargo xtask validat
 
 These checks are opinionated NovoNotes release-policy checks for commercial plugins, not format-spec validators. Keep the rule list small. Add new rules only for observed host-compatibility or support problems, and only when preventing recurrence is difficult through other means.
 
+## Release Tracks
+
+`wrac-plugin.toml` can classify a plugin package with `package.release_track`.
+
+```toml
+[package]
+version_source = "cargo"
+release_track = "prototype"
+```
+
+If omitted, the release track is `production`.
+
+- `production`: runs production-readiness checks and external format validators.
+- `prototype`: skips production-readiness checks and external format validators. `cargo xtask validate` still builds the selected artifacts as a smoke check.
+- `example`: skips production-readiness checks but still runs external format validators.
+
 ## Disabling Rules
 
 Rules can be disabled by rule ID in the plugin crate manifest. Every disabled rule must include a non-empty `reason`.

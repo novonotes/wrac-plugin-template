@@ -21,6 +21,7 @@ pub struct ManifestPackageInfo {
     pub package_name: Option<String>,
     pub version: Option<String>,
     pub repository: Option<String>,
+    pub release_track: ReleaseTrack,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,33 @@ impl PluginFormat {
             Self::Au => "AU",
             Self::Aax => "AAX",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReleaseTrack {
+    #[default]
+    Production,
+    Prototype,
+    Example,
+}
+
+impl ReleaseTrack {
+    pub fn display(self) -> &'static str {
+        match self {
+            Self::Production => "production",
+            Self::Prototype => "prototype",
+            Self::Example => "example",
+        }
+    }
+
+    pub fn runs_readiness_checks(self) -> bool {
+        matches!(self, Self::Production)
+    }
+
+    pub fn runs_external_validators(self) -> bool {
+        matches!(self, Self::Production | Self::Example)
     }
 }
 
@@ -170,6 +198,7 @@ pub fn read_cargo_package_info(path: &Path) -> Result<ManifestPackageInfo> {
         package_name: Some(cargo_manifest.package.name),
         version: Some(cargo_manifest.package.version),
         repository: cargo_manifest.package.repository,
+        release_track: ReleaseTrack::Production,
     })
 }
 
@@ -494,6 +523,8 @@ impl<'de> Deserialize<'de> for ManifestPackageInfo {
             name: Option<String>,
             version: Option<String>,
             repository: Option<String>,
+            #[serde(default)]
+            release_track: ReleaseTrack,
             #[allow(dead_code)]
             version_source: Option<String>,
         }
@@ -502,6 +533,7 @@ impl<'de> Deserialize<'de> for ManifestPackageInfo {
             package_name: raw.name,
             version: raw.version,
             repository: raw.repository,
+            release_track: raw.release_track,
         })
     }
 }
@@ -536,5 +568,33 @@ mod tests {
     #[test]
     fn fourcc_is_big_endian_ascii() {
         assert_eq!(fourcc("SnCl").unwrap(), 0x536E_436C);
+    }
+
+    #[test]
+    fn package_release_track_defaults_to_production() {
+        let info: ManifestPackageInfo = toml::from_str("version_source = \"cargo\"").unwrap();
+
+        assert_eq!(info.release_track, ReleaseTrack::Production);
+    }
+
+    #[test]
+    fn package_release_track_accepts_prototype_and_example() {
+        let prototype: ManifestPackageInfo = toml::from_str(
+            r#"
+version_source = "cargo"
+release_track = "prototype"
+"#,
+        )
+        .unwrap();
+        let example: ManifestPackageInfo = toml::from_str(
+            r#"
+version_source = "cargo"
+release_track = "example"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(prototype.release_track, ReleaseTrack::Prototype);
+        assert_eq!(example.release_track, ReleaseTrack::Example);
     }
 }

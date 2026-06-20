@@ -506,6 +506,10 @@ fn build_graph(
     let needs_au = targets.contains(&Target::Au);
     let needs_aax = targets.contains(&Target::Aax);
     let needs_standalone = targets.contains(&Target::Standalone);
+    let needs_readiness_checks = matches!(command, CommandKind::Validate)
+        && ctx.metadata.release_track.runs_readiness_checks();
+    let needs_external_validators = !matches!(command, CommandKind::Validate)
+        || ctx.metadata.release_track.runs_external_validators();
     // CLAP/VST3/AU/AAX all use the default Rust plugin build. CLAP consumes the
     // cdylib, while wrapper formats link the staticlib from the same cargo run.
     let needs_default = targets.iter().any(|target| {
@@ -556,10 +560,10 @@ fn build_graph(
     };
 
     let mut build_by_target = HashMap::new();
-    if targets.contains(&Target::Clap) || matches!(command, CommandKind::Validate) {
-        // WRAC production-readiness checks read the CLAP schema, so validation
-        // always packages CLAP even when the requested external validator is VST3,
-        // AU, or AAX.
+    if targets.contains(&Target::Clap) || needs_readiness_checks {
+        // Production-readiness checks read the CLAP schema. Production validation
+        // therefore packages CLAP even when only wrapper-format validators were
+        // requested, while prototype/example tracks keep CLAP tied to the target list.
         let clap = graph.task(package_task_id(ctx, "package-clap"), TaskKind::PackageClap);
         graph.depends_on(
             clap,
@@ -685,19 +689,29 @@ fn build_graph(
                     Target::Standalone => None,
                 })
                 .collect::<Vec<_>>();
-            let rules = graph.task(
-                package_task_id(ctx, "validate-wrac-rules"),
-                TaskKind::ValidateWracRules {
-                    targets: validate_targets.clone(),
-                },
-            );
-            graph.depends_on(rules, build_by_target[&Target::Clap]);
-            for target in validate_targets {
+            let rules = if needs_readiness_checks {
+                let rules = graph.task(
+                    package_task_id(ctx, "validate-wrac-rules"),
+                    TaskKind::ValidateWracRules {
+                        targets: validate_targets.clone(),
+                    },
+                );
+                graph.depends_on(rules, build_by_target[&Target::Clap]);
+                Some(rules)
+            } else {
+                None
+            };
+            for target in validate_targets
+                .into_iter()
+                .filter(|_| needs_external_validators)
+            {
                 let validate = graph.task(
                     package_task_id(ctx, &format!("validate-{target:?}")),
                     TaskKind::ValidateBundle { target },
                 );
-                graph.depends_on(validate, rules);
+                if let Some(rules) = rules {
+                    graph.depends_on(validate, rules);
+                }
                 if target == ValidateTarget::Au {
                     // auval discovers Audio Units through AudioComponentRegistrar
                     // instead of taking a bundle path. Model the user-local AU

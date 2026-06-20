@@ -563,7 +563,9 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use crate::metadata::{PluginMetadata, PluginProductMetadata, ValidationMetadata};
+    use crate::metadata::{
+        PluginMetadata, PluginProductMetadata, ReleaseTrack, ValidationMetadata,
+    };
     use crate::targets::{PluginFormat, ValidateTarget};
     use wrac_manifest::DisabledValidationRule;
 
@@ -583,6 +585,7 @@ mod tests {
             package_name: "test_plugin".to_string(),
             version: "1.0.0".to_string(),
             repository: Some("https://github.com/example/test-plugin".to_string()),
+            release_track: ReleaseTrack::Production,
             company_name: "Example".to_string(),
             auv2_manufacturer_code: "ExCo".to_string(),
             aax_manufacturer_id: None,

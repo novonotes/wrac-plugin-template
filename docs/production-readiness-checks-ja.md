@@ -6,6 +6,22 @@ Production-readiness check は、`cargo xtask validate` の中で実行される
 
 このチェックは、商用プラグインのための NovoNotes 独自のリリースポリシーチェックです。プラグイン形式の仕様そのものを検証するバリデーターではありません。ルールリストは小さく保つ方針です。実際に観測されたホスト互換性、サポート上の実問題を防ぐルールだけ、さらにそのなかでも、他の方法で再発防止が難しい場合だけ新規ルール追加します。
 
+## Release Track
+
+`wrac-plugin.toml` では `package.release_track` で plugin package のカテゴリを指定できます。
+
+```toml
+[package]
+version_source = "cargo"
+release_track = "prototype"
+```
+
+省略時は `production` として扱います。
+
+- `production`: production-readiness check と外部 format validator を実行します。
+- `prototype`: production-readiness check と外部 format validator をスキップします。`cargo xtask validate` は選択された成果物の build smoke check だけを実行します。
+- `example`: production-readiness check をスキップし、外部 format validator は実行します。
+
 ## ルールの無効化
 
 ルールはプラグイン crate の manifest で rule ID ごとに無効化できます。無効化する場合は、空ではない `reason` が必須です。
