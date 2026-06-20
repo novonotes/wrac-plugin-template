@@ -16,6 +16,7 @@ thread_local! {
     // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
     // cross-thread token; it releases this guard by dispatching back to the owner thread.
     static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const { RefCell::new(None) };
+    static GUI_RT_DRAIN: RefCell<Option<wrac_log::RtDrain>> = const { RefCell::new(None) };
 }
 
 static NEXT_GUI_ID: AtomicU64 = AtomicU64::new(1);
@@ -270,9 +271,14 @@ impl GuiThreadLease {
                 log::debug!("wxp GUI thread lease: RunLoop::init failed");
                 PluginError::UnsupportedHostGuiThreadingModel
             })?;
+            let rt_drain = wrac_log::attach_rt_drain(guard.local());
             GUI_RUN_LOOP_GUARD.with(|stored_guard| {
                 debug_assert!(stored_guard.borrow().is_none());
                 *stored_guard.borrow_mut() = Some(guard);
+            });
+            GUI_RT_DRAIN.with(|stored_drain| {
+                debug_assert!(stored_drain.borrow().is_none());
+                *stored_drain.borrow_mut() = Some(rt_drain);
             });
         }
 
@@ -333,6 +339,11 @@ fn release_gui_thread_lease() {
         }
     };
     if should_drop_guard {
+        GUI_RT_DRAIN.with(|stored_drain| {
+            let drain = stored_drain.borrow_mut().take();
+            debug_assert!(drain.is_some());
+            drop(drain);
+        });
         GUI_RUN_LOOP_GUARD.with(|stored_guard| {
             let guard = stored_guard.borrow_mut().take();
             debug_assert!(guard.is_some());

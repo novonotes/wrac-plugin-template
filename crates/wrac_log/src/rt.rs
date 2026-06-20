@@ -1,56 +1,63 @@
 use log::Level;
 use std::array;
+use std::cell::RefCell;
 use std::fmt::{self, Write as _};
+use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::thread;
 use std::time::Duration;
 
 const RT_LOG_CAPACITY: usize = 4096;
 const RT_MESSAGE_CAPACITY: usize = 256;
 const RT_TARGET_CAPACITY: usize = 96;
+const RT_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
 
 static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
-static RT_DRAIN_WORKER: OnceLock<()> = OnceLock::new();
 
-/// Configuration for the background realtime log drain worker.
-pub struct RtDrainConfig {
-    interval: Duration,
+thread_local! {
+    static RT_DRAIN_TIMER: RefCell<Weak<RtDrainInner>> = const { RefCell::new(Weak::new()) };
 }
 
-impl Default for RtDrainConfig {
-    fn default() -> Self {
-        Self {
-            interval: Duration::from_millis(100),
-        }
-    }
-}
-
-impl RtDrainConfig {
-    /// Sets how often the background worker drains realtime logs.
-    pub fn with_interval(mut self, interval: Duration) -> Self {
-        self.interval = interval;
-        self
-    }
-}
-
-/// Starts the realtime log drain worker once for the current process.
+/// Keeps realtime log draining attached to a run loop.
 ///
-/// This is called automatically by [`crate::init!`] in debug builds and when
-/// `WRAC_RT_LOG` is set. Calling it directly is useful for tests or custom host
-/// integration.
-pub fn init_rt_log_drain_once(config: RtDrainConfig) {
-    RT_DRAIN_WORKER.get_or_init(|| {
-        let interval = config.interval;
-        let _ = thread::Builder::new()
-            .name("wrac-rt-log-drain".to_string())
-            .spawn(move || {
-                loop {
-                    thread::sleep(interval);
-                    drain_rt_logs_once();
-                }
-            });
+/// Keep this guard alive for the same lifetime as the [`novonotes_run_loop::RunLoopGuard`]
+/// used to create it. Dropping the final guard stops the timer and drains any
+/// remaining realtime log records once on the current thread.
+#[must_use = "keep RtDrain alive while its RunLoop is alive"]
+pub struct RtDrain {
+    _inner: Rc<RtDrainInner>,
+}
+
+struct RtDrainInner {
+    timer: run_loop_timer::Timer,
+}
+
+impl Drop for RtDrainInner {
+    fn drop(&mut self) {
+        self.timer.stop();
+        drain_existing_rt_logs_once();
+    }
+}
+
+/// Attaches realtime log draining to the given run loop.
+///
+/// Multiple calls on the same run-loop thread share one timer. The timer keeps
+/// running until the last returned guard is dropped.
+pub fn attach_rt_drain(run_loop: &novonotes_run_loop::RunLoopLocal) -> RtDrain {
+    let _ = rt_log();
+    let inner = RT_DRAIN_TIMER.with(|slot| {
+        if let Some(inner) = slot.borrow().upgrade() {
+            return inner;
+        }
+
+        let timer = run_loop_timer::Timer::new(RT_DRAIN_INTERVAL, drain_existing_rt_logs_once);
+        timer.start(run_loop);
+        let inner = Rc::new(RtDrainInner { timer });
+        *slot.borrow_mut() = Rc::downgrade(&inner);
+        inner
     });
+    drain_existing_rt_logs_once();
+    RtDrain { _inner: inner }
 }
 
 /// Drains the global realtime log once on the current thread.
@@ -58,14 +65,16 @@ pub fn drain_rt_logs_once() {
     rt_log().drain_to_log();
 }
 
-pub(crate) fn start_drain_if_enabled() {
+fn drain_existing_rt_logs_once() {
+    if let Some(rt_log) = RT_LOG.get() {
+        rt_log.drain_to_log();
+    }
+}
+
+pub(crate) fn init_rt_buffer() {
     // Initialize from the non-realtime setup path so the first RT log write only
     // touches atomics and the fixed buffer.
     let _ = rt_log();
-
-    if cfg!(debug_assertions) || std::env::var_os("WRAC_RT_LOG").is_some() {
-        init_rt_log_drain_once(RtDrainConfig::default());
-    }
 }
 
 /// Writes one realtime log record into the fixed-size global buffer.
@@ -324,5 +333,21 @@ mod tests {
             std::str::from_utf8(message.as_bytes()).unwrap().len(),
             message.len,
         );
+    }
+
+    #[test]
+    fn rt_drain_guards_share_one_run_loop_timer() {
+        let run_loop_guard = novonotes_run_loop::RunLoop::init().expect("init test RunLoop");
+
+        let first_drain = attach_rt_drain(run_loop_guard.local());
+        let second_drain = attach_rt_drain(run_loop_guard.local());
+
+        assert!(Rc::ptr_eq(&first_drain._inner, &second_drain._inner));
+        assert_eq!(Rc::strong_count(&first_drain._inner), 2);
+
+        drop(first_drain);
+        assert_eq!(Rc::strong_count(&second_drain._inner), 1);
+
+        drop(second_drain);
     }
 }

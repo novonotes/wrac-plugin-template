@@ -436,7 +436,7 @@ fn init_stderr(dotenv_rust_log: Option<&str>) {
     apply_default_filter(&mut builder, dotenv_rust_log);
     builder.target(Target::Stderr);
     let _ = builder.try_init();
-    crate::rt::start_drain_if_enabled();
+    crate::rt::init_rt_buffer();
 }
 
 fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
@@ -457,7 +457,7 @@ fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
             apply_default_filter(&mut builder, dotenv_rust_log);
             builder.target(Target::Pipe(Box::new(FileAndStderr::new(file))));
             let _ = builder.try_init();
-            crate::rt::start_drain_if_enabled();
+            crate::rt::init_rt_buffer();
         }
         Err(error) => {
             eprintln!("Failed to open log file '{}': {error}", log_file.display());
