@@ -19,7 +19,7 @@ static CURRENT_LOG_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 ///
 /// Prefer calling the macro so `manifest_dir` is captured from the plugin crate,
 /// not from `wrac_log`.
-pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
+pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) -> crate::LogSession {
     INIT.call_once(|| {
         let dotenv_rust_log = rust_log_from_debug_dotenv(manifest_dir);
 
@@ -54,6 +54,7 @@ pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
         let _ = app_name;
         init_stderr(dotenv_rust_log.as_deref());
     });
+    crate::rt::LogSession::start()
 }
 
 /// Returns the directory currently used for file logging.
@@ -436,7 +437,6 @@ fn init_stderr(dotenv_rust_log: Option<&str>) {
     apply_default_filter(&mut builder, dotenv_rust_log);
     builder.target(Target::Stderr);
     let _ = builder.try_init();
-    crate::rt::start_drain_if_enabled();
 }
 
 fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
@@ -457,7 +457,6 @@ fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
             apply_default_filter(&mut builder, dotenv_rust_log);
             builder.target(Target::Pipe(Box::new(FileAndStderr::new(file))));
             let _ = builder.try_init();
-            crate::rt::start_drain_if_enabled();
         }
         Err(error) => {
             eprintln!("Failed to open log file '{}': {error}", log_file.display());
@@ -479,6 +478,9 @@ fn announce_log_output(destination: &str) {
 }
 
 fn apply_default_filter(builder: &mut Builder, dotenv_rust_log: Option<&str>) {
+    #[cfg(not(debug_assertions))]
+    let _ = dotenv_rust_log;
+
     if std::env::var("RUST_LOG").is_err() {
         #[cfg(debug_assertions)]
         if let Some(rust_log) = dotenv_rust_log.filter(|value| !value.trim().is_empty()) {
@@ -528,6 +530,7 @@ impl Write for FileAndStderr {
     }
 }
 
+#[cfg(debug_assertions)]
 fn get_test_name() -> String {
     std::thread::current()
         .name()
