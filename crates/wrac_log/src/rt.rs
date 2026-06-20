@@ -11,8 +11,7 @@ const RT_MESSAGE_CAPACITY: usize = 256;
 const RT_TARGET_CAPACITY: usize = 96;
 
 static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
-static RT_DRAIN_WORKER: Mutex<Option<RtDrainWorker>> = Mutex::new(None);
-static RT_LOG_SESSION_COUNT: AtomicUsize = AtomicUsize::new(0);
+static RT_DRAIN_STATE: Mutex<RtDrainState> = Mutex::new(RtDrainState::new());
 
 /// Keeps realtime log draining alive for one plugin instance.
 ///
@@ -25,10 +24,7 @@ pub struct LogSession {
 
 impl LogSession {
     pub(crate) fn start() -> Self {
-        let previous_count = RT_LOG_SESSION_COUNT.fetch_add(1, Ordering::AcqRel);
-        if previous_count == 0 {
-            start_drain_if_enabled();
-        }
+        start_log_session();
         Self { _private: () }
     }
 }
@@ -66,69 +62,44 @@ impl RtDrainConfig {
 /// `WRAC_RT_LOG` is set. Calling it directly is useful for tests or custom host
 /// integration.
 pub fn init_rt_log_drain_once(config: RtDrainConfig) {
-    let Ok(mut worker) = RT_DRAIN_WORKER.lock() else {
+    let Ok(mut state) = RT_DRAIN_STATE.lock() else {
         return;
     };
-    if worker.is_some() {
-        return;
-    }
-
-    let interval = config.interval;
-    let stop_requested = std::sync::Arc::new(AtomicBool::new(false));
-    let thread_stop_requested = stop_requested.clone();
-    let Ok(handle) = thread::Builder::new()
-        .name("wrac-rt-log-drain".to_string())
-        .spawn(move || {
-            while !thread_stop_requested.load(Ordering::Acquire) {
-                thread::park_timeout(interval);
-                if thread_stop_requested.load(Ordering::Acquire) {
-                    break;
-                }
-                drain_existing_rt_logs_once();
-            }
-            drain_existing_rt_logs_once();
-        })
-    else {
-        return;
-    };
-    *worker = Some(RtDrainWorker {
-        stop_requested,
-        handle,
-    });
+    state.start_worker_if_absent(config);
 }
 
 fn release_log_session() {
-    let mut current_count = RT_LOG_SESSION_COUNT.load(Ordering::Acquire);
-    loop {
-        if current_count == 0 {
-            return;
-        }
-        match RT_LOG_SESSION_COUNT.compare_exchange_weak(
-            current_count,
-            current_count - 1,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(1) => {
-                shutdown_rt_log_drain();
-                return;
-            }
-            Ok(_) => return,
-            Err(next_count) => current_count = next_count,
+    let Ok(mut state) = RT_DRAIN_STATE.lock() else {
+        return;
+    };
+    if state.session_count == 0 {
+        return;
+    }
+    state.session_count -= 1;
+    if state.session_count != 0 {
+        return;
+    }
+    if let Some(worker) = state.worker.take() {
+        // Keep the lifecycle state locked until the old worker exits. Otherwise a
+        // new session could skip startup against a worker that is about to be removed.
+        stop_drain_worker(worker);
+    } else {
+        drain_existing_rt_logs_once();
+    }
+}
+
+#[cfg(test)]
+fn shutdown_rt_log_drain() {
+    if let Ok(mut state) = RT_DRAIN_STATE.lock() {
+        if let Some(worker) = state.worker.take() {
+            stop_drain_worker(worker);
+        } else {
+            drain_existing_rt_logs_once();
         }
     }
 }
 
-fn shutdown_rt_log_drain() {
-    let worker = RT_DRAIN_WORKER
-        .lock()
-        .ok()
-        .and_then(|mut worker| worker.take());
-    let Some(worker) = worker else {
-        drain_existing_rt_logs_once();
-        return;
-    };
-
+fn stop_drain_worker(worker: RtDrainWorker) {
     worker.stop_requested.store(true, Ordering::Release);
     let thread = worker.handle.thread().clone();
     thread.unpark();
@@ -149,13 +120,19 @@ fn drain_existing_rt_logs_once() {
     }
 }
 
-pub(crate) fn start_drain_if_enabled() {
+fn start_log_session() {
     // Initialize from the non-realtime setup path so the first RT log write only
     // touches atomics and the fixed buffer.
     let _ = rt_log();
 
-    if cfg!(debug_assertions) || std::env::var_os("WRAC_RT_LOG").is_some() {
-        init_rt_log_drain_once(RtDrainConfig::default());
+    let drain_config = (cfg!(debug_assertions) || std::env::var_os("WRAC_RT_LOG").is_some())
+        .then(RtDrainConfig::default);
+    let Ok(mut state) = RT_DRAIN_STATE.lock() else {
+        return;
+    };
+    state.session_count += 1;
+    if let Some(config) = drain_config {
+        state.start_worker_if_absent(config);
     }
 }
 
@@ -171,6 +148,49 @@ pub fn write_rt_log(level: Level, target: &'static str, args: fmt::Arguments<'_>
 struct RtDrainWorker {
     stop_requested: std::sync::Arc<AtomicBool>,
     handle: JoinHandle<()>,
+}
+
+struct RtDrainState {
+    session_count: usize,
+    worker: Option<RtDrainWorker>,
+}
+
+impl RtDrainState {
+    const fn new() -> Self {
+        Self {
+            session_count: 0,
+            worker: None,
+        }
+    }
+
+    fn start_worker_if_absent(&mut self, config: RtDrainConfig) {
+        if self.worker.is_some() {
+            return;
+        }
+
+        let interval = config.interval;
+        let stop_requested = std::sync::Arc::new(AtomicBool::new(false));
+        let thread_stop_requested = stop_requested.clone();
+        let Ok(handle) = thread::Builder::new()
+            .name("wrac-rt-log-drain".to_string())
+            .spawn(move || {
+                while !thread_stop_requested.load(Ordering::Acquire) {
+                    thread::park_timeout(interval);
+                    if thread_stop_requested.load(Ordering::Acquire) {
+                        break;
+                    }
+                    drain_existing_rt_logs_once();
+                }
+                drain_existing_rt_logs_once();
+            })
+        else {
+            return;
+        };
+        self.worker = Some(RtDrainWorker {
+            stop_requested,
+            handle,
+        });
+    }
 }
 
 fn rt_log() -> &'static RtLogInner {
@@ -398,17 +418,24 @@ mod tests {
     static SESSION_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     fn reset_sessions_for_test() {
-        while RT_LOG_SESSION_COUNT.load(Ordering::Acquire) > 0 {
-            release_log_session();
-        }
         shutdown_rt_log_drain();
+        if let Ok(mut state) = RT_DRAIN_STATE.lock() {
+            state.session_count = 0;
+        }
     }
 
     fn drain_worker_is_running() -> bool {
-        RT_DRAIN_WORKER
+        RT_DRAIN_STATE
             .lock()
-            .map(|worker| worker.is_some())
+            .map(|state| state.worker.is_some())
             .unwrap_or(false)
+    }
+
+    fn log_session_count() -> usize {
+        RT_DRAIN_STATE
+            .lock()
+            .map(|state| state.session_count)
+            .unwrap_or_default()
     }
 
     #[test]
@@ -448,19 +475,19 @@ mod tests {
         let first_session = LogSession::start();
         let second_session = LogSession::start();
 
-        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 2);
+        assert_eq!(log_session_count(), 2);
         assert!(drain_worker_is_running());
 
         drop(first_session);
-        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 1);
+        assert_eq!(log_session_count(), 1);
         assert!(drain_worker_is_running());
 
         drop(second_session);
-        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 0);
+        assert_eq!(log_session_count(), 0);
         assert!(!drain_worker_is_running());
 
         let restarted_session = LogSession::start();
-        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 1);
+        assert_eq!(log_session_count(), 1);
         assert!(drain_worker_is_running());
 
         drop(restarted_session);
