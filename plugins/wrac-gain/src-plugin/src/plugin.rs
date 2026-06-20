@@ -92,9 +92,6 @@ impl PluginFactory for WracGainFactory {
 /// re-entrantly during lifecycle callbacks, requiring them to be reachable without
 /// acquiring the `&mut self` lock on `PluginInstance`.
 pub(crate) struct WracGainPlugin {
-    // Keep realtime log draining tied to this plugin instance. The last dropped
-    // session stops the drain worker before the plugin binary can be unloaded.
-    _log_session: wrac_log::LogSession,
     // The descriptor is instance data, not a global primary descriptor. This matters for
     // multi-product bundles where the same binary can expose more than one plugin id.
     descriptor: PluginDescriptor,
@@ -114,11 +111,7 @@ pub(crate) struct WracGainPlugin {
 }
 
 impl WracGainPlugin {
-    pub(crate) fn new(
-        context: PluginInstanceContext,
-        descriptor: PluginDescriptor,
-        log_session: wrac_log::LogSession,
-    ) -> Self {
+    pub(crate) fn new(context: PluginInstanceContext, descriptor: PluginDescriptor) -> Self {
         let shared = Arc::new(SharedState::new());
         let audio_layout = Arc::new(AudioLayoutStore::new(2));
         let audio_ports = Arc::new(WracGainAudioPorts::new(audio_layout.clone()));
@@ -143,7 +136,6 @@ impl WracGainPlugin {
         ));
 
         Self {
-            _log_session: log_session,
             descriptor,
             shared,
             audio_layout,
@@ -163,7 +155,7 @@ pub(crate) fn create_plugin_core(
     context: PluginInstanceContext,
     descriptor: PluginDescriptor,
 ) -> Box<dyn PluginInstance> {
-    let log_session = wrac_log::init!(descriptor.name);
+    wrac_log::init!(descriptor.name);
 
     log::debug!(
         "creating plugin core: id={}, name={}",
@@ -184,7 +176,7 @@ pub(crate) fn create_plugin_core(
             parameter.flags.is_bypass
         );
     }
-    Box::new(WracGainPlugin::new(context, descriptor, log_session))
+    Box::new(WracGainPlugin::new(context, descriptor))
 }
 
 // ---------------------------------------------------------------------------
