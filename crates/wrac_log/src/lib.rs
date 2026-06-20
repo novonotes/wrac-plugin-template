@@ -17,7 +17,7 @@ pub use file_logger::{
 /// Plugin code should not call or rely on this symbol directly; use the `rt*`
 /// logging macros instead.
 pub use rt::write_rt_log as __write_rt_log;
-pub use rt::{RtDrain, attach_rt_drain, drain_rt_logs_once};
+pub use rt::{RtDrainingRunLoopGuard, attach_rt_drain, drain_rt_logs_once};
 
 /// Initializes logging for a WRAC plugin.
 ///

@@ -18,13 +18,24 @@ thread_local! {
     static RT_DRAIN_TIMER: RefCell<Weak<RtDrainInner>> = const { RefCell::new(Weak::new()) };
 }
 
-/// Keeps realtime log draining attached to a run loop.
+/// Keeps realtime log draining attached to a [`novonotes_run_loop::RunLoopGuard`].
 ///
-/// Keep this guard alive for the same lifetime as the [`novonotes_run_loop::RunLoopGuard`]
-/// used to create it. Dropping the final guard stops the timer and drains any
-/// remaining realtime log records once on the current thread.
-#[must_use = "keep RtDrain alive while its RunLoop is alive"]
-pub struct RtDrain {
+/// Dropping this guard stops the drain timer before releasing the wrapped run loop
+/// guard, then drains any remaining realtime log records once on the current thread.
+#[must_use = "keep RtDrainingRunLoopGuard alive while its RunLoop is alive"]
+pub struct RtDrainingRunLoopGuard {
+    _rt_drain: RtDrain,
+    guard: novonotes_run_loop::RunLoopGuard,
+}
+
+impl RtDrainingRunLoopGuard {
+    /// Returns the run-loop-thread-local capability for the wrapped guard.
+    pub fn local(&self) -> &novonotes_run_loop::RunLoopLocal {
+        self.guard.local()
+    }
+}
+
+struct RtDrain {
     _inner: Rc<RtDrainInner>,
 }
 
@@ -39,11 +50,19 @@ impl Drop for RtDrainInner {
     }
 }
 
-/// Attaches realtime log draining to the given run loop.
+/// Attaches realtime log draining to the given run loop guard.
 ///
 /// Multiple calls on the same run-loop thread share one timer. The timer keeps
 /// running until the last returned guard is dropped.
-pub fn attach_rt_drain(run_loop: &novonotes_run_loop::RunLoopLocal) -> RtDrain {
+pub fn attach_rt_drain(guard: novonotes_run_loop::RunLoopGuard) -> RtDrainingRunLoopGuard {
+    let rt_drain = attach_rt_drain_to_local(guard.local());
+    RtDrainingRunLoopGuard {
+        _rt_drain: rt_drain,
+        guard,
+    }
+}
+
+fn attach_rt_drain_to_local(run_loop: &novonotes_run_loop::RunLoopLocal) -> RtDrain {
     let _ = rt_log();
     let inner = RT_DRAIN_TIMER.with(|slot| {
         if let Some(inner) = slot.borrow().upgrade() {
@@ -337,16 +356,21 @@ mod tests {
 
     #[test]
     fn rt_drain_guards_share_one_run_loop_timer() {
-        let run_loop_guard = novonotes_run_loop::RunLoop::init().expect("init test RunLoop");
+        let first_run_loop_guard = novonotes_run_loop::RunLoop::init().expect("init test RunLoop");
+        let second_run_loop_guard =
+            novonotes_run_loop::RunLoop::init().expect("share test RunLoop");
 
-        let first_drain = attach_rt_drain(run_loop_guard.local());
-        let second_drain = attach_rt_drain(run_loop_guard.local());
+        let first_drain = attach_rt_drain(first_run_loop_guard);
+        let second_drain = attach_rt_drain(second_run_loop_guard);
 
-        assert!(Rc::ptr_eq(&first_drain._inner, &second_drain._inner));
-        assert_eq!(Rc::strong_count(&first_drain._inner), 2);
+        assert!(Rc::ptr_eq(
+            &first_drain._rt_drain._inner,
+            &second_drain._rt_drain._inner
+        ));
+        assert_eq!(Rc::strong_count(&first_drain._rt_drain._inner), 2);
 
         drop(first_drain);
-        assert_eq!(Rc::strong_count(&second_drain._inner), 1);
+        assert_eq!(Rc::strong_count(&second_drain._rt_drain._inner), 1);
 
         drop(second_drain);
     }

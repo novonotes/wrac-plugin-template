@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::ThreadId;
 
-use novonotes_run_loop::{RunLoop, RunLoopGuard, RunLoopLocal};
+use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{GuiConfig, GuiSize, PluginError, PluginResult};
 
@@ -15,8 +15,9 @@ thread_local! {
     static GUI_RUNTIMES: RefCell<HashMap<u64, GuiRuntimeEntry>> = RefCell::new(HashMap::new());
     // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
     // cross-thread token; it releases this guard by dispatching back to the owner thread.
-    static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const { RefCell::new(None) };
-    static GUI_RT_DRAIN: RefCell<Option<wrac_log::RtDrain>> = const { RefCell::new(None) };
+    static GUI_RUN_LOOP_GUARD: RefCell<Option<wrac_log::RtDrainingRunLoopGuard>> = const {
+        RefCell::new(None)
+    };
 }
 
 static NEXT_GUI_ID: AtomicU64 = AtomicU64::new(1);
@@ -45,9 +46,9 @@ struct GuiRuntimeEntry {
 /// RAII token representing a reference to the GUI thread's run loop.
 ///
 /// The token is `Send + Sync` because `WxpGuiController` is shared with host callbacks,
-/// but the `!Send` [`RunLoopGuard`] itself stays in GUI-thread TLS. Dropping this token
-/// from another host thread blocks until the reference has been released on the owning
-/// GUI thread.
+/// but the `!Send` run-loop guard itself stays in GUI-thread TLS. Dropping this token
+/// from another host thread blocks until the reference has been released on the
+/// owning GUI thread.
 pub(crate) struct GuiThreadLease {
     owner: ThreadId,
     is_active: bool,
@@ -271,14 +272,10 @@ impl GuiThreadLease {
                 log::debug!("wxp GUI thread lease: RunLoop::init failed");
                 PluginError::UnsupportedHostGuiThreadingModel
             })?;
-            let rt_drain = wrac_log::attach_rt_drain(guard.local());
+            let guard = wrac_log::attach_rt_drain(guard);
             GUI_RUN_LOOP_GUARD.with(|stored_guard| {
                 debug_assert!(stored_guard.borrow().is_none());
                 *stored_guard.borrow_mut() = Some(guard);
-            });
-            GUI_RT_DRAIN.with(|stored_drain| {
-                debug_assert!(stored_drain.borrow().is_none());
-                *stored_drain.borrow_mut() = Some(rt_drain);
             });
         }
 
@@ -339,11 +336,6 @@ fn release_gui_thread_lease() {
         }
     };
     if should_drop_guard {
-        GUI_RT_DRAIN.with(|stored_drain| {
-            let drain = stored_drain.borrow_mut().take();
-            debug_assert!(drain.is_some());
-            drop(drain);
-        });
         GUI_RUN_LOOP_GUARD.with(|stored_guard| {
             let guard = stored_guard.borrow_mut().take();
             debug_assert!(guard.is_some());
