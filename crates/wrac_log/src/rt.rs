@@ -1,9 +1,9 @@
 use log::Level;
 use std::array;
 use std::fmt::{self, Write as _};
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::thread;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const RT_LOG_CAPACITY: usize = 4096;
@@ -11,7 +11,33 @@ const RT_MESSAGE_CAPACITY: usize = 256;
 const RT_TARGET_CAPACITY: usize = 96;
 
 static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
-static RT_DRAIN_WORKER: OnceLock<()> = OnceLock::new();
+static RT_DRAIN_WORKER: Mutex<Option<RtDrainWorker>> = Mutex::new(None);
+static RT_LOG_SESSION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Keeps realtime log draining alive for one plugin instance.
+///
+/// Dropping the last session stops the background drain worker before the plugin
+/// binary can be unloaded by the host.
+#[must_use = "keep LogSession alive for the plugin instance lifetime"]
+pub struct LogSession {
+    _private: (),
+}
+
+impl LogSession {
+    pub(crate) fn start() -> Self {
+        let previous_count = RT_LOG_SESSION_COUNT.fetch_add(1, Ordering::AcqRel);
+        if previous_count == 0 {
+            start_drain_if_enabled();
+        }
+        Self { _private: () }
+    }
+}
+
+impl Drop for LogSession {
+    fn drop(&mut self) {
+        release_log_session();
+    }
+}
 
 /// Configuration for the background realtime log drain worker.
 pub struct RtDrainConfig {
@@ -40,22 +66,87 @@ impl RtDrainConfig {
 /// `WRAC_RT_LOG` is set. Calling it directly is useful for tests or custom host
 /// integration.
 pub fn init_rt_log_drain_once(config: RtDrainConfig) {
-    RT_DRAIN_WORKER.get_or_init(|| {
-        let interval = config.interval;
-        let _ = thread::Builder::new()
-            .name("wrac-rt-log-drain".to_string())
-            .spawn(move || {
-                loop {
-                    thread::sleep(interval);
-                    drain_rt_logs_once();
+    let Ok(mut worker) = RT_DRAIN_WORKER.lock() else {
+        return;
+    };
+    if worker.is_some() {
+        return;
+    }
+
+    let interval = config.interval;
+    let stop_requested = std::sync::Arc::new(AtomicBool::new(false));
+    let thread_stop_requested = stop_requested.clone();
+    let Ok(handle) = thread::Builder::new()
+        .name("wrac-rt-log-drain".to_string())
+        .spawn(move || {
+            while !thread_stop_requested.load(Ordering::Acquire) {
+                thread::park_timeout(interval);
+                if thread_stop_requested.load(Ordering::Acquire) {
+                    break;
                 }
-            });
+                drain_existing_rt_logs_once();
+            }
+            drain_existing_rt_logs_once();
+        })
+    else {
+        return;
+    };
+    *worker = Some(RtDrainWorker {
+        stop_requested,
+        handle,
     });
+}
+
+fn release_log_session() {
+    let mut current_count = RT_LOG_SESSION_COUNT.load(Ordering::Acquire);
+    loop {
+        if current_count == 0 {
+            return;
+        }
+        match RT_LOG_SESSION_COUNT.compare_exchange_weak(
+            current_count,
+            current_count - 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(1) => {
+                shutdown_rt_log_drain();
+                return;
+            }
+            Ok(_) => return,
+            Err(next_count) => current_count = next_count,
+        }
+    }
+}
+
+fn shutdown_rt_log_drain() {
+    let worker = RT_DRAIN_WORKER
+        .lock()
+        .ok()
+        .and_then(|mut worker| worker.take());
+    let Some(worker) = worker else {
+        drain_existing_rt_logs_once();
+        return;
+    };
+
+    worker.stop_requested.store(true, Ordering::Release);
+    let thread = worker.handle.thread().clone();
+    thread.unpark();
+    if thread.id() != thread::current().id() {
+        let _ = worker.handle.join();
+    }
+    drain_existing_rt_logs_once();
 }
 
 /// Drains the global realtime log once on the current thread.
 pub fn drain_rt_logs_once() {
     rt_log().drain_to_log();
+}
+
+fn drain_existing_rt_logs_once() {
+    if let Some(rt_log) = RT_LOG.get() {
+        rt_log.drain_to_log();
+    }
 }
 
 pub(crate) fn start_drain_if_enabled() {
@@ -75,6 +166,11 @@ pub(crate) fn start_drain_if_enabled() {
 /// the `rt*` logging macros instead.
 pub fn write_rt_log(level: Level, target: &'static str, args: fmt::Arguments<'_>) {
     rt_log().write_fmt(level, target, args);
+}
+
+struct RtDrainWorker {
+    stop_requested: std::sync::Arc<AtomicBool>,
+    handle: JoinHandle<()>,
 }
 
 fn rt_log() -> &'static RtLogInner {
@@ -299,6 +395,22 @@ fn u8_to_level(level: u8) -> Level {
 mod tests {
     use super::*;
 
+    static SESSION_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn reset_sessions_for_test() {
+        while RT_LOG_SESSION_COUNT.load(Ordering::Acquire) > 0 {
+            release_log_session();
+        }
+        shutdown_rt_log_drain();
+    }
+
+    fn drain_worker_is_running() -> bool {
+        RT_DRAIN_WORKER
+            .lock()
+            .map(|worker| worker.is_some())
+            .unwrap_or(false)
+    }
+
     #[test]
     fn drain_stops_before_unpublished_slot() {
         let log = RtLogInner::new();
@@ -324,5 +436,34 @@ mod tests {
             std::str::from_utf8(message.as_bytes()).unwrap().len(),
             message.len,
         );
+    }
+
+    #[test]
+    fn log_session_stops_drain_worker_after_last_drop() {
+        let _guard = SESSION_TEST_MUTEX
+            .lock()
+            .expect("session test mutex poisoned");
+        reset_sessions_for_test();
+
+        let first_session = LogSession::start();
+        let second_session = LogSession::start();
+
+        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 2);
+        assert!(drain_worker_is_running());
+
+        drop(first_session);
+        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 1);
+        assert!(drain_worker_is_running());
+
+        drop(second_session);
+        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 0);
+        assert!(!drain_worker_is_running());
+
+        let restarted_session = LogSession::start();
+        assert_eq!(RT_LOG_SESSION_COUNT.load(Ordering::Acquire), 1);
+        assert!(drain_worker_is_running());
+
+        drop(restarted_session);
+        reset_sessions_for_test();
     }
 }
