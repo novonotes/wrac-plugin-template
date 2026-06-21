@@ -1,5 +1,7 @@
 # wrac_xtask
 
+> Japanese: [README_JA.md](README_JA.md)
+
 `wrac_xtask` provides the shared WRAC `cargo xtask` command surface for building,
 installing, launching, cleaning, and validating plugin artifacts.
 
