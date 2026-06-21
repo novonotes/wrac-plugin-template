@@ -128,6 +128,8 @@ pub struct ValidateOptions {
     pub release: bool,
     pub dry_run: bool,
     pub continue_on_error: bool,
+    pub skip_readiness_checks: bool,
+    pub skip_external_validators: bool,
     pub target: Vec<ValidateTarget>,
 }
 
@@ -284,6 +286,8 @@ impl WracWorkspace {
             release: options.release,
             dry_run: options.dry_run,
             continue_on_error: options.continue_on_error,
+            skip_readiness_checks: options.skip_readiness_checks,
+            skip_external_validators: options.skip_external_validators,
             target: options.target,
         };
         let mut failures = Vec::new();
@@ -373,6 +377,8 @@ impl From<cli::Commands> for WracCommand {
                 release: args.release,
                 dry_run: args.dry_run,
                 continue_on_error: args.continue_on_error,
+                skip_readiness_checks: args.skip_readiness_checks,
+                skip_external_validators: args.skip_external_validators,
                 target: args.target,
             }),
             cli::Commands::Launch(args) => Self::Launch(LaunchOptions {

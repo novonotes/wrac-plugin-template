@@ -95,6 +95,8 @@ Notes:
   Explicit targets must be listed in wrac-plugin.toml supported_formats.
   Explicit targets fail when unsupported on the current platform.
   WRAC check violations are errors. See docs/production-readiness-checks.md for rule IDs and disable metadata.
+  --skip-readiness-checks builds selected artifacts without running WRAC production-readiness checks.
+  --skip-external-validators builds selected artifacts without running clap-validator, VST3 validator, auval, or AAX Validator.
   CLAP validation downloads clap-validator 0.3.2 into target/tools if needed.
   VST3 validation uses the VST3 validator.
   AU validation is available only on macOS and installs the built AU before running auval.
@@ -334,6 +336,18 @@ pub(crate) struct ValidateArgs {
         help = "Continue independent tasks after a task fails; final exit status remains non-zero."
     )]
     pub(crate) continue_on_error: bool,
+
+    #[arg(
+        long,
+        help = "Skip WRAC production-readiness checks while still building selected artifacts."
+    )]
+    pub(crate) skip_readiness_checks: bool,
+
+    #[arg(
+        long,
+        help = "Skip external format validators while still building selected artifacts."
+    )]
+    pub(crate) skip_external_validators: bool,
 
     #[arg(
         short = 't',

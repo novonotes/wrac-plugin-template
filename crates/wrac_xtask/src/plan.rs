@@ -46,7 +46,13 @@ pub(crate) enum FailurePolicy {
 enum CommandKind {
     Build,
     Install,
-    Validate,
+    Validate(ValidatePlanOptions),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValidatePlanOptions {
+    run_readiness_checks: bool,
+    run_external_validators: bool,
 }
 
 /// Stable user-facing task identity.
@@ -436,7 +442,10 @@ pub(crate) fn run_validate(ctx: &Context, args: &ValidateArgs) -> Result<()> {
     // install tasks those validators need.
     let graph = build_graph(
         ctx,
-        CommandKind::Validate,
+        CommandKind::Validate(ValidatePlanOptions {
+            run_readiness_checks: !args.skip_readiness_checks,
+            run_external_validators: !args.skip_external_validators,
+        }),
         &build_targets,
         false,
         Some(InstallSelection {
@@ -506,10 +515,15 @@ fn build_graph(
     let needs_au = targets.contains(&Target::Au);
     let needs_aax = targets.contains(&Target::Aax);
     let needs_standalone = targets.contains(&Target::Standalone);
-    let needs_readiness_checks = matches!(command, CommandKind::Validate)
-        && ctx.metadata.release_track.runs_readiness_checks();
-    let needs_external_validators = !matches!(command, CommandKind::Validate)
-        || ctx.metadata.release_track.runs_external_validators();
+    let validate_options = match command {
+        CommandKind::Validate(options) => Some(options),
+        CommandKind::Build | CommandKind::Install => None,
+    };
+    let needs_readiness_checks =
+        validate_options.is_some_and(|options| options.run_readiness_checks);
+    let needs_external_validators = validate_options
+        .map(|options| options.run_external_validators)
+        .unwrap_or(true);
     // CLAP/VST3/AU/AAX all use the default Rust plugin build. CLAP consumes the
     // cdylib, while wrapper formats link the staticlib from the same cargo run.
     let needs_default = targets.iter().any(|target| {
@@ -678,7 +692,7 @@ fn build_graph(
                 graph.depends_on(install, build);
             }
         }
-        CommandKind::Validate => {
+        CommandKind::Validate(_) => {
             let validate_targets = targets
                 .iter()
                 .filter_map(|target| match target {

@@ -3,9 +3,7 @@ use std::path::Path;
 use crate::Result;
 use crate::targets::PluginFormat;
 
-pub(crate) use wrac_manifest::{
-    AaxStemConfig as AaxStemConfigMetadata, ReleaseTrack, ValidationMetadata,
-};
+pub(crate) use wrac_manifest::{AaxStemConfig as AaxStemConfigMetadata, ValidationMetadata};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -13,7 +11,6 @@ pub(crate) struct PluginMetadata {
     pub(crate) package_name: String,
     pub(crate) version: String,
     pub(crate) repository: Option<String>,
-    pub(crate) release_track: ReleaseTrack,
     pub(crate) company_name: String,
     pub(crate) auv2_manufacturer_code: String,
     pub(crate) aax_manufacturer_id: Option<String>,
@@ -97,7 +94,6 @@ impl PluginMetadata {
             package_name,
             version,
             repository: manifest.package.repository,
-            release_track: manifest.package.release_track,
             company_name: manifest.company_name,
             auv2_manufacturer_code: manifest.auv2_manufacturer_code,
             aax_manufacturer_id: manifest.aax_manufacturer_id,
@@ -156,7 +152,6 @@ mod tests {
             package_name: "test_plugin".to_string(),
             version: "1.0.0".to_string(),
             repository: None,
-            release_track: ReleaseTrack::Production,
             company_name: "Example".to_string(),
             auv2_manufacturer_code: "ExCo".to_string(),
             aax_manufacturer_id: None,
