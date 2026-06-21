@@ -9,8 +9,9 @@ use crate::window::StoredParentWindow;
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError, PluginGuiExtension,
-    PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginResult,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError,
+    PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
+    PluginGuiQueryExtension, PluginResult,
 };
 use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 
@@ -657,11 +658,13 @@ fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64
     None
 }
 
-impl PluginGuiQueryExtension for WxpGuiController {
+impl PluginGuiApiSupportExtension for WxpGuiController {
     fn is_api_supported(&self, api: GuiApi, is_floating: bool) -> bool {
         !is_floating && api == default_gui_api()
     }
+}
 
+impl PluginGuiQueryExtension for WxpGuiController {
     fn preferred_api(&self) -> Option<GuiConfig> {
         Some(default_gui_configuration())
     }
@@ -692,7 +695,7 @@ impl PluginGuiQueryExtension for WxpGuiController {
 impl PluginGuiMainThreadExtension for WxpGuiController {
     fn create(&self, configuration: GuiConfig) -> PluginResult<()> {
         log::debug!("wxp controller: create called: configuration={configuration:?}");
-        if !PluginGuiQueryExtension::is_api_supported(
+        if !PluginGuiApiSupportExtension::is_api_supported(
             self,
             configuration.api,
             configuration.is_floating,
@@ -930,6 +933,10 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
 }
 
 impl PluginGuiExtension for WxpGuiController {
+    fn api_support(&self) -> &(dyn PluginGuiApiSupportExtension + Send + Sync) {
+        self
+    }
+
     fn query(&self) -> &(dyn PluginGuiQueryExtension + Send + Sync) {
         self
     }
