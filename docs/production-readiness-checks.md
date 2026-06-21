@@ -6,36 +6,6 @@ Production-readiness checks are WRAC-specific checks run by `cargo xtask validat
 
 These checks are opinionated NovoNotes release-policy checks for commercial plugins, not format-spec validators. Keep the rule list small. Add new rules only for observed host-compatibility or support problems, and only when preventing recurrence is difficult through other means.
 
-## Repository-Specific Extensions
-
-`wrac-plugin.toml` may include repository-specific extension tables. WRAC
-ignores unknown fields and tables so downstream repositories can keep their own
-CI metadata next to the WRAC manifest without making that metadata part of the
-WRAC schema.
-
-```toml
-[acme.ci]
-validation_profile = "prototype"
-```
-
-WRAC does not interpret extension tables. Repository automation should parse its
-own extension namespace and translate that policy to explicit WRAC command-line
-options.
-
-## Skipping Validation Stages
-
-`cargo xtask validate` normally runs both production-readiness checks and
-external format validators. Repository automation can opt out of either stage
-with explicit flags:
-
-- `--skip-readiness-checks`: build selected artifacts and run external format
-  validators, but skip WRAC production-readiness checks.
-- `--skip-external-validators`: build selected artifacts and run WRAC
-  production-readiness checks, but skip external format validators.
-
-If both flags are passed, `cargo xtask validate` builds the selected artifacts as
-a smoke check.
-
 ## Disabling Rules
 
 Rules can be disabled by rule ID in the plugin crate manifest. Every disabled rule must include a non-empty `reason`.

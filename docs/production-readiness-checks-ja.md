@@ -6,32 +6,6 @@ Production-readiness check は、`cargo xtask validate` の中で実行される
 
 このチェックは、商用プラグインのための NovoNotes 独自のリリースポリシーチェックです。プラグイン形式の仕様そのものを検証するバリデーターではありません。ルールリストは小さく保つ方針です。実際に観測されたホスト互換性、サポート上の実問題を防ぐルールだけ、さらにそのなかでも、他の方法で再発防止が難しい場合だけ新規ルール追加します。
 
-## リポジトリ固有の拡張
-
-`wrac-plugin.toml` には、リポジトリ固有の拡張 table を含めることができます。
-WRAC は未知の field / table を無視するため、downstream repository は WRAC schema に
-含めない CI metadata を WRAC manifest の近くに置けます。
-
-```toml
-[acme.ci]
-validation_profile = "prototype"
-```
-
-WRAC は拡張 table の意味を解釈しません。リポジトリ側の automation が独自 namespace
-を parse し、その policy を明示的な WRAC command-line option に変換してください。
-
-## 検証 stage のスキップ
-
-`cargo xtask validate` は通常、production-readiness check と外部 format validator の両方を実行します。
-リポジトリ側の automation は、明示的な flag でどちらかの stage を無効化できます。
-
-- `--skip-readiness-checks`: 選択された成果物を build し、外部 format validator は実行しますが、
-  WRAC production-readiness check はスキップします。
-- `--skip-external-validators`: 選択された成果物を build し、WRAC production-readiness check は実行しますが、
-  外部 format validator はスキップします。
-
-両方の flag を渡した場合、`cargo xtask validate` は選択された成果物の build smoke check として動作します。
-
 ## ルールの無効化
 
 ルールはプラグイン crate の manifest で rule ID ごとに無効化できます。無効化する場合は、空ではない `reason` が必須です。
