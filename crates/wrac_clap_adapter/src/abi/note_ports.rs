@@ -75,7 +75,7 @@ unsafe extern "C" fn note_ports_get(
             (*info).id = port.id;
             (*info).supported_dialects = port.supported_dialects.bits();
             (*info).preferred_dialect = port.preferred_dialect.bits();
-            fill_c_char_array(&mut (*info).name, port.name);
+            fill_c_char_array(&mut (*info).name, &port.name);
         }
         true
     })

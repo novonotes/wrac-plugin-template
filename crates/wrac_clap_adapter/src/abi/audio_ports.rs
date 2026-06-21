@@ -75,7 +75,7 @@ unsafe extern "C" fn audio_ports_get(
             (*info).channel_count = port.channel_count;
             (*info).port_type = audio_port_type(port.port_type);
             (*info).in_place_pair = port.in_place_pair.unwrap_or(u32::MAX);
-            fill_c_char_array(&mut (*info).name, port.name);
+            fill_c_char_array(&mut (*info).name, &port.name);
         }
         true
     })

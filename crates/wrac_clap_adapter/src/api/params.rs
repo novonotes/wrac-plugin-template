@@ -14,7 +14,7 @@ pub trait PluginParamsQuery: Send + Sync + 'static {
     /// Called from CLAP `params.count`. `[thread-safe]`
     fn count(&self) -> u32;
 
-    /// Called from CLAP `params.get_info`. `[thread-safe]`
+    /// Called from CLAP `params.get_info`. `[thread-safe & control-thread]`
     fn get_info(&self, index: u32) -> Option<ParamInfo>;
 
     /// Called from CLAP `params.get_value`. `[thread-safe]`
