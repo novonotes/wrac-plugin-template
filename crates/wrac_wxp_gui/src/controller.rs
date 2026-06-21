@@ -15,8 +15,10 @@ use wrac_clap_adapter::{
 };
 use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 
+mod defaults;
 mod resize;
 
+use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
 
@@ -979,23 +981,6 @@ enum ShowAction {
     Create {
         generation: u64,
     },
-}
-
-fn default_gui_api() -> GuiApi {
-    if cfg!(target_os = "macos") {
-        GuiApi::Cocoa
-    } else if cfg!(target_os = "windows") {
-        GuiApi::Win32
-    } else {
-        GuiApi::X11
-    }
-}
-
-fn default_gui_configuration() -> GuiConfig {
-    GuiConfig {
-        api: default_gui_api(),
-        is_floating: false,
-    }
 }
 
 #[cfg(test)]
