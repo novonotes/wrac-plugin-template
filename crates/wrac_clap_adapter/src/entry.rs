@@ -29,10 +29,12 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// Initializes entry-level state.
     ///
     /// This callback belongs to the DSO entry lifecycle and may run during plugin
-    /// scanning without any plugin instance. It may also run from a Windows loader
-    /// context through wrapper formats such as AAX. Implementations must not log,
-    /// open files, write to stderr, start worker threads, initialize COM or GUI
-    /// state, launch external processes, or perform expensive computation here.
+    /// scanning without any plugin instance. The clap-wrapper Windows AAX
+    /// implementation can call `clap_entry.init` while the Windows loader lock is
+    /// held, so this callback must remain loader-lock-safe. Implementations must
+    /// not log, open files, write to stderr, start worker threads, initialize COM
+    /// or GUI state, launch external processes, or perform expensive computation
+    /// here.
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
