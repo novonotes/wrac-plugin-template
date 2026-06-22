@@ -2,26 +2,26 @@ use std::path::PathBuf;
 
 use cargo_metadata::MetadataCommand;
 
+use crate::BuildProfile;
 use crate::metadata::{PluginMetadata, PluginProductMetadata};
-use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::{Result, WracPluginPackage, XtaskConfig, XtaskOutputLanguage};
 
-pub(crate) struct Context {
+pub struct WracContext {
     pub(crate) root: PathBuf,
-    pub(crate) package_name: String,
+    pub package_name: String,
     pub(crate) plugin_root: PathBuf,
     pub(crate) manifest_path: PathBuf,
-    pub(crate) platform: Platform,
+    pub platform: Platform,
     pub(crate) target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
     pub(crate) default_aax_sdk_root: Option<PathBuf>,
-    pub(crate) output_language: XtaskOutputLanguage,
+    pub output_language: XtaskOutputLanguage,
     pub(crate) metadata: PluginMetadata,
 }
 
-impl Context {
-    pub(crate) fn new(config: &XtaskConfig, package_name: &str) -> Result<Self> {
+impl WracContext {
+    pub fn new(config: &XtaskConfig, package_name: &str) -> Result<Self> {
         let package = find_package(config, package_name)?;
         // CARGO_TARGET_DIR may be redirected to a shared cache in workspaces or CI.
         // Using the same target root as cargo keeps post-build library detection consistent.
@@ -57,27 +57,27 @@ impl Context {
         })
     }
 
-    pub(crate) fn gui_dir(&self) -> PathBuf {
+    pub fn gui_dir(&self) -> PathBuf {
         self.plugin_root.join("src-gui")
     }
 
-    pub(crate) fn plugin_manifest(&self) -> PathBuf {
+    pub fn plugin_manifest(&self) -> PathBuf {
         self.manifest_path.clone()
     }
 
-    pub(crate) fn cargo_profile_dir(&self, profile: BuildProfile) -> PathBuf {
+    pub fn cargo_profile_dir(&self, profile: BuildProfile) -> PathBuf {
         self.target_dir.join(profile.cargo_dir())
     }
 
-    pub(crate) fn wrac_dir(&self) -> PathBuf {
+    pub fn wrac_dir(&self) -> PathBuf {
         self.target_dir.join("wrac")
     }
 
-    pub(crate) fn plugins_dir(&self, profile: BuildProfile) -> PathBuf {
+    pub fn plugins_dir(&self, profile: BuildProfile) -> PathBuf {
         self.wrac_dir().join("plugins").join(profile.artifact_dir())
     }
 
-    pub(crate) fn cmake_dir(&self, purpose: &str, profile: BuildProfile) -> PathBuf {
+    pub fn cmake_dir(&self, purpose: &str, profile: BuildProfile) -> PathBuf {
         // Keep the wrapper build directory short and stable.
         // The old hash-based path avoided Windows path length limits but changed between runs, which broke launch.json paths and made debugging harder.
         self.wrac_dir()
@@ -85,32 +85,32 @@ impl Context {
             .join(format!("{purpose}-{}", profile.cmake_suffix()))
     }
 
-    pub(crate) fn standalone_dir(&self, profile: BuildProfile) -> PathBuf {
+    pub fn standalone_dir(&self, profile: BuildProfile) -> PathBuf {
         self.wrac_dir()
             .join("standalone")
             .join(profile.artifact_dir())
     }
 
-    pub(crate) fn clap_bundle(&self, profile: BuildProfile) -> PathBuf {
+    pub fn clap_bundle(&self, profile: BuildProfile) -> PathBuf {
         self.plugins_dir(profile)
             .join(self.metadata.clap_bundle_name())
     }
 
-    pub(crate) fn vst3_bundle(&self, profile: BuildProfile) -> PathBuf {
+    pub fn vst3_bundle(&self, profile: BuildProfile) -> PathBuf {
         self.plugins_dir(profile)
             .join(self.metadata.vst3_bundle_name())
     }
 
-    pub(crate) fn aax_bundle(&self, profile: BuildProfile) -> PathBuf {
+    pub fn aax_bundle(&self, profile: BuildProfile) -> PathBuf {
         self.plugins_dir(profile)
             .join(self.metadata.aax_bundle_name())
     }
 
-    pub(crate) fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
+    pub fn au_bundles(&self, profile: BuildProfile) -> Vec<PathBuf> {
         vec![self.au_bundle(profile)]
     }
 
-    pub(crate) fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
+    pub fn au_bundle(&self, profile: BuildProfile) -> PathBuf {
         // AUv2 keeps multiple AudioComponents inside one component bundle.
         // The wrapper reads per-product type/subtype metadata from the CLAP
         // factory's AUv2 extension, so xtask tracks the artifact at bundle level.
@@ -141,6 +141,8 @@ impl Context {
         )
     }
 }
+
+pub(crate) type Context = WracContext;
 
 pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
     let metadata = MetadataCommand::new()

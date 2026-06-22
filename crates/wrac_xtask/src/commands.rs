@@ -5,15 +5,14 @@ use std::process::Command;
 
 use crate::Result;
 use crate::XtaskOutputLanguage;
-use crate::cli::{InstallScope, UninstallScope};
 use crate::context::Context;
 use crate::metadata::PluginMetadata;
-use crate::profile::BuildProfile;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target};
 use crate::util::{
     common_program_files, copy_path, ensure_exists, home_dir, local_app_data, print_section,
     print_success, remove_if_exists, run_with_language,
 };
+use crate::{BuildProfile, InstallScope, UninstallScope};
 
 mod build;
 mod validation;
@@ -57,13 +56,6 @@ pub(crate) fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&st
         }
     }
     Ok(())
-}
-
-pub(crate) fn ensure_launch_target_exists(ctx: &Context, plugin_id: Option<&str>) -> Result<()> {
-    // Launch has to build the standalone app before opening it, but an invalid
-    // product selection is independent of build artifacts. Check it upfront so
-    // typos in --plugin-id do not trigger a full standalone build.
-    standalone_plugin_to_launch(ctx, plugin_id).map(|_| ())
 }
 
 fn standalone_plugin_to_launch<'a>(

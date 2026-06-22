@@ -7,16 +7,15 @@ use petgraph::visit::EdgeRef;
 
 use crate::Result;
 use crate::XtaskOutputLanguage;
-use crate::cli::{BuildArgs, InstallArgs, UninstallArgs, ValidateArgs};
 use crate::commands::{
     RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
-    build_wrapper_target, clean, configure_wrapper, install_dir, install_plugin_target,
+    build_wrapper_target, clean, configure_wrapper, install_dir, install_plugin_target, launch,
     package_clap, print_outputs, uninstall_plugin_target, validate_plugin_target,
     validate_wrac_rules_for_targets,
 };
 use crate::context::Context;
-use crate::profile::BuildProfile;
 use crate::targets::{PluginTarget, Target, ValidateTarget};
+use crate::{BuildProfile, InstallScope, UninstallScope};
 
 mod output;
 mod target_resolution;
@@ -26,7 +25,7 @@ use self::output::{
     plan_heading, result_heading, skip_reason, skipped_label, status_label, success_label,
     uninstall_summary,
 };
-use self::target_resolution::{
+pub use self::target_resolution::{
     resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
     resolve_validate_targets_from_metadata,
 };
@@ -37,23 +36,12 @@ use self::target_resolution::{
 /// invalid scopes, missing SDKs, build failures, and validator failures are all
 /// represented as task failures so the same downstream-skip rule applies.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum FailurePolicy {
+pub enum FailurePolicy {
     FailFast,
     Continue,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum CommandKind {
-    Build,
-    Install,
-    Validate(ValidatePlanOptions),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ValidatePlanOptions {
-    run_readiness_checks: bool,
-    run_external_validators: bool,
-}
+pub type TaskNode = NodeIndex;
 
 /// Stable user-facing task identity.
 ///
@@ -61,10 +49,10 @@ struct ValidatePlanOptions {
 /// skip reasons, and dry-run output on these string IDs prevents graph insertion
 /// order changes from leaking into user-visible diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct TaskId(String);
+pub struct TaskId(String);
 
 impl TaskId {
-    fn new(value: impl Into<String>) -> Self {
+    pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 }
@@ -88,7 +76,7 @@ impl Task {
 }
 
 #[derive(Debug, Clone)]
-enum TaskKind {
+pub enum TaskKind {
     Clean,
     BuildGui,
     BuildRustDefault,
@@ -106,17 +94,20 @@ enum TaskKind {
     BuildStandaloneBundle {
         plugin_id: Option<String>,
     },
+    LaunchStandalone {
+        plugin_id: Option<String>,
+    },
     CheckInstallScope {
         target: PluginTarget,
-        scope: crate::cli::InstallScope,
+        scope: InstallScope,
     },
     InstallBundle {
         target: PluginTarget,
-        scope: crate::cli::InstallScope,
+        scope: InstallScope,
     },
     UninstallBundle {
         target: PluginTarget,
-        scope: crate::cli::UninstallScope,
+        scope: UninstallScope,
         dry_run: bool,
     },
     ValidateWracRules {
@@ -205,6 +196,17 @@ impl TaskKind {
                     None => "standalone 成果物をビルド".to_string(),
                 }
             }
+            (XtaskOutputLanguage::English, Self::LaunchStandalone { plugin_id }) => match plugin_id
+            {
+                Some(plugin_id) => format!("launch standalone artifact ({plugin_id})"),
+                None => "launch standalone artifact".to_string(),
+            },
+            (XtaskOutputLanguage::Japanese, Self::LaunchStandalone { plugin_id }) => {
+                match plugin_id {
+                    Some(plugin_id) => format!("standalone artifact を起動 ({plugin_id})"),
+                    None => "standalone artifact を起動".to_string(),
+                }
+            }
             (XtaskOutputLanguage::English, Self::CheckInstallScope { target, scope }) => {
                 format!("check install scope for {} ({scope:?})", target.display())
             }
@@ -274,20 +276,20 @@ enum TaskStatus {
     Skipped,
 }
 
-struct TaskGraph {
+pub struct TaskPlan {
     graph: DiGraph<Task, ()>,
     nodes: HashMap<TaskId, NodeIndex>,
 }
 
-impl TaskGraph {
-    fn new() -> Self {
+impl TaskPlan {
+    pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
             nodes: HashMap::new(),
         }
     }
 
-    fn task(&mut self, id: TaskId, kind: TaskKind) -> NodeIndex {
+    pub fn task(&mut self, id: TaskId, kind: TaskKind) -> NodeIndex {
         // Multiple terminal tasks often share dependencies, for example VST3
         // and AAX both need the default Rust staticlib. Reusing the existing
         // node here is what keeps the plan a DAG instead of a duplicated tree.
@@ -302,7 +304,7 @@ impl TaskGraph {
         index
     }
 
-    fn depends_on(&mut self, task: NodeIndex, dependency: NodeIndex) {
+    pub fn depends_on(&mut self, task: NodeIndex, dependency: NodeIndex) {
         // Edges point from dependency to dependent so petgraph's topological
         // order is directly executable. Keeping that convention local makes
         // later task additions much easier to review.
@@ -355,404 +357,10 @@ impl TaskGraph {
     }
 }
 
-pub(crate) fn run_build(ctx: &Context, args: &BuildArgs) -> Result<()> {
-    let profile = BuildProfile::from_release(args.release);
-    let targets = resolve_build_targets_from_metadata(ctx, &args.target)?;
-    // The command only chooses terminal build tasks. The graph builder expands
-    // those into Rust, wrapper-configure, and format-specific build tasks.
-    let graph = build_graph(
-        ctx,
-        CommandKind::Build,
-        &targets,
-        args.clean,
-        None,
-        args.standalone_plugin_id.clone(),
-    )?;
-    execute_plan(
-        ctx,
-        profile,
-        graph,
-        args.dry_run,
-        failure_policy(args.continue_on_error),
-    )?;
-    if !args.dry_run {
-        print_outputs(ctx, profile, &targets, args.standalone_plugin_id.as_deref())?;
-    }
-    Ok(())
-}
-
-pub(crate) fn run_install(ctx: &Context, args: &InstallArgs) -> Result<()> {
-    let profile = BuildProfile::from_release(args.release);
-    let targets = resolve_plugin_targets_from_metadata(ctx, &args.target)?;
-    let build_targets = targets
-        .iter()
-        .map(|target| target.target())
-        .collect::<Vec<_>>();
-    let graph = build_graph(
-        ctx,
-        CommandKind::Install,
-        &build_targets,
-        false,
-        Some(InstallSelection {
-            targets,
-            scope: args.scope,
-        }),
-        None,
-    )?;
-    execute_plan(
-        ctx,
-        profile,
-        graph,
-        args.dry_run,
-        failure_policy(args.continue_on_error),
-    )
-}
-
-pub(crate) fn run_uninstall(ctx: &Context, args: &UninstallArgs) -> Result<()> {
-    let targets = resolve_plugin_targets_from_metadata(ctx, &args.target)?;
-    let mut graph = TaskGraph::new();
-    for target in targets {
-        graph.task(
-            TaskId::new(format!("{}:uninstall:{target:?}", ctx.package_name)),
-            TaskKind::UninstallBundle {
-                target,
-                scope: args.scope,
-                dry_run: args.dry_run,
-            },
-        );
-    }
-    execute_plan(
-        ctx,
-        BuildProfile::Debug,
-        graph,
-        false,
-        failure_policy(args.continue_on_error),
-    )
-}
-
-pub(crate) fn run_validate(ctx: &Context, args: &ValidateArgs) -> Result<()> {
-    let profile = BuildProfile::from_release(args.release);
-    let targets = resolve_validate_targets_from_metadata(ctx, &args.target)?;
-    let build_targets = targets
-        .iter()
-        .map(|target| target.target())
-        .collect::<Vec<_>>();
-    // Validate does not "call build" as a special case. It asks for validation
-    // terminal tasks, and the dependency graph pulls in exactly the build and
-    // install tasks those validators need.
-    let graph = build_graph(
-        ctx,
-        CommandKind::Validate(ValidatePlanOptions {
-            run_readiness_checks: !args.skip_readiness_checks,
-            run_external_validators: !args.skip_external_validators,
-        }),
-        &build_targets,
-        false,
-        Some(InstallSelection {
-            targets: targets
-                .iter()
-                .map(|target| match target {
-                    ValidateTarget::Clap => PluginTarget::Clap,
-                    ValidateTarget::Vst3 => PluginTarget::Vst3,
-                    ValidateTarget::Au => PluginTarget::Au,
-                    ValidateTarget::Aax => PluginTarget::Aax,
-                })
-                .collect(),
-            scope: crate::cli::InstallScope::Default,
-        }),
-        None,
-    )?;
-    execute_plan(
-        ctx,
-        profile,
-        graph,
-        args.dry_run,
-        failure_policy(args.continue_on_error),
-    )
-}
-
-#[derive(Clone)]
-struct InstallSelection {
-    targets: Vec<PluginTarget>,
-    scope: crate::cli::InstallScope,
-}
-
-fn build_graph(
-    ctx: &Context,
-    command: CommandKind,
-    targets: &[Target],
-    clean_first: bool,
-    install_selection: Option<InstallSelection>,
-    standalone_plugin_id: Option<String>,
-) -> Result<TaskGraph> {
-    let mut graph = TaskGraph::new();
-    // Install scope validation is modeled as a task, not an upfront global
-    // preflight. With --continue-on-error, an invalid AAX user install scope can
-    // skip only AAX while unrelated CLAP/VST3/AU installs continue.
-    let install_checks = install_selection
-        .as_ref()
-        .filter(|_| matches!(command, CommandKind::Install))
-        .map(|selection| {
-            selection
-                .targets
-                .iter()
-                .map(|target| {
-                    let check = graph.task(
-                        package_task_id(ctx, &format!("check-install-scope-{target:?}")),
-                        TaskKind::CheckInstallScope {
-                            target: *target,
-                            scope: selection.scope,
-                        },
-                    );
-                    (target.target(), check)
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
-    let clean = clean_first.then(|| graph.task(package_task_id(ctx, "clean"), TaskKind::Clean));
-
-    let needs_vst3 = targets.contains(&Target::Vst3);
-    let needs_au = targets.contains(&Target::Au);
-    let needs_aax = targets.contains(&Target::Aax);
-    let needs_standalone = targets.contains(&Target::Standalone);
-    let validate_options = match command {
-        CommandKind::Validate(options) => Some(options),
-        CommandKind::Build | CommandKind::Install => None,
-    };
-    let needs_readiness_checks =
-        validate_options.is_some_and(|options| options.run_readiness_checks);
-    let needs_external_validators = validate_options
-        .map(|options| options.run_external_validators)
-        .unwrap_or(true);
-    // CLAP/VST3/AU/AAX all use the default Rust plugin build. CLAP consumes the
-    // cdylib, while wrapper formats link the staticlib from the same cargo run.
-    let needs_default = targets.iter().any(|target| {
-        matches!(
-            target,
-            Target::Clap | Target::Vst3 | Target::Au | Target::Aax
-        )
-    });
-
-    let build_gui = if needs_default || needs_standalone {
-        let build_gui = graph.task(package_task_id(ctx, "build-gui"), TaskKind::BuildGui);
-        if let Some(clean) = clean {
-            graph.depends_on(build_gui, clean);
-        }
-        Some(build_gui)
-    } else {
-        None
-    };
-
-    let rust_default = if needs_default {
-        let rust_default = graph.task(
-            package_task_id(ctx, "build-rust-default"),
-            TaskKind::BuildRustDefault,
-        );
-        graph.depends_on(
-            rust_default,
-            build_gui.expect("default Rust build needs GUI"),
-        );
-        Some(rust_default)
-    } else {
-        None
-    };
-
-    let rust_standalone = if needs_standalone {
-        // Standalone uses a separate cargo target directory because wrapper app
-        // dependencies and debug artifacts should not contaminate plugin builds.
-        let rust_standalone = graph.task(
-            package_task_id(ctx, "build-rust-standalone"),
-            TaskKind::BuildRustStandalone,
-        );
-        graph.depends_on(
-            rust_standalone,
-            build_gui.expect("standalone Rust build needs GUI"),
-        );
-        Some(rust_standalone)
-    } else {
-        None
-    };
-
-    let mut build_by_target = HashMap::new();
-    if targets.contains(&Target::Clap) || needs_readiness_checks {
-        // Production-readiness checks read the CLAP schema. Production validation
-        // therefore packages CLAP even when only wrapper-format validators were
-        // requested, while prototype/example tracks keep CLAP tied to the target list.
-        let clap = graph.task(package_task_id(ctx, "package-clap"), TaskKind::PackageClap);
-        graph.depends_on(
-            clap,
-            rust_default.expect("CLAP packaging needs default Rust build"),
-        );
-        if let Some(check) = install_checks.get(&Target::Clap) {
-            graph.depends_on(clap, *check);
-        }
-        build_by_target.insert(Target::Clap, clap);
-    }
-
-    if needs_vst3 || needs_au {
-        // VST3 and AU intentionally share the default Rust staticlib. Older
-        // WRY_OBJC_SUFFIX-based builds needed per-format Rust builds for
-        // Objective-C class names, but current wxp/wry embeds the source ID into
-        // objc2-generated class names. Split this again only if per-format
-        // compile-time inputs return.
-        // Configure the private-SDK-free wrapper project with the full native
-        // plugin target set for this platform, then build only the DAG-selected
-        // CMake target below. This avoids flipping the same CMake cache between
-        // "VST3 only" and "AU only" when developers alternate commands.
-        let configure_vst3 = needs_vst3 || ctx.platform.supports_vst3();
-        let configure_au = needs_au || ctx.platform.supports_au();
-        // Keep AAX out of this configure group. AAX requires a private SDK, and
-        // VST3/AU-only builds must not fail just because AAX inputs are absent.
-        let configure = graph.task(
-            package_task_id(ctx, "configure-wrapper-plugins"),
-            TaskKind::ConfigureWrapperPlugins {
-                vst3: configure_vst3,
-                au: configure_au,
-            },
-        );
-        graph.depends_on(
-            configure,
-            rust_default.expect("wrapper plugin builds need default Rust build"),
-        );
-        for target in [Target::Vst3, Target::Au] {
-            if let Some(check) = install_checks.get(&target) {
-                graph.depends_on(configure, *check);
-            }
-        }
-        if needs_vst3 {
-            let vst3 = graph.task(
-                package_task_id(ctx, "build-vst3"),
-                TaskKind::BuildVst3Bundle,
-            );
-            graph.depends_on(vst3, configure);
-            build_by_target.insert(Target::Vst3, vst3);
-        }
-        if needs_au {
-            let au = graph.task(package_task_id(ctx, "build-au"), TaskKind::BuildAuBundle);
-            graph.depends_on(au, configure);
-            build_by_target.insert(Target::Au, au);
-        }
-    }
-
-    if needs_aax {
-        // AAX gets its own CMake build directory because the target set and SDK
-        // root are configure-time inputs. Sharing one wrapper cache with VST3/AU
-        // would recreate the old "last command wins" CMake state problem.
-        let configure = graph.task(
-            package_task_id(ctx, "configure-wrapper-aax"),
-            TaskKind::ConfigureWrapperAax,
-        );
-        graph.depends_on(
-            configure,
-            rust_default.expect("AAX wrapper builds need default Rust build"),
-        );
-        if let Some(check) = install_checks.get(&Target::Aax) {
-            graph.depends_on(configure, *check);
-        }
-        let aax = graph.task(package_task_id(ctx, "build-aax"), TaskKind::BuildAaxBundle);
-        graph.depends_on(aax, configure);
-        build_by_target.insert(Target::Aax, aax);
-    }
-
-    if needs_standalone {
-        let configure = graph.task(
-            package_task_id(ctx, "configure-wrapper-standalone"),
-            TaskKind::ConfigureWrapperStandalone,
-        );
-        graph.depends_on(
-            configure,
-            rust_standalone.expect("standalone wrapper needs standalone Rust build"),
-        );
-        let standalone = graph.task(
-            package_task_id(ctx, "build-standalone"),
-            TaskKind::BuildStandaloneBundle {
-                plugin_id: standalone_plugin_id,
-            },
-        );
-        graph.depends_on(standalone, configure);
-        build_by_target.insert(Target::Standalone, standalone);
-    }
-
-    match command {
-        CommandKind::Build => {}
-        CommandKind::Install => {
-            let install_selection = install_selection.expect("install graph needs selection");
-            for target in install_selection.targets {
-                // Install tasks depend on their concrete format build task, not
-                // on a broad "build all" node. This lets --continue-on-error skip
-                // only the affected format when another format fails.
-                let install = graph.task(
-                    package_task_id(ctx, &format!("install-{target:?}")),
-                    TaskKind::InstallBundle {
-                        target,
-                        scope: install_selection.scope,
-                    },
-                );
-                let build = build_by_target[&target.target()];
-                graph.depends_on(install, build);
-            }
-        }
-        CommandKind::Validate(_) => {
-            let validate_targets = targets
-                .iter()
-                .filter_map(|target| match target {
-                    Target::Clap => Some(ValidateTarget::Clap),
-                    Target::Vst3 => Some(ValidateTarget::Vst3),
-                    Target::Au => Some(ValidateTarget::Au),
-                    Target::Aax => Some(ValidateTarget::Aax),
-                    Target::Standalone => None,
-                })
-                .collect::<Vec<_>>();
-            let rules = if needs_readiness_checks {
-                let rules = graph.task(
-                    package_task_id(ctx, "validate-wrac-rules"),
-                    TaskKind::ValidateWracRules {
-                        targets: validate_targets.clone(),
-                    },
-                );
-                graph.depends_on(rules, build_by_target[&Target::Clap]);
-                Some(rules)
-            } else {
-                None
-            };
-            for target in validate_targets
-                .into_iter()
-                .filter(|_| needs_external_validators)
-            {
-                let validate = graph.task(
-                    package_task_id(ctx, &format!("validate-{target:?}")),
-                    TaskKind::ValidateBundle { target },
-                );
-                if let Some(rules) = rules {
-                    graph.depends_on(validate, rules);
-                }
-                if target == ValidateTarget::Au {
-                    // auval discovers Audio Units through AudioComponentRegistrar
-                    // instead of taking a bundle path. Model the user-local AU
-                    // install as a real dependency so validate-AU cannot observe
-                    // a stale or missing component.
-                    let install = graph.task(
-                        package_task_id(ctx, "install-Au-for-validation"),
-                        TaskKind::InstallBundle {
-                            target: PluginTarget::Au,
-                            scope: crate::cli::InstallScope::User,
-                        },
-                    );
-                    graph.depends_on(install, build_by_target[&Target::Au]);
-                    graph.depends_on(validate, install);
-                } else {
-                    graph.depends_on(validate, build_by_target[&target.target()]);
-                }
-            }
-        }
-    }
-    Ok(graph)
-}
-
-fn execute_plan(
+pub fn execute_plan(
     ctx: &Context,
     profile: BuildProfile,
-    graph: TaskGraph,
+    graph: TaskPlan,
     dry_run: bool,
     policy: FailurePolicy,
 ) -> Result<()> {
@@ -880,6 +488,7 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
             WrapperTarget::Standalone,
             plugin_id.as_deref(),
         ),
+        TaskKind::LaunchStandalone { plugin_id } => launch(ctx, profile, plugin_id.as_deref()),
         TaskKind::CheckInstallScope { target, scope } => {
             install_dir(ctx, *scope, target.format()).map(|_| ())
         }
@@ -913,7 +522,7 @@ fn run_task(ctx: &Context, profile: BuildProfile, kind: &TaskKind) -> Result<()>
 }
 
 fn print_plan(
-    graph: &TaskGraph,
+    graph: &TaskPlan,
     ordered: &[NodeIndex],
     dry_run: bool,
     language: XtaskOutputLanguage,
@@ -952,7 +561,7 @@ fn print_plan(
 }
 
 fn print_summary(
-    graph: &TaskGraph,
+    graph: &TaskPlan,
     statuses: &HashMap<NodeIndex, TaskStatus>,
     language: XtaskOutputLanguage,
 ) {
@@ -981,14 +590,19 @@ fn print_summary(
     }
 }
 
-fn package_task_id(ctx: &Context, task: &str) -> TaskId {
-    TaskId::new(format!("{}:{task}", ctx.package_name))
-}
-
-fn failure_policy(continue_on_error: bool) -> FailurePolicy {
+pub fn failure_policy(continue_on_error: bool) -> FailurePolicy {
     if continue_on_error {
         FailurePolicy::Continue
     } else {
         FailurePolicy::FailFast
     }
+}
+
+pub fn print_build_outputs(
+    ctx: &Context,
+    profile: BuildProfile,
+    targets: &[Target],
+    standalone_plugin_id: Option<&str>,
+) -> Result<()> {
+    print_outputs(ctx, profile, targets, standalone_plugin_id)
 }

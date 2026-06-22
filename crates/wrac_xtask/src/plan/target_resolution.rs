@@ -4,7 +4,7 @@ use crate::context::Context;
 use crate::targets::{PluginFormat, PluginTarget, Target, ValidateTarget};
 use crate::{Result, XtaskOutputLanguage};
 
-pub(super) fn resolve_build_targets_from_metadata(
+pub fn resolve_build_targets_from_metadata(
     ctx: &Context,
     requested: &[Target],
 ) -> Result<Vec<Target>> {
@@ -29,7 +29,7 @@ pub(super) fn resolve_build_targets_from_metadata(
     Ok(targets)
 }
 
-pub(super) fn resolve_plugin_targets_from_metadata(
+pub fn resolve_plugin_targets_from_metadata(
     ctx: &Context,
     requested: &[PluginTarget],
 ) -> Result<Vec<PluginTarget>> {
@@ -63,7 +63,7 @@ pub(super) fn resolve_plugin_targets_from_metadata(
     Ok(targets)
 }
 
-pub(super) fn resolve_validate_targets_from_metadata(
+pub fn resolve_validate_targets_from_metadata(
     ctx: &Context,
     requested: &[ValidateTarget],
 ) -> Result<Vec<ValidateTarget>> {
