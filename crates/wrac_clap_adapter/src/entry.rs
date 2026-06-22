@@ -11,6 +11,10 @@ pub struct EntryContext<'a> {
 pub trait PluginEntry: Send + Sync + 'static {
     /// Provides process-wide logger configuration without opening files or writing to stderr.
     ///
+    /// This can run from the host loader context, such as a Windows AAX wrapper
+    /// loading the DSO. Return static data only; do not log, inspect the
+    /// environment, start threads, or touch the filesystem here.
+    ///
     /// The adapter installs a lightweight logger during entry initialization. The
     /// file destination is opened lazily on the first log write or the first plugin
     /// instance, whichever comes first. Return a stable static configuration so
@@ -25,8 +29,12 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// Initializes entry-level state.
     ///
     /// This callback belongs to the DSO entry lifecycle and may run during plugin
-    /// scanning without any plugin instance. Implementations must not log, open
-    /// files, write to stderr, or start worker threads here.
+    /// scanning without any plugin instance. The clap-wrapper Windows AAX
+    /// implementation can call `clap_entry.init` while the Windows loader lock is
+    /// held, so this callback must remain loader-lock-safe. Implementations must
+    /// not log, open files, write to stderr, start worker threads, initialize COM
+    /// or GUI state, launch external processes, or perform expensive computation
+    /// here.
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
@@ -34,8 +42,9 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// Releases entry-level state.
     ///
     /// This callback can run close to DSO unload. Implementations must not log,
-    /// perform file I/O, or join worker threads here; per-instance cleanup must
-    /// happen when the last plugin instance is destroyed.
+    /// perform file I/O, join worker threads, or release thread-affine GUI/COM
+    /// state here; per-instance cleanup must happen when the last plugin instance
+    /// is destroyed.
     fn deinit(&self) {}
 
     fn attach_main_thread(&self) {}
