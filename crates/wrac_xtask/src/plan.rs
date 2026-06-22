@@ -357,6 +357,12 @@ impl TaskPlan {
     }
 }
 
+impl Default for TaskPlan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn execute_plan(
     ctx: &Context,
     profile: BuildProfile,
