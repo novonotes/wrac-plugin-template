@@ -28,7 +28,7 @@ use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
 use wrac_clap_adapter::{
     AaxDescriptor, AaxStemConfig, ActivateContext, ActivateResult, ActiveProcessor, Auv2Descriptor,
-    InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
+    InactiveProcessor, LogConfig, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension,
     PluginInstance, PluginInstanceContext, PluginParamsQuery, PluginResult, PluginStateExtension,
     Vst3Descriptor,
@@ -45,10 +45,18 @@ use crate::state::{ProjectStateStore, SharedState};
 include!(concat!(env!("OUT_DIR"), "/wrac_plugin_products.rs"));
 
 pub(crate) static PLUGIN_ENTRY: WracGainEntry = WracGainEntry;
+static LOG_CONFIG: LogConfig = LogConfig::new(
+    PLUGIN_DESCRIPTORS[0].name,
+    Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../.log")),
+);
 
 pub(crate) struct WracGainEntry;
 
 impl PluginEntry for WracGainEntry {
+    fn log_config(&'static self) -> Option<&'static LogConfig> {
+        Some(&LOG_CONFIG)
+    }
+
     fn plugin_factory(&self) -> Option<&dyn PluginFactory> {
         Some(&WRAC_GAIN_FACTORY)
     }
@@ -155,8 +163,6 @@ pub(crate) fn create_plugin_core(
     context: PluginInstanceContext,
     descriptor: PluginDescriptor,
 ) -> Box<dyn PluginInstance> {
-    wrac_log::init!(descriptor.name);
-
     log::debug!(
         "creating plugin core: id={}, name={}",
         descriptor.id,

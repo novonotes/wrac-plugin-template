@@ -14,7 +14,7 @@ use super::{
 };
 use crate::entry::{
     EntryContext, EntryRegistration, decrement_entry_init_count, entry_init_count,
-    increment_entry_init_count, reset_entry_init_count,
+    increment_entry_init_count, reset_entry_init_count, retain_entry_instance,
 };
 use crate::factory::{
     AaxFactoryState, Auv2FactoryState, ClapPluginFactoryAsAax, ClapPluginFactoryAsAuv2,
@@ -52,6 +52,10 @@ pub(crate) unsafe extern "C" fn entry_init(
             return true;
         }
 
+        if let Some(config) = registration.entry.log_config() {
+            registration.configure_log_runtime(config);
+        }
+
         let plugin_path = if plugin_path.is_null() {
             None
         } else {
@@ -59,14 +63,17 @@ pub(crate) unsafe extern "C" fn entry_init(
             match plugin_path.to_str() {
                 Ok(plugin_path) => Some(plugin_path),
                 Err(error) => {
-                    log::warn!("entry.init: invalid UTF-8 plugin_path: {error}");
+                    let _ = error;
                     reset_entry_init_count(registration);
                     return false;
                 }
             }
         };
-        if let Err(error) = registration.entry.init(EntryContext { plugin_path }) {
-            log::warn!("entry.init: product init failed: {error}");
+        if registration
+            .entry
+            .init(EntryContext { plugin_path })
+            .is_err()
+        {
             reset_entry_init_count(registration);
             return false;
         }
@@ -81,7 +88,6 @@ pub(crate) unsafe extern "C" fn entry_init(
 pub(crate) unsafe extern "C" fn entry_deinit(registration: &'static EntryRegistration) {
     ffi_unit(|| {
         if entry_init_count(registration) == 0 {
-            log::warn!("entry.deinit: called while entry is not initialized");
             return;
         }
         let count = decrement_entry_init_count(registration);
@@ -316,6 +322,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
         let instance_ptr = (&mut *instance) as *mut PluginInstanceState;
         instance.plugin.plugin_data = instance_ptr.cast();
         let plugin_ptr = &instance.plugin as *const clap_plugin;
+        retain_entry_instance(registration);
         let _ = Box::into_raw(instance);
         plugin_ptr
     })

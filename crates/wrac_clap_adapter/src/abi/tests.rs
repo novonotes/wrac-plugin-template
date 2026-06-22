@@ -21,7 +21,7 @@ use super::{
 use crate::entry::EntryRegistration;
 use crate::{
     ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext,
-    HostAudioPorts, HostLifecycle, HostNotePorts, InactiveProcessor, NoteDialects,
+    HostAudioPorts, HostLifecycle, HostNotePorts, InactiveProcessor, LogConfig, NoteDialects,
     ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory, PluginInstance,
     PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery, PluginResult, ProcessContext,
     ProcessStatus,
@@ -527,6 +527,10 @@ struct TestEntry {
 }
 
 impl PluginEntry for TestEntry {
+    fn log_config(&'static self) -> Option<&'static LogConfig> {
+        None
+    }
+
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
