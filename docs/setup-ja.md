@@ -149,3 +149,14 @@ package が複数の plugin product を公開している場合は `--plugin-id`
 
 デバッグビルドのログは `.log/<plugin_name> Latest.log` に出ます。
 追いかける場合は macOS / Linux では `tail -f ".log/<plugin_name> Latest.log"`、Windows PowerShell では `Get-Content ".log\<plugin_name> Latest.log" -Wait` などを使います。
+ログレベルを上書きする場合は `RUST_LOG` 環境変数を使ってください。
+Debug build では、process 環境変数に `RUST_LOG` が無い場合、repository root の `.env` に書いた `RUST_LOG` も参照します。
+`PluginEntry::init` / `PluginEntry::deinit` からログを書かないでください。これらの callback は plugin scan や DSO unload の近くで呼ばれ得るため、File IO、stderr 書き込み、worker 起動、worker join も避けてください。
+
+### Plugin logging の責務
+
+`wrac_clap_adapter` を使う plugin は、`PluginEntry::log_config` からログ設定を返してください。
+Plugin 製品コードから `wrac_log::configure` や async file writer lifecycle API を直接呼ばないでください。logger の install と async file writer の lifecycle は adapter が管理します。
+Realtime 経路以外では通常の `log::*` macro を使い、realtime 経路では必要な場合だけ `wrac_log::rtdebug!` / `wrac_log::rtwarn!` を使ってください。
+
+Standalone app、service、test binary は `wrac_clap_adapter` を通らないため、`wrac_log::configure` または `wrac_log::init_test` で明示的に logger を初期化してください。

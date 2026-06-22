@@ -2,16 +2,40 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::factory::PluginRegistrationStorage;
 use crate::{PluginDescriptor, PluginInstance, PluginInstanceContext, PluginResult};
+pub use wrac_log::{LogConfig, LogOutput};
 
 pub struct EntryContext<'a> {
     pub plugin_path: Option<&'a str>,
 }
 
 pub trait PluginEntry: Send + Sync + 'static {
+    /// Provides process-wide logger configuration without opening files or writing to stderr.
+    ///
+    /// The adapter installs a lightweight logger during entry initialization. The
+    /// file destination is opened lazily on the first log write or the first plugin
+    /// instance, whichever comes first. Return a stable static configuration so
+    /// repeated entry initialization cannot change logger identity or destination.
+    ///
+    /// Plugins managed by this adapter must not call `wrac_log::configure` or the
+    /// async file-writer lifecycle APIs directly. Standalone apps and other binaries
+    /// that do not enter through this adapter are responsible for calling
+    /// `wrac_log::configure` themselves.
+    fn log_config(&'static self) -> Option<&'static LogConfig>;
+
+    /// Initializes entry-level state.
+    ///
+    /// This callback belongs to the DSO entry lifecycle and may run during plugin
+    /// scanning without any plugin instance. Implementations must not log, open
+    /// files, write to stderr, or start worker threads here.
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
 
+    /// Releases entry-level state.
+    ///
+    /// This callback can run close to DSO unload. Implementations must not log,
+    /// perform file I/O, or join worker threads here; per-instance cleanup must
+    /// happen when the last plugin instance is destroyed.
     fn deinit(&self) {}
 
     fn attach_main_thread(&self) {}
@@ -36,11 +60,18 @@ pub struct EntryRegistration {
     pub(crate) entry: &'static dyn PluginEntry,
     storage: OnceLock<PluginRegistrationStorage>,
     init_state: Mutex<EntryInitState>,
+    instance_state: Mutex<EntryInstanceState>,
 }
 
 #[derive(Debug, Default)]
 struct EntryInitState {
     count: u32,
+}
+
+#[derive(Default)]
+struct EntryInstanceState {
+    count: u32,
+    async_file_logger_guard: Option<wrac_log::__adapter::AsyncFileLoggerGuard>,
 }
 
 // Safety: `entry` is immutable and all mutable state is synchronized. Factory queries
@@ -54,6 +85,10 @@ impl EntryRegistration {
             entry,
             storage: OnceLock::new(),
             init_state: Mutex::new(EntryInitState { count: 0 }),
+            instance_state: Mutex::new(EntryInstanceState {
+                count: 0,
+                async_file_logger_guard: None,
+            }),
         }
     }
 
@@ -95,4 +130,26 @@ pub(crate) fn reset_entry_init_count(registration: &'static EntryRegistration) {
         .lock()
         .expect("entry init state mutex poisoned");
     state.count = 0;
+}
+
+pub(crate) fn retain_entry_instance(registration: &'static EntryRegistration) {
+    let mut state = registration
+        .instance_state
+        .lock()
+        .expect("entry instance state mutex poisoned");
+    state.count = state.count.saturating_add(1);
+    if state.count == 1 {
+        state.async_file_logger_guard = wrac_log::__adapter::start_async_file_logger();
+    }
+}
+
+pub(crate) fn release_entry_instance(registration: &'static EntryRegistration) {
+    let mut state = registration
+        .instance_state
+        .lock()
+        .expect("entry instance state mutex poisoned");
+    state.count = state.count.saturating_sub(1);
+    if state.count == 0 {
+        state.async_file_logger_guard = None;
+    }
 }

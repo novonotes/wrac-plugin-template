@@ -39,7 +39,7 @@ pub use api::{RawParamFlushContext, RawProcessContext};
 pub use descriptor::{
     AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
 };
-pub use entry::{EntryContext, PluginEntry, PluginFactory};
+pub use entry::{EntryContext, LogConfig, LogOutput, PluginEntry, PluginFactory};
 pub use events::{
     EventLists, InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent,
     NoteExpressionEvent, OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents,

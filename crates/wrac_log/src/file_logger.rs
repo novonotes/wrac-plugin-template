@@ -3,57 +3,70 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
+use std::thread::JoinHandle;
 use time::{OffsetDateTime, macros::format_description};
 
 const MAX_LOG_FILES: usize = 30;
 const DEFAULT_RECENT_LOG_MAX_FILES: usize = 30;
 const DEFAULT_RECENT_LOG_MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS: u32 = 1000;
+const ASYNC_LOG_QUEUE_CAPACITY: usize = 4096;
+const ASYNC_MODE: u8 = 0;
+const BLOCKING_MODE: u8 = 1;
 
 static INIT: Once = Once::new();
 static CURRENT_LOG_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static CURRENT_LOG_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static RT_SAFE_LOGGER: OnceLock<&'static WracLogger> = OnceLock::new();
+static FILE_WRITER: OnceLock<LazyFileWriter> = OnceLock::new();
+static ACTIVE_PLUGIN_INSTANCES: AtomicU32 = AtomicU32::new(0);
 
-/// Implementation for [`crate::init!`].
-///
-/// Prefer calling the macro so `manifest_dir` is captured from the plugin crate,
-/// not from `wrac_log`.
-pub fn init_impl(manifest_dir: Option<&'static str>, app_name: &str) {
+/// File logging configuration supplied by the plugin adapter.
+#[derive(Clone, Copy, Debug)]
+pub struct LogConfig {
+    pub app_name: &'static str,
+    pub output: LogOutput,
+    debug_dotenv_search_dir: Option<&'static str>,
+}
+
+/// Destination policy for WRAC file logging.
+#[derive(Clone, Copy, Debug)]
+pub enum LogOutput {
+    /// Use `WRAC_LOG_DIR` when set, otherwise use the release user log directory.
+    /// Debug builds use `debug_log_dir` when provided.
+    DefaultPluginLogDir {
+        debug_log_dir: Option<&'static str>,
+    },
+    Directory(&'static str),
+    File(&'static str),
+    Stderr,
+}
+
+impl LogConfig {
+    /// Creates a standard WRAC file-log configuration.
+    ///
+    /// `debug_log_dir` is used only for debug builds. Release builds use the
+    /// platform user log directory unless `WRAC_LOG_DIR` overrides it.
+    pub const fn new(app_name: &'static str, debug_log_dir: Option<&'static str>) -> Self {
+        Self {
+            app_name,
+            output: LogOutput::DefaultPluginLogDir { debug_log_dir },
+            debug_dotenv_search_dir: debug_log_dir,
+        }
+    }
+}
+
+/// Installs the lightweight WRAC logger without touching the filesystem.
+pub fn configure(config: &'static LogConfig) {
     INIT.call_once(|| {
-        let dotenv_rust_log = rust_log_from_debug_dotenv(manifest_dir);
-
-        // Explicit environment configuration is useful for host-driven debugging and CI.
-        if let Ok(log_dir) = std::env::var("WRAC_LOG_DIR") {
-            init_with_dir(&log_dir, app_name, dotenv_rust_log.as_deref());
-            return;
+        let writer = LazyFileWriter::new(*config);
+        let writer_for_runtime = writer.clone();
+        if let Some(writer) = install_lazy_logger(writer, writer_for_runtime) {
+            let _ = FILE_WRITER.set(writer);
         }
-
-        // Debug builds should make local development logs easy to find in the repository.
-        #[cfg(debug_assertions)]
-        if let Some(manifest_dir) = manifest_dir {
-            let log_dir = Path::new(manifest_dir).join("../.log");
-            if let Some(log_dir_str) = log_dir.to_str() {
-                init_with_dir(log_dir_str, app_name, dotenv_rust_log.as_deref());
-                return;
-            }
-        }
-
-        // Release builds use a user log directory so installed plugins can keep logs
-        // without depending on the build tree.
-        #[cfg(not(debug_assertions))]
-        {
-            let _ = manifest_dir;
-            if let Some(log_dir) = resolve_release_log_dir(app_name) {
-                init_with_dir(log_dir.to_string_lossy().as_ref(), app_name, None);
-                return;
-            }
-        }
-
-        #[cfg(debug_assertions)]
-        let _ = app_name;
-        init_stderr(dotenv_rust_log.as_deref());
+        crate::rt::init_rt_buffer();
     });
 }
 
@@ -98,6 +111,35 @@ pub fn collect_recent_log_files(options: RecentLogFilesOptions) -> std::io::Resu
     let current_log_file = current_log_file()
         .ok_or_else(|| std::io::Error::other("wrac_log is not writing to a log file"))?;
     collect_recent_log_files_from_current(&current_log_file, &options)
+}
+
+/// Keeps the asynchronous file logger running while this guard is alive.
+///
+/// Dropping the last guard stops the worker thread and joins it. After that, the
+/// installed logger remains usable and writes to the same destinations synchronously.
+pub struct AsyncFileLoggerGuard {
+    writer: LazyFileWriter,
+}
+
+/// Starts the asynchronous file logger and returns its lifetime guard.
+///
+/// This function returns `None` when no WRAC logger was installed, for example when
+/// another logger implementation already owns the global `log` facade.
+pub fn start_async_file_logger() -> Option<AsyncFileLoggerGuard> {
+    let writer = FILE_WRITER.get()?.clone();
+    if ACTIVE_PLUGIN_INSTANCES.fetch_add(1, Ordering::AcqRel) == 0 {
+        writer.ensure_initialized();
+        writer.start();
+    }
+    Some(AsyncFileLoggerGuard { writer })
+}
+
+impl Drop for AsyncFileLoggerGuard {
+    fn drop(&mut self) {
+        if ACTIVE_PLUGIN_INSTANCES.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.writer.shutdown();
+        }
+    }
 }
 
 fn collect_recent_log_files_from_current(
@@ -170,30 +212,6 @@ pub fn init_test() {
             init_stderr(None);
         }
     });
-}
-
-fn init_with_dir(log_dir: &str, app_name: &str, dotenv_rust_log: Option<&str>) {
-    let log_dir_path = Path::new(log_dir);
-    if !log_dir_path.exists()
-        && let Err(error) = std::fs::create_dir_all(log_dir_path)
-    {
-        eprintln!("Failed to create log directory '{log_dir}': {error}");
-        init_stderr(dotenv_rust_log);
-        return;
-    }
-
-    let file_stem = log_file_stem(app_name);
-    let latest_log_file = latest_log_file_path(log_dir_path, &file_stem);
-    // Keep a stable Latest filename for users while preserving the previous session
-    // before the new logger appends current-session output.
-    if let Err(error) = archive_existing_latest_log(&latest_log_file, &file_stem) {
-        eprintln!(
-            "Failed to archive latest log file '{}': {error}",
-            latest_log_file.display(),
-        );
-    }
-    rotate_logs(log_dir_path, &file_stem);
-    init_with_file(&latest_log_file, dotenv_rust_log);
 }
 
 fn rotate_logs(log_dir: &Path, file_stem: &str) {
@@ -304,12 +322,12 @@ fn log_file_stem(app_name: &str) -> String {
 }
 
 #[cfg(debug_assertions)]
-fn rust_log_from_debug_dotenv(manifest_dir: Option<&str>) -> Option<String> {
+fn rust_log_from_debug_dotenv(search_dir: Option<&Path>) -> Option<String> {
     if std::env::var("RUST_LOG").is_ok() {
         return None;
     }
 
-    let dotenv_path = debug_dotenv_path(manifest_dir?)?;
+    let dotenv_path = debug_dotenv_path(search_dir?)?;
     let Ok(content) = std::fs::read_to_string(&dotenv_path) else {
         return None;
     };
@@ -317,17 +335,16 @@ fn rust_log_from_debug_dotenv(manifest_dir: Option<&str>) -> Option<String> {
 }
 
 #[cfg(not(debug_assertions))]
-fn rust_log_from_debug_dotenv(manifest_dir: Option<&str>) -> Option<String> {
-    let _ = manifest_dir;
+fn rust_log_from_debug_dotenv(search_dir: Option<&Path>) -> Option<String> {
+    let _ = search_dir;
     None
 }
 
 #[cfg(debug_assertions)]
-fn debug_dotenv_path(manifest_dir: &str) -> Option<PathBuf> {
-    let start = Path::new(manifest_dir);
+fn debug_dotenv_path(search_dir: &Path) -> Option<PathBuf> {
     let mut fallback = None;
 
-    for ancestor in start.ancestors() {
+    for ancestor in search_dir.ancestors() {
         let candidate = ancestor.join(".env");
         if ancestor.join(".git").exists() {
             if candidate.is_file() {
@@ -436,7 +453,7 @@ fn init_stderr(dotenv_rust_log: Option<&str>) {
     let mut builder = Builder::from_default_env();
     apply_default_filter(&mut builder, dotenv_rust_log);
     builder.target(Target::Stderr);
-    install_logger(builder);
+    install_logger(builder, None);
     crate::rt::init_rt_buffer();
 }
 
@@ -456,13 +473,113 @@ fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
             record_current_log_paths(Some(canonical_log_file));
             let mut builder = Builder::from_default_env();
             apply_default_filter(&mut builder, dotenv_rust_log);
-            builder.target(Target::Pipe(Box::new(FileAndStderr::new(file))));
-            install_logger(builder);
+            let writer = LazyFileWriter::from_open_file(file);
+            let writer_for_shutdown = writer.clone();
+            builder.target(Target::Pipe(Box::new(writer)));
+            if let Some(writer) = install_logger(builder, Some(writer_for_shutdown)) {
+                let _ = FILE_WRITER.set(writer);
+            }
             crate::rt::init_rt_buffer();
         }
         Err(error) => {
             eprintln!("Failed to open log file '{}': {error}", log_file.display());
             init_stderr(dotenv_rust_log);
+        }
+    }
+}
+
+fn initialize_log_destination(config: LogConfig) -> LogDestination {
+    match resolve_log_file_path(&config) {
+        Some(log_file) => {
+            let Some(file_stem) = log_file
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_suffix(" Latest.log"))
+                .map(str::to_string)
+            else {
+                return open_log_file_destination(&log_file);
+            };
+            if let Some(log_dir) = log_file.parent() {
+                if !log_dir.exists()
+                    && let Err(error) = std::fs::create_dir_all(log_dir)
+                {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "Failed to create log directory '{}': {error}",
+                        log_dir.display()
+                    );
+                    record_current_log_paths(None);
+                    return LogDestination::Stderr;
+                }
+                if let Err(error) = archive_existing_latest_log(&log_file, &file_stem) {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "Failed to archive latest log file '{}': {error}",
+                        log_file.display()
+                    );
+                }
+                rotate_logs(log_dir, &file_stem);
+            }
+            open_log_file_destination(&log_file)
+        }
+        None => {
+            record_current_log_paths(None);
+            LogDestination::Stderr
+        }
+    }
+}
+
+fn resolve_log_file_path(config: &LogConfig) -> Option<PathBuf> {
+    match &config.output {
+        LogOutput::Stderr => None,
+        LogOutput::File(path) => Some(PathBuf::from(path)),
+        LogOutput::Directory(path) => Some(latest_log_file_path(
+            Path::new(path),
+            &log_file_stem(config.app_name),
+        )),
+        LogOutput::DefaultPluginLogDir { debug_log_dir } => {
+            if let Ok(log_dir) = std::env::var("WRAC_LOG_DIR") {
+                return Some(latest_log_file_path(
+                    Path::new(&log_dir),
+                    &log_file_stem(config.app_name),
+                ));
+            }
+            #[cfg(debug_assertions)]
+            {
+                debug_log_dir.map(|log_dir| {
+                    latest_log_file_path(Path::new(log_dir), &log_file_stem(config.app_name))
+                })
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = debug_log_dir;
+                resolve_release_log_dir(config.app_name)
+                    .map(|log_dir| latest_log_file_path(&log_dir, &log_file_stem(config.app_name)))
+            }
+        }
+    }
+}
+
+fn open_log_file_destination(log_file: &Path) -> LogDestination {
+    if let Some(parent) = log_file.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match OpenOptions::new().create(true).append(true).open(log_file) {
+        Ok(file) => {
+            let canonical_log_file = log_file
+                .canonicalize()
+                .unwrap_or_else(|_| log_file.to_path_buf());
+            record_current_log_paths(Some(canonical_log_file));
+            LogDestination::File(Arc::new(Mutex::new(file)))
+        }
+        Err(error) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "Failed to open log file '{}': {error}",
+                log_file.display()
+            );
+            record_current_log_paths(None);
+            LogDestination::Stderr
         }
     }
 }
@@ -491,13 +608,50 @@ fn apply_default_filter(builder: &mut Builder, dotenv_rust_log: Option<&str>) {
     }
 }
 
-fn install_logger(mut builder: Builder) {
-    let logger = WracLogger {
-        inner: builder.build(),
-    };
-    let max_level = logger.inner.filter();
-    crate::rt::set_rt_fallback_max_level(max_level);
+fn build_file_logger(config: LogConfig, writer: LazyFileWriter) -> Logger {
+    let dotenv_rust_log = rust_log_from_debug_dotenv(config.debug_dotenv_search_dir.map(Path::new));
+    let mut builder = Builder::from_default_env();
+    apply_default_filter(&mut builder, dotenv_rust_log.as_deref());
+    builder.target(Target::Pipe(Box::new(writer)));
+    builder.build()
+}
 
+fn install_lazy_logger(
+    writer: LazyFileWriter,
+    file_writer: LazyFileWriter,
+) -> Option<LazyFileWriter> {
+    let config = writer.config_for_logger();
+    let logger = WracLogger {
+        inner: LoggerInner::Lazy {
+            logger: OnceLock::new(),
+            config,
+            writer,
+        },
+        fallback_max_level: default_level_filter(),
+    };
+    crate::rt::set_rt_fallback_max_level(logger.fallback_max_level);
+    install_wrac_logger(logger, Some(file_writer), LevelFilter::Trace)
+}
+
+fn install_logger(
+    mut builder: Builder,
+    file_writer: Option<LazyFileWriter>,
+) -> Option<LazyFileWriter> {
+    let inner = builder.build();
+    let max_level = inner.filter();
+    let logger = WracLogger {
+        inner: LoggerInner::Immediate(inner),
+        fallback_max_level: max_level,
+    };
+    crate::rt::set_rt_fallback_max_level(max_level);
+    install_wrac_logger(logger, file_writer, max_level)
+}
+
+fn install_wrac_logger(
+    logger: WracLogger,
+    file_writer: Option<LazyFileWriter>,
+    max_level: LevelFilter,
+) -> Option<LazyFileWriter> {
     let logger = Box::new(logger);
     let logger_ptr = Box::into_raw(logger);
     // `log` stores a `'static` logger reference. On failure, another logger is already
@@ -508,9 +662,14 @@ fn install_logger(mut builder: Builder) {
             let logger = unsafe { &*logger_ptr };
             let _ = RT_SAFE_LOGGER.set(logger);
             log::set_max_level(max_level);
+            file_writer
         }
         Err(_) => {
             drop(unsafe { Box::from_raw(logger_ptr) });
+            if let Some(writer) = file_writer {
+                writer.shutdown();
+            }
+            None
         }
     }
 }
@@ -518,7 +677,7 @@ fn install_logger(mut builder: Builder) {
 pub(crate) fn rt_logger_enabled(level: Level, target: &'static str) -> Option<bool> {
     let logger = RT_SAFE_LOGGER.get()?;
     let metadata = Metadata::builder().level(level).target(target).build();
-    Some(logger.enabled(&metadata))
+    Some(logger.rt_enabled(&metadata))
 }
 
 fn default_level_filter() -> LevelFilter {
@@ -532,48 +691,267 @@ fn default_level_filter() -> LevelFilter {
     }
 }
 
-struct FileAndStderr {
-    file: Arc<Mutex<std::fs::File>>,
+#[derive(Clone)]
+struct LazyFileWriter {
+    shared: Arc<LazyFileWriterShared>,
 }
 
-impl FileAndStderr {
-    fn new(file: std::fs::File) -> Self {
-        Self {
-            file: Arc::new(Mutex::new(file)),
+struct LazyFileWriterShared {
+    config: Mutex<Option<LogConfig>>,
+    destination: Mutex<LogDestination>,
+    sender: Mutex<Option<mpsc::SyncSender<Vec<u8>>>>,
+    worker: Mutex<Option<JoinHandle<()>>>,
+    shutdown: Mutex<()>,
+    mode: AtomicU8,
+    dropped_records: AtomicU64,
+    initialized: AtomicBool,
+}
+
+impl LazyFileWriter {
+    fn new(config: LogConfig) -> Self {
+        let shared = Arc::new(LazyFileWriterShared {
+            config: Mutex::new(Some(config)),
+            destination: Mutex::new(LogDestination::Uninitialized),
+            sender: Mutex::new(None),
+            worker: Mutex::new(None),
+            shutdown: Mutex::new(()),
+            mode: AtomicU8::new(BLOCKING_MODE),
+            dropped_records: AtomicU64::new(0),
+            initialized: AtomicBool::new(false),
+        });
+        Self { shared }
+    }
+
+    fn from_open_file(file: std::fs::File) -> Self {
+        let shared = Arc::new(LazyFileWriterShared {
+            config: Mutex::new(None),
+            destination: Mutex::new(LogDestination::File(Arc::new(Mutex::new(file)))),
+            sender: Mutex::new(None),
+            worker: Mutex::new(None),
+            shutdown: Mutex::new(()),
+            mode: AtomicU8::new(BLOCKING_MODE),
+            dropped_records: AtomicU64::new(0),
+            initialized: AtomicBool::new(true),
+        });
+        Self { shared }
+    }
+
+    fn config_for_logger(&self) -> LogConfig {
+        self.shared
+            .config
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("lazy file logger config must exist before initialization")
+            .clone()
+    }
+
+    fn ensure_initialized(&self) {
+        if self.shared.initialized.load(Ordering::Acquire) {
+            return;
+        }
+
+        let _shutdown = self.shared.shutdown.lock().unwrap();
+        if self.shared.initialized.load(Ordering::Acquire) {
+            return;
+        }
+
+        let config = self.shared.config.lock().unwrap().take();
+        let destination = config
+            .map(initialize_log_destination)
+            .unwrap_or(LogDestination::Stderr);
+        *self.shared.destination.lock().unwrap() = destination;
+        self.shared.initialized.store(true, Ordering::Release);
+    }
+
+    fn start(&self) {
+        self.ensure_initialized();
+        let _shutdown = self.shared.shutdown.lock().unwrap();
+        if self.shared.worker.lock().unwrap().is_some() {
+            return;
+        }
+
+        let (sender, receiver) = mpsc::sync_channel(ASYNC_LOG_QUEUE_CAPACITY);
+        let worker_shared = self.shared.clone();
+        match std::thread::Builder::new()
+            .name("wrac-log-writer".to_string())
+            .spawn(move || async_file_writer_worker(worker_shared, receiver))
+        {
+            Ok(worker) => {
+                *self.shared.sender.lock().unwrap() = Some(sender);
+                *self.shared.worker.lock().unwrap() = Some(worker);
+                self.shared.mode.store(ASYNC_MODE, Ordering::Release);
+            }
+            Err(error) => {
+                let message =
+                    format!("[wrac_log] failed to start async file log worker: {error}\n");
+                let _ = self.write_blocking(message.as_bytes());
+                self.shared.mode.store(BLOCKING_MODE, Ordering::Release);
+            }
+        }
+    }
+
+    fn shutdown(&self) {
+        let _shutdown = self.shared.shutdown.lock().unwrap();
+        self.shared.mode.store(BLOCKING_MODE, Ordering::Release);
+        drop(self.shared.sender.lock().unwrap().take());
+        if let Some(worker) = self.shared.worker.lock().unwrap().take() {
+            let _ = worker.join();
+        }
+    }
+
+    fn write_blocking(&self, buf: &[u8]) -> std::io::Result<()> {
+        write_log_bytes_blocking(&mut self.shared.destination.lock().unwrap(), buf)
+    }
+
+    fn flush_blocking(&self) -> std::io::Result<()> {
+        flush_log_outputs(&mut self.shared.destination.lock().unwrap())
+    }
+}
+
+enum LoggerInner {
+    Immediate(Logger),
+    Lazy {
+        logger: OnceLock<Logger>,
+        config: LogConfig,
+        writer: LazyFileWriter,
+    },
+}
+
+struct WracLogger {
+    inner: LoggerInner,
+    fallback_max_level: LevelFilter,
+}
+
+impl WracLogger {
+    fn logger(&self) -> &Logger {
+        match &self.inner {
+            LoggerInner::Immediate(logger) => logger,
+            LoggerInner::Lazy {
+                logger,
+                config,
+                writer,
+            } => {
+                let logger =
+                    logger.get_or_init(|| build_file_logger(config.clone(), writer.clone()));
+                let max_level = logger.filter();
+                crate::rt::set_rt_fallback_max_level(max_level);
+                log::set_max_level(max_level);
+                logger
+            }
+        }
+    }
+
+    fn rt_enabled(&self, metadata: &Metadata<'_>) -> bool {
+        match &self.inner {
+            LoggerInner::Immediate(logger) => logger.enabled(metadata),
+            LoggerInner::Lazy { logger, .. } => logger
+                .get()
+                .map(|logger| logger.enabled(metadata))
+                .unwrap_or_else(|| metadata.level() <= self.fallback_max_level),
         }
     }
 }
 
-struct WracLogger {
-    inner: Logger,
-}
-
 impl Log for WracLogger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        self.inner.enabled(metadata)
+        self.logger().enabled(metadata)
     }
 
     fn log(&self, record: &Record<'_>) {
-        self.inner.log(record);
+        self.logger().log(record);
     }
 
     fn flush(&self) {
-        self.inner.flush();
+        self.logger().flush();
     }
 }
 
-impl Write for FileAndStderr {
+impl Write for LazyFileWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        std::io::stderr().write_all(buf)?;
-        let mut file = self.file.lock().unwrap();
-        file.write_all(buf)?;
+        self.ensure_initialized();
+        if ACTIVE_PLUGIN_INSTANCES.load(Ordering::Acquire) > 0 {
+            self.start();
+        }
+
+        if self.shared.mode.load(Ordering::Acquire) == ASYNC_MODE {
+            let send_result = self
+                .shared
+                .sender
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|sender| sender.try_send(buf.to_vec()));
+            match send_result {
+                Some(Ok(())) => return Ok(buf.len()),
+                Some(Err(mpsc::TrySendError::Full(_))) => {
+                    self.shared.dropped_records.fetch_add(1, Ordering::Relaxed);
+                    return Ok(buf.len());
+                }
+                Some(Err(mpsc::TrySendError::Disconnected(_))) | None => {
+                    self.shared.mode.store(BLOCKING_MODE, Ordering::Release);
+                }
+            }
+        }
+
+        let _shutdown = self.shared.shutdown.lock().unwrap();
+        self.write_blocking(buf)?;
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        std::io::stderr().flush()?;
-        let mut file = self.file.lock().unwrap();
-        file.flush()
+        if self.shared.mode.load(Ordering::Acquire) == ASYNC_MODE {
+            return Ok(());
+        }
+        self.flush_blocking()
+    }
+}
+
+enum LogDestination {
+    Uninitialized,
+    File(Arc<Mutex<std::fs::File>>),
+    Stderr,
+}
+
+fn async_file_writer_worker(shared: Arc<LazyFileWriterShared>, receiver: mpsc::Receiver<Vec<u8>>) {
+    while let Ok(buf) = receiver.recv() {
+        write_dropped_record_notice_if_needed(&shared);
+        let _ = write_log_bytes_blocking(&mut shared.destination.lock().unwrap(), &buf);
+    }
+    write_dropped_record_notice_if_needed(&shared);
+    let _ = flush_log_outputs(&mut shared.destination.lock().unwrap());
+}
+
+fn write_dropped_record_notice_if_needed(shared: &LazyFileWriterShared) {
+    let dropped = shared.dropped_records.swap(0, Ordering::AcqRel);
+    if dropped == 0 {
+        return;
+    }
+    let message = format!("[wrac_log] dropped {dropped} async file log records\n");
+    let _ = write_log_bytes_blocking(&mut shared.destination.lock().unwrap(), message.as_bytes());
+}
+
+fn write_log_bytes_blocking(destination: &mut LogDestination, buf: &[u8]) -> std::io::Result<()> {
+    match destination {
+        LogDestination::Uninitialized => Ok(()),
+        LogDestination::Stderr => std::io::stderr().write_all(buf),
+        LogDestination::File(file) => {
+            std::io::stderr().write_all(buf)?;
+            let mut file = file.lock().unwrap();
+            file.write_all(buf)
+        }
+    }
+}
+
+fn flush_log_outputs(destination: &mut LogDestination) -> std::io::Result<()> {
+    match destination {
+        LogDestination::Uninitialized => Ok(()),
+        LogDestination::Stderr => std::io::stderr().flush(),
+        LogDestination::File(file) => {
+            std::io::stderr().flush()?;
+            let mut file = file.lock().unwrap();
+            file.flush()
+        }
     }
 }
 
@@ -595,226 +973,4 @@ fn get_timestamp() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn init_test_is_idempotent() {
-        init_test();
-        init_test();
-    }
-
-    #[test]
-    fn test_name_and_timestamp_are_available() {
-        assert!(get_test_name().contains("test"));
-
-        let timestamp = get_timestamp();
-        assert_eq!(timestamp.len(), 19);
-        assert_eq!(timestamp.chars().nth(8).unwrap(), '_');
-        assert_eq!(timestamp.chars().nth(15).unwrap(), '_');
-    }
-
-    #[test]
-    fn logging_is_thread_safe_after_initialization() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::thread;
-
-        let counter = Arc::new(AtomicUsize::new(0));
-        let handles = (0..10)
-            .map(|i| {
-                let counter = counter.clone();
-                thread::spawn(move || {
-                    for j in 0..100 {
-                        log::info!("Thread {i} - Message {j}");
-                        counter.fetch_add(1, Ordering::SeqCst);
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        assert_eq!(counter.load(Ordering::SeqCst), 1000);
-    }
-
-    #[test]
-    fn log_file_stem_replaces_path_unsafe_characters() {
-        assert_eq!(log_file_stem("TestApp"), "TestApp");
-        assert_eq!(log_file_stem("Bad/Name:Plugin"), "Bad_Name_Plugin");
-        assert_eq!(log_file_stem("   "), "Application");
-    }
-
-    #[test]
-    fn archive_existing_latest_log_moves_latest_to_timestamped_log() {
-        let temp_dir = TempDir::new("wrac_log_archive_latest");
-        let latest = temp_dir.path().join("TestApp Latest.log");
-        std::fs::write(&latest, "previous session").unwrap();
-
-        archive_existing_latest_log(&latest, "TestApp").unwrap();
-
-        assert!(!latest.exists());
-        let archived = log_files(temp_dir.path());
-        assert_eq!(archived.len(), 1);
-        let archived_name = archived[0].file_name().unwrap().to_string_lossy();
-        assert!(archived_name.starts_with("TestApp "));
-        assert!(archived_name.ends_with(".log"));
-        assert_ne!(archived_name, "TestApp Latest.log");
-        assert_eq!(
-            std::fs::read_to_string(&archived[0]).unwrap(),
-            "previous session",
-        );
-    }
-
-    #[test]
-    fn collect_recent_log_files_includes_latest_first_and_respects_limit() {
-        let temp_dir = TempDir::new("wrac_log_collect_recent");
-        let latest = temp_dir.path().join("TestApp Latest.log");
-        let archived1 = temp_dir.path().join("TestApp 20260101_000000_000.log");
-        let archived2 = temp_dir.path().join("TestApp 20260102_000000_000.log");
-        let other = temp_dir.path().join("Other 20260103_000000_000.log");
-        std::fs::write(&latest, "latest").unwrap();
-        std::fs::write(&archived1, "archived1").unwrap();
-        std::fs::write(&archived2, "archived2").unwrap();
-        std::fs::write(&other, "other").unwrap();
-
-        let files = collect_recent_log_files_from_current(
-            &latest,
-            &RecentLogFilesOptions {
-                max_files: 2,
-                max_total_bytes: 1024,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(files.len(), 2);
-        assert_eq!(files[0], latest);
-        assert!(files[1] == archived1 || files[1] == archived2);
-        assert!(!files.contains(&other));
-    }
-
-    #[test]
-    fn rotate_logs_keeps_max_archived_logs() {
-        let temp_dir = TempDir::new("wrac_log_rotate");
-        for index in 0..(MAX_LOG_FILES + 2) {
-            let file = temp_dir
-                .path()
-                .join(format!("TestApp 20260101_000000_{index:03}.log"));
-            std::fs::write(file, format!("log {index}")).unwrap();
-        }
-        std::fs::write(temp_dir.path().join("TestApp Latest.log"), "latest").unwrap();
-
-        rotate_logs(temp_dir.path(), "TestApp");
-
-        let archived = log_files(temp_dir.path())
-            .into_iter()
-            .filter(|path| path.file_name().unwrap().to_string_lossy() != "TestApp Latest.log")
-            .collect::<Vec<_>>();
-        assert_eq!(archived.len(), MAX_LOG_FILES);
-        assert!(temp_dir.path().join("TestApp Latest.log").exists());
-    }
-
-    #[test]
-    fn parse_dotenv_rust_log_reads_last_non_empty_rust_log() {
-        let content = r#"
-            # wrac_log reads this only in development builds
-            OTHER=value
-            export RUST_LOG="wrac_gain_plugin=debug,wrac_log=trace"
-            RUST_LOG=wrac_gain_plugin=info # the last definition wins
-        "#;
-
-        assert_eq!(
-            parse_dotenv_rust_log(content).as_deref(),
-            Some("wrac_gain_plugin=info"),
-        );
-    }
-
-    #[test]
-    fn parse_dotenv_rust_log_ignores_empty_rust_log() {
-        assert_eq!(parse_dotenv_rust_log("RUST_LOG=\n"), None);
-    }
-
-    #[test]
-    fn debug_dotenv_path_prefers_repository_root() {
-        let temp_dir = TempDir::new("wrac_log_dotenv_root");
-        std::fs::create_dir(temp_dir.path().join(".git")).unwrap();
-        std::fs::write(temp_dir.path().join(".env"), "RUST_LOG=info").unwrap();
-
-        let crate_dir = temp_dir.path().join("plugins").join("gain");
-        std::fs::create_dir_all(&crate_dir).unwrap();
-        std::fs::write(crate_dir.join(".env"), "RUST_LOG=trace").unwrap();
-
-        let expected = temp_dir.path().join(".env");
-        assert_eq!(
-            debug_dotenv_path(crate_dir.to_str().unwrap()).as_deref(),
-            Some(expected.as_path()),
-        );
-    }
-
-    #[test]
-    fn debug_dotenv_path_falls_back_to_nearest_dotenv_when_repository_root_has_none() {
-        let temp_dir = TempDir::new("wrac_log_dotenv_fallback");
-        std::fs::create_dir(temp_dir.path().join(".git")).unwrap();
-
-        let crate_dir = temp_dir.path().join("plugins").join("gain");
-        std::fs::create_dir_all(&crate_dir).unwrap();
-        std::fs::write(crate_dir.join(".env"), "RUST_LOG=trace").unwrap();
-
-        let expected = crate_dir.join(".env");
-        assert_eq!(
-            debug_dotenv_path(crate_dir.to_str().unwrap()).as_deref(),
-            Some(expected.as_path()),
-        );
-    }
-
-    #[test]
-    fn parse_dotenv_rust_log_strips_comment_after_quoted_value() {
-        assert_eq!(
-            parse_dotenv_rust_log(r#"RUST_LOG="debug" # comment"#).as_deref(),
-            Some("debug"),
-        );
-        assert_eq!(
-            parse_dotenv_rust_log("RUST_LOG='wrac_gain_plugin=trace' # comment").as_deref(),
-            Some("wrac_gain_plugin=trace"),
-        );
-    }
-
-    struct TempDir {
-        path: PathBuf,
-    }
-
-    impl TempDir {
-        fn new(prefix: &str) -> Self {
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let path = std::env::temp_dir().join(format!("{prefix}_{nanos}"));
-            std::fs::create_dir_all(&path).unwrap();
-            Self { path }
-        }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn log_files(dir: &Path) -> Vec<PathBuf> {
-        let mut files = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|extension| extension == "log"))
-            .collect::<Vec<_>>();
-        files.sort();
-        files
-    }
-}
+mod tests;

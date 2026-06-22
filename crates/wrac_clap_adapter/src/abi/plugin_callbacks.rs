@@ -27,6 +27,7 @@ use super::{
     audio_ports, configurable_audio_ports, gui_extension, latency_extension, note_ports,
     params_extension, render_extension, state_extension, tail_extension, vst3_extension,
 };
+use crate::entry::release_entry_instance;
 use crate::{
     ActivateContext, PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
 };
@@ -63,8 +64,9 @@ pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool 
             log::warn!("plugin.init: product factory returned no plugin core");
             return false;
         };
-        // Product construction initializes logging. Emit immediately afterward so
-        // wrapper/host routing is visible before capability queries or GUI attachment.
+        // Instance creation starts plugin logging before CLAP init. Emit immediately
+        // after product construction so wrapper/host routing is visible before
+        // capability queries or GUI attachment.
         log::info!(
             "plugin.init: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
             instance.host_context.host.display_name,
@@ -200,6 +202,7 @@ pub(super) unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
         if detach_in_adapter {
             registration.entry.detach_main_thread();
         }
+        release_entry_instance(registration);
     });
 }
 

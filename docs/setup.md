@@ -151,3 +151,14 @@ If the package exposes multiple plugin products, pass `--plugin-id`; invalid plu
 
 Debug build logs are written to `.log/<plugin_name> Latest.log`.
 To follow the log, use `tail -f ".log/<plugin_name> Latest.log"` on macOS/Linux, or `Get-Content ".log\<plugin_name> Latest.log" -Wait` in Windows PowerShell.
+Use the `RUST_LOG` environment variable to override the default log level.
+In debug builds, WRAC also reads `RUST_LOG` from the repository root `.env` when the process environment does not provide it.
+Do not log from `PluginEntry::init` or `PluginEntry::deinit`; those callbacks may run during plugin scanning or DSO unload. Keep them free of file I/O, stderr writes, worker startup, and worker joins.
+
+### Plugin Logging Responsibilities
+
+Plugins using `wrac_clap_adapter` must provide logging configuration from `PluginEntry::log_config`.
+Do not call `wrac_log::configure` or the async file-writer lifecycle APIs from plugin product code; the adapter owns logger installation and the async file-writer lifecycle.
+Use regular `log::*` macros outside realtime paths, and use `wrac_log::rtdebug!` / `wrac_log::rtwarn!` only from realtime paths.
+
+Standalone apps, services, and test binaries do not enter through `wrac_clap_adapter`, so they must initialize logging explicitly with `wrac_log::configure` or `wrac_log::init_test`.

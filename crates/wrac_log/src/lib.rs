@@ -8,9 +8,14 @@ mod file_logger;
 mod rt;
 
 pub use file_logger::{
-    RecentLogFilesOptions, collect_recent_log_files, current_log_dir, current_log_file, init_impl,
-    init_test,
+    LogConfig, LogOutput, RecentLogFilesOptions, collect_recent_log_files, configure,
+    current_log_dir, current_log_file, init_test,
 };
+
+#[doc(hidden)]
+pub mod __adapter {
+    pub use crate::file_logger::{AsyncFileLoggerGuard, start_async_file_logger};
+}
 /// Macro support function used by the realtime log macros to check filtering.
 ///
 /// This remains public because exported macros refer to it through `$crate`.
@@ -24,31 +29,6 @@ pub use rt::rt_log_enabled as __rt_log_enabled;
 /// logging macros instead.
 pub use rt::write_rt_log as __write_rt_log;
 pub use rt::{RtDrainingRunLoopGuard, attach_rt_drain, drain_rt_logs_once};
-
-/// Initializes logging for a WRAC plugin.
-///
-/// This macro must be called from the plugin crate so `CARGO_MANIFEST_DIR` points at
-/// the caller. In debug builds, the default log directory is resolved as
-/// `{plugin_crate}/../.log`; calling the implementation function directly from this
-/// crate would resolve that path relative to `wrac_log` instead.
-///
-/// Initialization is process-wide and idempotent. The first call wins.
-///
-/// Output destination priority:
-/// 1. `WRAC_LOG_DIR`
-/// 2. Debug builds: `{plugin_crate}/../.log`
-/// 3. Release builds: the platform user log directory under `NovoNotes/{app_name}`
-/// 4. `stderr` when no file destination can be resolved
-///
-/// When writing to a file, the current session is written to
-/// `{app_name} Latest.log`; any previous latest log is archived with a timestamp and
-/// old archives are rotated.
-#[macro_export]
-macro_rules! init {
-    ($app_name:expr) => {
-        $crate::init_impl(option_env!("CARGO_MANIFEST_DIR"), $app_name)
-    };
-}
 
 #[macro_export]
 macro_rules! rttrace {
