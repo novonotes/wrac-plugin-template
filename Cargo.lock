@@ -556,7 +556,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1452,7 +1452,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "novonotes_run_loop"
 version = "0.6.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=e0b0db34d976459853f34c85b017a55ef92559aa#e0b0db34d976459853f34c85b017a55ef92559aa"
+source = "git+https://github.com/novonotes/wxp.git?rev=93d7ed412b7206351100e6a1970628d3bedab2cc#93d7ed412b7206351100e6a1970628d3bedab2cc"
 dependencies = [
  "core-foundation",
  "futures",
@@ -2037,7 +2037,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "run_loop_timer"
 version = "0.1.0"
-source = "git+https://github.com/novonotes/wxp.git?rev=e0b0db34d976459853f34c85b017a55ef92559aa#e0b0db34d976459853f34c85b017a55ef92559aa"
+source = "git+https://github.com/novonotes/wxp.git?rev=93d7ed412b7206351100e6a1970628d3bedab2cc#93d7ed412b7206351100e6a1970628d3bedab2cc"
 dependencies = [
  "novonotes_run_loop",
 ]
@@ -2708,7 +2708,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3185,7 +3185,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 [[package]]
 name = "wry"
 version = "0.55.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=e0b0db34d976459853f34c85b017a55ef92559aa#e0b0db34d976459853f34c85b017a55ef92559aa"
+source = "git+https://github.com/novonotes/wxp.git?rev=93d7ed412b7206351100e6a1970628d3bedab2cc#93d7ed412b7206351100e6a1970628d3bedab2cc"
 dependencies = [
  "base64",
  "block2 0.6.2",
@@ -3228,7 +3228,7 @@ dependencies = [
 [[package]]
 name = "wxp"
 version = "0.1.0-alpha.1"
-source = "git+https://github.com/novonotes/wxp.git?rev=e0b0db34d976459853f34c85b017a55ef92559aa#e0b0db34d976459853f34c85b017a55ef92559aa"
+source = "git+https://github.com/novonotes/wxp.git?rev=93d7ed412b7206351100e6a1970628d3bedab2cc#93d7ed412b7206351100e6a1970628d3bedab2cc"
 dependencies = [
  "async-trait",
  "directories",
