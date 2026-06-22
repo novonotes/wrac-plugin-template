@@ -1,5 +1,5 @@
-use env_logger::{Builder, Target};
-use log::LevelFilter;
+use env_logger::{Builder, Logger, Target};
+use log::{Level, LevelFilter, Log, Metadata, Record};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -14,6 +14,7 @@ const MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS: u32 = 1000;
 static INIT: Once = Once::new();
 static CURRENT_LOG_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static CURRENT_LOG_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
+static RT_SAFE_LOGGER: OnceLock<&'static WracLogger> = OnceLock::new();
 
 /// Implementation for [`crate::init!`].
 ///
@@ -435,7 +436,7 @@ fn init_stderr(dotenv_rust_log: Option<&str>) {
     let mut builder = Builder::from_default_env();
     apply_default_filter(&mut builder, dotenv_rust_log);
     builder.target(Target::Stderr);
-    let _ = builder.try_init();
+    install_logger(builder);
     crate::rt::init_rt_buffer();
 }
 
@@ -456,7 +457,7 @@ fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
             let mut builder = Builder::from_default_env();
             apply_default_filter(&mut builder, dotenv_rust_log);
             builder.target(Target::Pipe(Box::new(FileAndStderr::new(file))));
-            let _ = builder.try_init();
+            install_logger(builder);
             crate::rt::init_rt_buffer();
         }
         Err(error) => {
@@ -490,6 +491,36 @@ fn apply_default_filter(builder: &mut Builder, dotenv_rust_log: Option<&str>) {
     }
 }
 
+fn install_logger(mut builder: Builder) {
+    let logger = WracLogger {
+        inner: builder.build(),
+    };
+    let max_level = logger.inner.filter();
+    crate::rt::set_rt_fallback_max_level(max_level);
+
+    let logger = Box::new(logger);
+    let logger_ptr = Box::into_raw(logger);
+    // `log` stores a `'static` logger reference. On failure, another logger is already
+    // installed, so RT logging must avoid calling through that unknown implementation.
+    let set_logger_result = unsafe { log::set_logger(&*logger_ptr) };
+    match set_logger_result {
+        Ok(()) => {
+            let logger = unsafe { &*logger_ptr };
+            let _ = RT_SAFE_LOGGER.set(logger);
+            log::set_max_level(max_level);
+        }
+        Err(_) => {
+            drop(unsafe { Box::from_raw(logger_ptr) });
+        }
+    }
+}
+
+pub(crate) fn rt_logger_enabled(level: Level, target: &'static str) -> Option<bool> {
+    let logger = RT_SAFE_LOGGER.get()?;
+    let metadata = Metadata::builder().level(level).target(target).build();
+    Some(logger.enabled(&metadata))
+}
+
 fn default_level_filter() -> LevelFilter {
     #[cfg(debug_assertions)]
     {
@@ -510,6 +541,24 @@ impl FileAndStderr {
         Self {
             file: Arc::new(Mutex::new(file)),
         }
+    }
+}
+
+struct WracLogger {
+    inner: Logger,
+}
+
+impl Log for WracLogger {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        self.inner.enabled(metadata)
+    }
+
+    fn log(&self, record: &Record<'_>) {
+        self.inner.log(record);
+    }
+
+    fn flush(&self) {
+        self.inner.flush();
     }
 }
 

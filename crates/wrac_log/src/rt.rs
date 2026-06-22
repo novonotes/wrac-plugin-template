@@ -1,4 +1,4 @@
-use log::Level;
+use log::{Level, LevelFilter};
 use std::array;
 use std::cell::RefCell;
 use std::fmt::{self, Write as _};
@@ -13,6 +13,7 @@ const RT_TARGET_CAPACITY: usize = 96;
 const RT_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
 
 static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
+static RT_FALLBACK_MAX_LEVEL: AtomicU8 = AtomicU8::new(level_filter_to_u8(LevelFilter::Off));
 
 thread_local! {
     static RT_DRAIN_TIMER: RefCell<Weak<RtDrainInner>> = const { RefCell::new(Weak::new()) };
@@ -94,6 +95,26 @@ pub(crate) fn init_rt_buffer() {
     // Initialize from the non-realtime setup path so the first RT log write only
     // touches atomics and the fixed buffer.
     let _ = rt_log();
+}
+
+pub(crate) fn set_rt_fallback_max_level(level: LevelFilter) {
+    RT_FALLBACK_MAX_LEVEL.store(level_filter_to_u8(level), Ordering::Relaxed);
+}
+
+/// Returns whether a realtime log record should be written.
+///
+/// Exported macros call this before constructing `fmt::Arguments`, so disabled RT logs
+/// do not evaluate formatting arguments on the realtime thread.
+pub fn rt_log_enabled(level: Level, target: &'static str) -> bool {
+    if level > log::STATIC_MAX_LEVEL {
+        return false;
+    }
+
+    if let Some(enabled) = crate::file_logger::rt_logger_enabled(level, target) {
+        return enabled;
+    }
+
+    level <= u8_to_level_filter(RT_FALLBACK_MAX_LEVEL.load(Ordering::Relaxed))
 }
 
 /// Writes one realtime log record into the fixed-size global buffer.
@@ -310,6 +331,28 @@ const fn level_to_u8(level: Level) -> u8 {
         Level::Info => 3,
         Level::Debug => 4,
         Level::Trace => 5,
+    }
+}
+
+const fn level_filter_to_u8(level: LevelFilter) -> u8 {
+    match level {
+        LevelFilter::Off => 0,
+        LevelFilter::Error => 1,
+        LevelFilter::Warn => 2,
+        LevelFilter::Info => 3,
+        LevelFilter::Debug => 4,
+        LevelFilter::Trace => 5,
+    }
+}
+
+fn u8_to_level_filter(level: u8) -> LevelFilter {
+    match level {
+        1 => LevelFilter::Error,
+        2 => LevelFilter::Warn,
+        3 => LevelFilter::Info,
+        4 => LevelFilter::Debug,
+        5 => LevelFilter::Trace,
+        _ => LevelFilter::Off,
     }
 }
 

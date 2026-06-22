@@ -11,7 +11,13 @@ pub use file_logger::{
     RecentLogFilesOptions, collect_recent_log_files, current_log_dir, current_log_file, init_impl,
     init_test,
 };
-/// Macro support function used by the realtime log macros.
+/// Macro support function used by the realtime log macros to check filtering.
+///
+/// This remains public because exported macros refer to it through `$crate`.
+/// Plugin code should not call or rely on this symbol directly; use the `rt*`
+/// logging macros instead.
+pub use rt::rt_log_enabled as __rt_log_enabled;
+/// Macro support function used by the realtime log macros to write records.
 ///
 /// This remains public because exported macros refer to it through `$crate`.
 /// Plugin code should not call or rely on this symbol directly; use the `rt*`
@@ -47,49 +53,69 @@ macro_rules! init {
 #[macro_export]
 macro_rules! rttrace {
     (target: $target:expr, $($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Trace, $target, format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Trace, $target) {
+            $crate::__write_rt_log(log::Level::Trace, $target, format_args!($($arg)+));
+        }
     }};
     ($($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Trace, module_path!(), format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Trace, module_path!()) {
+            $crate::__write_rt_log(log::Level::Trace, module_path!(), format_args!($($arg)+));
+        }
     }};
 }
 
 #[macro_export]
 macro_rules! rtdebug {
     (target: $target:expr, $($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Debug, $target, format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Debug, $target) {
+            $crate::__write_rt_log(log::Level::Debug, $target, format_args!($($arg)+));
+        }
     }};
     ($($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Debug, module_path!(), format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Debug, module_path!()) {
+            $crate::__write_rt_log(log::Level::Debug, module_path!(), format_args!($($arg)+));
+        }
     }};
 }
 
 #[macro_export]
 macro_rules! rtinfo {
     (target: $target:expr, $($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Info, $target, format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Info, $target) {
+            $crate::__write_rt_log(log::Level::Info, $target, format_args!($($arg)+));
+        }
     }};
     ($($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Info, module_path!(), format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Info, module_path!()) {
+            $crate::__write_rt_log(log::Level::Info, module_path!(), format_args!($($arg)+));
+        }
     }};
 }
 
 #[macro_export]
 macro_rules! rtwarn {
     (target: $target:expr, $($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Warn, $target, format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Warn, $target) {
+            $crate::__write_rt_log(log::Level::Warn, $target, format_args!($($arg)+));
+        }
     }};
     ($($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Warn, module_path!(), format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Warn, module_path!()) {
+            $crate::__write_rt_log(log::Level::Warn, module_path!(), format_args!($($arg)+));
+        }
     }};
 }
 
 #[macro_export]
 macro_rules! rterror {
     (target: $target:expr, $($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Error, $target, format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Error, $target) {
+            $crate::__write_rt_log(log::Level::Error, $target, format_args!($($arg)+));
+        }
     }};
     ($($arg:tt)+) => {{
-        $crate::__write_rt_log(log::Level::Error, module_path!(), format_args!($($arg)+));
+        if $crate::__rt_log_enabled(log::Level::Error, module_path!()) {
+            $crate::__write_rt_log(log::Level::Error, module_path!(), format_args!($($arg)+));
+        }
     }};
 }
