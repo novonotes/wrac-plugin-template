@@ -28,10 +28,11 @@ pub use api::{
     HostLifecycle, HostNotePorts, HostParams, HostState, HostTail, HostVersion, HostWindow,
     InactiveProcessor, NoteDialects, NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo,
     ParamValueEvent, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError,
-    PluginFormat, PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension,
-    PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginNotePortsExtension,
-    PluginParamsQuery, PluginRenderExtension, PluginRenderMode, PluginResult, PluginStateExtension,
-    PluginTailExtension, ProcessContext, ProcessStatus, State, SystemContext,
+    PluginFormat, PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
+    PluginGuiQueryExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
+    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginRenderMode,
+    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus, State,
+    SystemContext,
 };
 #[cfg(feature = "raw-clap-forwarding")]
 pub use api::{RawParamFlushContext, RawProcessContext};

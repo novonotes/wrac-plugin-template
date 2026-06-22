@@ -54,7 +54,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
         (index == 0).then_some(if is_input {
             AudioPortInfo {
                 id: 1,
-                name: "Main In",
+                name: "Main In".to_string(),
                 flags: AudioPortFlags {
                     is_main: true,
                     ..AudioPortFlags::default()
@@ -66,7 +66,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
         } else {
             AudioPortInfo {
                 id: 2,
-                name: "Main Out",
+                name: "Main Out".to_string(),
                 flags: AudioPortFlags {
                     is_main: true,
                     ..AudioPortFlags::default()

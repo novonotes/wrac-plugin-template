@@ -9,7 +9,10 @@ mod tail;
 
 pub use audio_ports::PluginAudioPortsExtension;
 pub use configurable_audio_ports::PluginConfigurableAudioPortsExtension;
-pub use gui::{PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension};
+pub use gui::{
+    PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
+    PluginGuiQueryExtension,
+};
 pub use latency::PluginLatencyExtension;
 pub use note_ports::PluginNotePortsExtension;
 pub use render::PluginRenderExtension;

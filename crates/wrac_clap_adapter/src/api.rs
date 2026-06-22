@@ -43,9 +43,10 @@ pub use core::{
 };
 pub use error::{PluginError, PluginResult};
 pub use extensions::{
-    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiExtension,
-    PluginGuiMainThreadExtension, PluginGuiQueryExtension, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension, PluginTailExtension,
+    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiApiSupportExtension,
+    PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension,
+    PluginLatencyExtension, PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension,
+    PluginTailExtension,
 };
 pub use host::{
     HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState, HostTail,

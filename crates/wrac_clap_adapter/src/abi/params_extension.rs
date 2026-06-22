@@ -98,8 +98,8 @@ unsafe extern "C" fn params_get_info(
             (*param_info).id = info.id;
             (*param_info).flags = parameter_flags(info.flags);
             (*param_info).cookie = ptr::null_mut();
-            fill_c_char_array(&mut (*param_info).name, info.name);
-            fill_c_char_array(&mut (*param_info).module, info.module);
+            fill_c_char_array(&mut (*param_info).name, &info.name);
+            fill_c_char_array(&mut (*param_info).module, &info.module);
             (*param_info).min_value = info.min_value;
             (*param_info).max_value = info.max_value;
             (*param_info).default_value = info.default_value;

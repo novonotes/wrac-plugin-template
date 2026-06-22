@@ -29,7 +29,13 @@ enum ParameterKind {
 #[derive(Debug, Clone, Copy)]
 struct ParameterSpec {
     kind: ParameterKind,
-    info: ParamInfo,
+    id: u32,
+    name: &'static str,
+    module: &'static str,
+    min_value: f64,
+    max_value: f64,
+    default_value: f64,
+    flags: ParamFlags,
     // CLAP exposes normalized host-domain values, while the DSP and GUI use plain
     // product-domain values. Keeping both domains in the spec prevents host metadata,
     // GUI mapping, defaults, and DSP ranges from drifting inside the Rust contract.
@@ -47,15 +53,13 @@ struct ParameterSpec {
 const PARAM_SPECS: &[ParameterSpec] = &[
     ParameterSpec {
         kind: ParameterKind::Bypass,
-        info: ParamInfo {
-            id: PARAM_BYPASS_ID,
-            name: "Bypass",
-            module: "",
-            min_value: 0.0,
-            max_value: 1.0,
-            default_value: 0.0,
-            flags: param_flags(true, true, true, true),
-        },
+        id: PARAM_BYPASS_ID,
+        name: "Bypass",
+        module: "",
+        min_value: 0.0,
+        max_value: 1.0,
+        default_value: 0.0,
+        flags: param_flags(true, true, true, true),
         plain_min: 0.0,
         plain_max: 1.0,
         plain_default: 0.0,
@@ -65,15 +69,13 @@ const PARAM_SPECS: &[ParameterSpec] = &[
     },
     ParameterSpec {
         kind: ParameterKind::Gain,
-        info: ParamInfo {
-            id: PARAM_GAIN_ID,
-            name: "Gain",
-            module: "",
-            min_value: 0.0,
-            max_value: 1.0,
-            default_value: DEFAULT_GAIN_HOST_VALUE,
-            flags: param_flags(true, false, false, false),
-        },
+        id: PARAM_GAIN_ID,
+        name: "Gain",
+        module: "",
+        min_value: 0.0,
+        max_value: 1.0,
+        default_value: DEFAULT_GAIN_HOST_VALUE,
+        flags: param_flags(true, false, false, false),
         plain_min: MIN_GAIN as f64,
         plain_max: MAX_GAIN as f64,
         plain_default: DEFAULT_GAIN as f64,
@@ -130,7 +132,7 @@ impl PluginParamsQuery for WracGainParamsExtension {
     }
 
     fn get_info(&self, index: u32) -> Option<ParamInfo> {
-        PARAM_SPECS.get(index as usize).map(|spec| spec.info)
+        PARAM_SPECS.get(index as usize).map(param_info)
     }
 
     /// Answers the host's query for the current value of a parameter.
@@ -287,7 +289,7 @@ fn param_spec(parameter_id: u32) -> PluginResult<&'static ParameterSpec> {
     // by id after discovery so inserting a new parameter does not silently reroute edits.
     PARAM_SPECS
         .iter()
-        .find(|spec| spec.info.id == parameter_id)
+        .find(|spec| spec.id == parameter_id)
         .ok_or(PluginError::InvalidParameter)
 }
 
@@ -298,7 +300,7 @@ pub(crate) fn clamp_gain(gain: f32) -> f32 {
 }
 
 pub(crate) fn parameter_infos() -> impl Iterator<Item = ParamInfo> {
-    PARAM_SPECS.iter().map(|spec| spec.info)
+    PARAM_SPECS.iter().map(param_info)
 }
 
 /// Converts a plain value to a display string. GUI payloads route through here too, so
@@ -329,8 +331,8 @@ pub(crate) fn notify_gui_parameters(shared: &SharedState, mut notify: impl FnMut
     // still maps the gain control explicitly in TypeScript, but Rust owns the list of
     // parameters worth pushing over the WebView channel.
     for spec in PARAM_SPECS.iter().filter(|spec| spec.gui_role.is_some()) {
-        if let Some(value) = shared.parameter_value(spec.info.id) {
-            notify(spec.info.id, value);
+        if let Some(value) = shared.parameter_value(spec.id) {
+            notify(spec.id, value);
         }
     }
 }
@@ -366,6 +368,18 @@ pub(crate) fn gain_db_text(gain: f64) -> String {
 fn gain_spec() -> &'static ParameterSpec {
     PARAM_SPECS
         .iter()
-        .find(|spec| spec.info.id == PARAM_GAIN_ID)
+        .find(|spec| spec.id == PARAM_GAIN_ID)
         .expect("PARAM_GAIN_ID must be present in PARAM_SPECS")
+}
+
+fn param_info(spec: &ParameterSpec) -> ParamInfo {
+    ParamInfo {
+        id: spec.id,
+        name: spec.name.to_string(),
+        module: spec.module.to_string(),
+        min_value: spec.min_value,
+        max_value: spec.max_value,
+        default_value: spec.default_value,
+        flags: spec.flags,
+    }
 }

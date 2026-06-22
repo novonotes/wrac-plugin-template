@@ -47,7 +47,7 @@ unsafe extern "C" fn gui_is_api_supported(
             log::warn!("gui.is_api_supported: invalid API pointer");
             return false;
         };
-        gui.query().is_api_supported(api, is_floating)
+        gui.api_support().is_api_supported(api, is_floating)
     })
 }
 

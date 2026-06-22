@@ -5,10 +5,10 @@ use clap_sys::ext::note_ports::{
     CLAP_NOTE_DIALECT_MIDI2,
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct AudioPortInfo {
     pub id: u32,
-    pub name: &'static str,
+    pub name: String,
     pub flags: AudioPortFlags,
     pub channel_count: u32,
     pub port_type: AudioPortType,
@@ -23,12 +23,12 @@ pub struct AudioPortConfigRequest {
     pub port_type: AudioPortType,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NotePortInfo {
     pub id: u32,
     pub supported_dialects: NoteDialects,
     pub preferred_dialect: NoteDialects,
-    pub name: &'static str,
+    pub name: String,
 }
 
 /// Thin Rust representation of the CLAP note dialect bitset.
@@ -71,11 +71,11 @@ pub enum AudioPortType {
     Stereo,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ParamInfo {
     pub id: u32,
-    pub name: &'static str,
-    pub module: &'static str,
+    pub name: String,
+    pub module: String,
     pub min_value: f64,
     pub max_value: f64,
     pub default_value: f64,
