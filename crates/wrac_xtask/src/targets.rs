@@ -22,7 +22,7 @@ pub enum PluginFormat {
 }
 
 impl PluginFormat {
-    pub(crate) fn display(self) -> &'static str {
+    pub fn display(self) -> &'static str {
         match self {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
@@ -31,7 +31,7 @@ impl PluginFormat {
         }
     }
 
-    pub(crate) fn target(self) -> Target {
+    pub fn target(self) -> Target {
         match self {
             Self::Clap => Target::Clap,
             Self::Vst3 => Target::Vst3,
@@ -42,7 +42,7 @@ impl PluginFormat {
 }
 
 impl Target {
-    pub(crate) fn display(self) -> &'static str {
+    pub fn display(self) -> &'static str {
         match self {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
@@ -52,7 +52,7 @@ impl Target {
         }
     }
 
-    pub(crate) fn plugin_format(self) -> Option<PluginFormat> {
+    pub fn plugin_format(self) -> Option<PluginFormat> {
         match self {
             Self::Clap => Some(PluginFormat::Clap),
             Self::Vst3 => Some(PluginFormat::Vst3),
@@ -72,7 +72,7 @@ pub enum PluginTarget {
 }
 
 impl PluginTarget {
-    pub(crate) fn display(self) -> &'static str {
+    pub fn display(self) -> &'static str {
         match self {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
@@ -81,11 +81,11 @@ impl PluginTarget {
         }
     }
 
-    pub(crate) fn target(self) -> Target {
+    pub fn target(self) -> Target {
         self.format().target()
     }
 
-    pub(crate) fn format(self) -> PluginFormat {
+    pub fn format(self) -> PluginFormat {
         match self {
             Self::Clap => PluginFormat::Clap,
             Self::Vst3 => PluginFormat::Vst3,
@@ -104,7 +104,7 @@ pub enum ValidateTarget {
 }
 
 impl ValidateTarget {
-    pub(crate) fn display(self) -> &'static str {
+    pub fn display(self) -> &'static str {
         match self {
             Self::Clap => "CLAP",
             Self::Vst3 => "VST3",
@@ -113,11 +113,11 @@ impl ValidateTarget {
         }
     }
 
-    pub(crate) fn target(self) -> Target {
+    pub fn target(self) -> Target {
         self.format().target()
     }
 
-    pub(crate) fn format(self) -> PluginFormat {
+    pub fn format(self) -> PluginFormat {
         match self {
             Self::Clap => PluginFormat::Clap,
             Self::Vst3 => PluginFormat::Vst3,
@@ -128,14 +128,14 @@ impl ValidateTarget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Platform {
+pub enum Platform {
     Macos,
     Windows,
     Linux,
 }
 
 impl Platform {
-    pub(crate) fn detect() -> Result<Self> {
+    pub fn detect() -> Result<Self> {
         if cfg!(target_os = "macos") {
             Ok(Self::Macos)
         } else if cfg!(target_os = "windows") {
@@ -147,23 +147,23 @@ impl Platform {
         }
     }
 
-    pub(crate) fn supports_vst3(self) -> bool {
+    pub fn supports_vst3(self) -> bool {
         matches!(self, Self::Macos | Self::Windows | Self::Linux)
     }
 
-    pub(crate) fn supports_wrappers(self) -> bool {
+    pub fn supports_wrappers(self) -> bool {
         self.supports_vst3() || self.supports_au() || self.supports_aax()
     }
 
-    pub(crate) fn supports_au(self) -> bool {
+    pub fn supports_au(self) -> bool {
         self == Self::Macos
     }
 
-    pub(crate) fn supports_aax(self) -> bool {
+    pub fn supports_aax(self) -> bool {
         matches!(self, Self::Macos | Self::Windows)
     }
 
-    pub(crate) fn supports_target(self, target: Target) -> bool {
+    pub fn supports_target(self, target: Target) -> bool {
         match target {
             Target::Clap => true,
             Target::Vst3 => self.supports_vst3(),
@@ -173,7 +173,7 @@ impl Platform {
         }
     }
 
-    pub(crate) fn display(self) -> &'static str {
+    pub fn display(self) -> &'static str {
         match self {
             Self::Macos => "macOS",
             Self::Windows => "Windows",

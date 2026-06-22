@@ -1,11 +1,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BuildProfile {
+pub enum BuildProfile {
     Debug,
     Release,
 }
 
 impl BuildProfile {
-    pub(crate) fn from_release(release: bool) -> Self {
+    pub fn from_release(release: bool) -> Self {
         if release { Self::Release } else { Self::Debug }
     }
 

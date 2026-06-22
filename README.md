@@ -97,7 +97,18 @@ cargo xtask validate
 cargo xtask install
 ```
 
-`cargo xtask validate` runs WRAC production-readiness checks before external format validators.
+`cargo xtask validate` builds the requested artifacts, runs WRAC production-readiness checks,
+and then runs external format validators. Use `--checks` to run a narrower validation plan:
+
+```bash
+# Build/package artifacts only
+cargo xtask validate --checks build-artifacts
+# Build/package artifacts and run external format validators
+cargo xtask validate --checks build-artifacts,external-validators
+# Explicitly request the full validation plan
+cargo xtask validate --checks build-artifacts,external-validators,production-readiness
+```
+
 For the check list and disable format, see [Production-Readiness Checks](docs/production-readiness-checks.md).
 
 Build and launch the development standalone app:
