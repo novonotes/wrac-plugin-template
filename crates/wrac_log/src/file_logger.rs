@@ -21,9 +21,9 @@ static CURRENT_LOG_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static CURRENT_LOG_FILE: OnceLock<Option<PathBuf>> = OnceLock::new();
 static RT_SAFE_LOGGER: OnceLock<&'static WracLogger> = OnceLock::new();
 static FILE_WRITER: OnceLock<LazyFileWriter> = OnceLock::new();
-static ACTIVE_PLUGIN_INSTANCES: AtomicU32 = AtomicU32::new(0);
+static ACTIVE_ASYNC_FILE_LOGGERS: AtomicU32 = AtomicU32::new(0);
 
-/// File logging configuration supplied by the plugin adapter.
+/// WRAC file logging configuration.
 #[derive(Clone, Copy, Debug)]
 pub struct LogConfig {
     pub app_name: &'static str,
@@ -31,11 +31,10 @@ pub struct LogConfig {
     debug_dotenv_search_dir: Option<&'static str>,
 }
 
-/// Destination policy for WRAC file logging.
+/// WRAC file logging destination policy.
 #[derive(Clone, Copy, Debug)]
 pub enum LogOutput {
-    /// Use `WRAC_LOG_DIR` when set, otherwise use the release user log directory.
-    /// Debug builds use `debug_log_dir` when provided.
+    /// Uses `WRAC_LOG_DIR`, then the debug directory in debug builds, otherwise the platform log directory.
     DefaultPluginLogDir {
         debug_log_dir: Option<&'static str>,
     },
@@ -46,9 +45,6 @@ pub enum LogOutput {
 
 impl LogConfig {
     /// Creates a standard WRAC file-log configuration.
-    ///
-    /// `debug_log_dir` is used only for debug builds. Release builds use the
-    /// platform user log directory unless `WRAC_LOG_DIR` overrides it.
     pub const fn new(app_name: &'static str, debug_log_dir: Option<&'static str>) -> Self {
         Self {
             app_name,
@@ -58,8 +54,26 @@ impl LogConfig {
     }
 }
 
-/// Installs the lightweight WRAC logger without touching the filesystem.
-pub fn configure(config: &'static LogConfig) {
+/// Configures logging for a plugin managed by a host adapter.
+///
+/// This installs the lightweight logger without touching the filesystem.
+pub fn configure_plugin(config: &'static LogConfig) -> PluginLogRuntime {
+    PluginLogRuntime {
+        writer: configure_logger(config),
+    }
+}
+
+/// Configures logging for a standalone app or service.
+///
+/// Hold the returned runtime while async file logging should remain active.
+pub fn configure_standalone(config: &'static LogConfig) -> StandaloneLogRuntime {
+    let writer = configure_logger(config);
+    StandaloneLogRuntime {
+        _guard: writer.map(start_async_file_logger),
+    }
+}
+
+fn configure_logger(config: &'static LogConfig) -> Option<LazyFileWriter> {
     INIT.call_once(|| {
         let writer = LazyFileWriter::new(*config);
         let writer_for_runtime = writer.clone();
@@ -68,19 +82,15 @@ pub fn configure(config: &'static LogConfig) {
         }
         crate::rt::init_rt_buffer();
     });
+    FILE_WRITER.get().cloned()
 }
 
 /// Returns the directory currently used for file logging.
-///
-/// Returns `None` before initialization or when logging fell back to `stderr`.
-/// Use [`current_log_file`] when the caller needs the exact current session log.
 pub fn current_log_dir() -> Option<PathBuf> {
     CURRENT_LOG_DIR.get().cloned().flatten()
 }
 
 /// Returns the current session log file.
-///
-/// Returns `None` before initialization or when logging fell back to `stderr`.
 pub fn current_log_file() -> Option<PathBuf> {
     CURRENT_LOG_FILE.get().cloned().flatten()
 }
@@ -104,39 +114,52 @@ impl Default for RecentLogFilesOptions {
 }
 
 /// Returns the current log and recent archived logs, newest first.
-///
-/// The current log is always included even if it exceeds `max_total_bytes`.
-/// Archived logs are then added newest first until the file or byte limit is reached.
 pub fn collect_recent_log_files(options: RecentLogFilesOptions) -> std::io::Result<Vec<PathBuf>> {
     let current_log_file = current_log_file()
         .ok_or_else(|| std::io::Error::other("wrac_log is not writing to a log file"))?;
     collect_recent_log_files_from_current(&current_log_file, &options)
 }
 
-/// Keeps the asynchronous file logger running while this guard is alive.
-///
-/// Dropping the last guard stops the worker thread and joins it. After that, the
-/// installed logger remains usable and writes to the same destinations synchronously.
-pub struct AsyncFileLoggerGuard {
+/// Plugin logger runtime returned by [`configure_plugin`].
+pub struct PluginLogRuntime {
+    writer: Option<LazyFileWriter>,
+}
+
+impl PluginLogRuntime {
+    /// Keeps async file logging active while the returned instance guard is alive.
+    pub fn retain_instance(&self) -> PluginLogInstanceGuard {
+        PluginLogInstanceGuard {
+            _guard: self.writer.clone().map(start_async_file_logger),
+        }
+    }
+}
+
+/// Keeps plugin async file logging active for one plugin instance.
+pub struct PluginLogInstanceGuard {
+    _guard: Option<AsyncFileLoggerGuard>,
+}
+
+/// Keeps standalone async file logging active.
+pub struct StandaloneLogRuntime {
+    _guard: Option<AsyncFileLoggerGuard>,
+}
+
+/// Keeps the asynchronous file writer running while this guard is alive.
+struct AsyncFileLoggerGuard {
     writer: LazyFileWriter,
 }
 
-/// Starts the asynchronous file logger and returns its lifetime guard.
-///
-/// This function returns `None` when no WRAC logger was installed, for example when
-/// another logger implementation already owns the global `log` facade.
-pub fn start_async_file_logger() -> Option<AsyncFileLoggerGuard> {
-    let writer = FILE_WRITER.get()?.clone();
-    if ACTIVE_PLUGIN_INSTANCES.fetch_add(1, Ordering::AcqRel) == 0 {
+fn start_async_file_logger(writer: LazyFileWriter) -> AsyncFileLoggerGuard {
+    if ACTIVE_ASYNC_FILE_LOGGERS.fetch_add(1, Ordering::AcqRel) == 0 {
         writer.ensure_initialized();
         writer.start();
     }
-    Some(AsyncFileLoggerGuard { writer })
+    AsyncFileLoggerGuard { writer }
 }
 
 impl Drop for AsyncFileLoggerGuard {
     fn drop(&mut self) {
-        if ACTIVE_PLUGIN_INSTANCES.fetch_sub(1, Ordering::AcqRel) == 1 {
+        if ACTIVE_ASYNC_FILE_LOGGERS.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.writer.shutdown();
         }
     }
@@ -737,13 +760,13 @@ impl LazyFileWriter {
     }
 
     fn config_for_logger(&self) -> LogConfig {
-        self.shared
+        *self
+            .shared
             .config
             .lock()
             .unwrap()
             .as_ref()
             .expect("lazy file logger config must exist before initialization")
-            .clone()
     }
 
     fn ensure_initialized(&self) {
@@ -832,8 +855,7 @@ impl WracLogger {
                 config,
                 writer,
             } => {
-                let logger =
-                    logger.get_or_init(|| build_file_logger(config.clone(), writer.clone()));
+                let logger = logger.get_or_init(|| build_file_logger(*config, writer.clone()));
                 let max_level = logger.filter();
                 crate::rt::set_rt_fallback_max_level(max_level);
                 log::set_max_level(max_level);
@@ -870,7 +892,7 @@ impl Log for WracLogger {
 impl Write for LazyFileWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.ensure_initialized();
-        if ACTIVE_PLUGIN_INSTANCES.load(Ordering::Acquire) > 0 {
+        if ACTIVE_ASYNC_FILE_LOGGERS.load(Ordering::Acquire) > 0 {
             self.start();
         }
 

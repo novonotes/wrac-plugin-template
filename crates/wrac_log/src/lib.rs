@@ -8,14 +8,10 @@ mod file_logger;
 mod rt;
 
 pub use file_logger::{
-    LogConfig, LogOutput, RecentLogFilesOptions, collect_recent_log_files, configure,
+    LogConfig, LogOutput, PluginLogInstanceGuard, PluginLogRuntime, RecentLogFilesOptions,
+    StandaloneLogRuntime, collect_recent_log_files, configure_plugin, configure_standalone,
     current_log_dir, current_log_file, init_test,
 };
-
-#[doc(hidden)]
-pub mod __adapter {
-    pub use crate::file_logger::{AsyncFileLoggerGuard, start_async_file_logger};
-}
 /// Macro support function used by the realtime log macros to check filtering.
 ///
 /// This remains public because exported macros refer to it through `$crate`.

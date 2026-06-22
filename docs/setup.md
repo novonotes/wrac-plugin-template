@@ -158,7 +158,7 @@ Do not log from `PluginEntry::init` or `PluginEntry::deinit`; those callbacks ma
 ### Plugin Logging Responsibilities
 
 Plugins using `wrac_clap_adapter` must provide logging configuration from `PluginEntry::log_config`.
-Do not call `wrac_log::configure` or the async file-writer lifecycle APIs from plugin product code; the adapter owns logger installation and the async file-writer lifecycle.
+Do not call `wrac_log` configure APIs from plugin product code; the adapter owns logger installation and the async file-writer lifecycle.
 Use regular `log::*` macros outside realtime paths, and use `wrac_log::rtdebug!` / `wrac_log::rtwarn!` only from realtime paths.
 
-Standalone apps, services, and test binaries do not enter through `wrac_clap_adapter`, so they must initialize logging explicitly with `wrac_log::configure` or `wrac_log::init_test`.
+Standalone apps and services do not enter through `wrac_clap_adapter`, so they must initialize logging explicitly with `wrac_log::configure_standalone` and hold the returned runtime while async file logging should remain active. Test binaries should use `wrac_log::init_test`.

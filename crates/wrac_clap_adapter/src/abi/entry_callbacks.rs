@@ -53,7 +53,7 @@ pub(crate) unsafe extern "C" fn entry_init(
         }
 
         if let Some(config) = registration.entry.log_config() {
-            wrac_log::configure(config);
+            registration.configure_log_runtime(config);
         }
 
         let plugin_path = if plugin_path.is_null() {

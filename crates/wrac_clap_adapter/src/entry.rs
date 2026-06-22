@@ -16,10 +16,10 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// instance, whichever comes first. Return a stable static configuration so
     /// repeated entry initialization cannot change logger identity or destination.
     ///
-    /// Plugins managed by this adapter must not call `wrac_log::configure` or the
-    /// async file-writer lifecycle APIs directly. Standalone apps and other binaries
-    /// that do not enter through this adapter are responsible for calling
-    /// `wrac_log::configure` themselves.
+    /// Plugins managed by this adapter must not call `wrac_log` configure APIs
+    /// directly. Standalone apps and other binaries that do not enter through
+    /// this adapter are responsible for calling `wrac_log::configure_standalone`
+    /// and holding the returned runtime themselves.
     fn log_config(&'static self) -> Option<&'static LogConfig>;
 
     /// Initializes entry-level state.
@@ -59,6 +59,7 @@ pub trait PluginFactory: Send + Sync + 'static {
 pub struct EntryRegistration {
     pub(crate) entry: &'static dyn PluginEntry,
     storage: OnceLock<PluginRegistrationStorage>,
+    log_runtime: OnceLock<wrac_log::PluginLogRuntime>,
     init_state: Mutex<EntryInitState>,
     instance_state: Mutex<EntryInstanceState>,
 }
@@ -71,7 +72,7 @@ struct EntryInitState {
 #[derive(Default)]
 struct EntryInstanceState {
     count: u32,
-    async_file_logger_guard: Option<wrac_log::__adapter::AsyncFileLoggerGuard>,
+    async_file_logger_guard: Option<wrac_log::PluginLogInstanceGuard>,
 }
 
 // Safety: `entry` is immutable and all mutable state is synchronized. Factory queries
@@ -84,6 +85,7 @@ impl EntryRegistration {
         Self {
             entry,
             storage: OnceLock::new(),
+            log_runtime: OnceLock::new(),
             init_state: Mutex::new(EntryInitState { count: 0 }),
             instance_state: Mutex::new(EntryInstanceState {
                 count: 0,
@@ -95,6 +97,16 @@ impl EntryRegistration {
     pub(crate) fn storage(&'static self) -> &'static PluginRegistrationStorage {
         self.storage
             .get_or_init(|| PluginRegistrationStorage::new(self))
+    }
+
+    pub(crate) fn configure_log_runtime(&'static self, config: &'static LogConfig) {
+        let _ = self
+            .log_runtime
+            .get_or_init(|| wrac_log::configure_plugin(config));
+    }
+
+    fn log_runtime(&self) -> Option<&wrac_log::PluginLogRuntime> {
+        self.log_runtime.get()
     }
 }
 
@@ -139,7 +151,10 @@ pub(crate) fn retain_entry_instance(registration: &'static EntryRegistration) {
         .expect("entry instance state mutex poisoned");
     state.count = state.count.saturating_add(1);
     if state.count == 1 {
-        state.async_file_logger_guard = wrac_log::__adapter::start_async_file_logger();
+        let Some(log_runtime) = registration.log_runtime() else {
+            return;
+        };
+        state.async_file_logger_guard = Some(log_runtime.retain_instance());
     }
 }
 

@@ -156,7 +156,7 @@ Debug build では、process 環境変数に `RUST_LOG` が無い場合、reposi
 ### Plugin logging の責務
 
 `wrac_clap_adapter` を使う plugin は、`PluginEntry::log_config` からログ設定を返してください。
-Plugin 製品コードから `wrac_log::configure` や async file writer lifecycle API を直接呼ばないでください。logger の install と async file writer の lifecycle は adapter が管理します。
+Plugin 製品コードから `wrac_log` の configure API を直接呼ばないでください。logger の install と async file writer の lifecycle は adapter が管理します。
 Realtime 経路以外では通常の `log::*` macro を使い、realtime 経路では必要な場合だけ `wrac_log::rtdebug!` / `wrac_log::rtwarn!` を使ってください。
 
-Standalone app、service、test binary は `wrac_clap_adapter` を通らないため、`wrac_log::configure` または `wrac_log::init_test` で明示的に logger を初期化してください。
+Standalone app / service は `wrac_clap_adapter` を通らないため、`wrac_log::configure_standalone` で明示的に logger を初期化し、async file logging を有効にしたい期間は返り値の runtime を保持してください。test binary は `wrac_log::init_test` を使ってください。
