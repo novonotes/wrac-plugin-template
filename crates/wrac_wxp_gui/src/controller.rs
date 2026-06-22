@@ -703,7 +703,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             configuration.is_floating,
         ) {
             log::debug!("wxp controller: create rejected unsupported configuration");
-            return Err(PluginError::Message("unsupported GUI configuration"));
+            return Err(PluginError::Message("unsupported GUI configuration".into()));
         }
         self.destroy_gui_session();
         let scale = *self.scale.lock();

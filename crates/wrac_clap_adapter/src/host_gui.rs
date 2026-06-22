@@ -55,7 +55,7 @@ impl HostGui for HostGuiProxy {
     fn request_resize(&self, size: GuiSize) -> PluginResult<()> {
         let Some(host_gui) = self.callbacks() else {
             return Err(PluginError::Message(
-                "host does not expose CLAP GUI extension",
+                "host does not expose CLAP GUI extension".into(),
             ));
         };
 
@@ -63,7 +63,9 @@ impl HostGui for HostGuiProxy {
         if accepted {
             Ok(())
         } else {
-            Err(PluginError::Message("host rejected GUI resize request"))
+            Err(PluginError::Message(
+                "host rejected GUI resize request".into(),
+            ))
         }
     }
 

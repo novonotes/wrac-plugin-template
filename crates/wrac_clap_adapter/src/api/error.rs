@@ -1,5 +1,8 @@
-use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::{
+    borrow::Cow,
+    error::Error,
+    fmt::{Display, Formatter},
+};
 
 use crate::process_buffer::AudioBufferError;
 
@@ -9,7 +12,7 @@ pub enum PluginError {
     InvalidState,
     UnsupportedHostGuiThreadingModel,
     RequiresInactive,
-    Message(&'static str),
+    Message(Cow<'static, str>),
 }
 
 impl Display for PluginError {

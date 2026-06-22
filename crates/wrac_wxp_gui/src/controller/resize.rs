@@ -149,7 +149,7 @@ impl WxpGuiResizeHandle {
                 // can resize without extending the lifetime of a closing editor.
                 web_view
                     .post_set_bounds(dpi.create_webview_bounds(logical_size))
-                    .map_err(|_| PluginError::Message("failed to resize webview"))?;
+                    .map_err(|_| PluginError::Message("failed to resize webview".into()))?;
                 self.layout.store_accepted_size(gui_size);
                 Ok(logical_size)
             }

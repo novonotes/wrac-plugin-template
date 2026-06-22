@@ -73,7 +73,7 @@ impl WracGainGuiRuntime {
         // Implement floating window support separately if needed.
         if configuration.is_floating {
             log::warn!("rejecting floating GUI configuration");
-            return Err(PluginError::Message("unsupported GUI configuration"));
+            return Err(PluginError::Message("unsupported GUI configuration".into()));
         }
         log::debug!(
             "creating GUI runtime: width={}, height={}, configuration={configuration:?}",
