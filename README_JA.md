@@ -43,7 +43,6 @@ git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
 # 最小確認として CLAP だけをビルドしてインストール
-# supported_formats に書かれた全 format をインストールする場合は `cargo xtask install`
 cargo xtask install --target=clap
 
 # デバッグビルドは Vite dev server から GUI を読み込むため、DAW を起動する前に立ち上げてください
@@ -92,18 +91,9 @@ cargo xtask build --target=au --release
 cargo xtask validate
 # プラグインをビルドしてインストール
 cargo xtask install
-```
-
-`cargo xtask validate` は外部フォーマット validator の前に WRAC の production-readiness check を実行します。
-check 一覧と disable 形式は [Production-Readiness Checks](docs/production-readiness-checks.md) を参照してください。
-
-開発用 standalone app をビルドして起動できます:
-
-```bash
+# 開発用 standalone app をビルドして起動
 cargo xtask launch
 ```
-
-Standalone app は軽量な開発・smoke test 用 host です。リリース用のプラグインフォーマットや出荷 artifact ではありません。
 
 対応プラグインフォーマット:
 
@@ -112,11 +102,6 @@ Standalone app は軽量な開発・smoke test 用 host です。リリース用
 | macOS | CLAP / VST3 / AU / AAX |
 | Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
-
-既定の build / install / validate target は `wrac-plugin.toml` の `supported_formats` から決まります。
-`--target` を使うと特定の subset だけを指定できます。明示した plugin format target は `supported_formats` に含まれている必要があります。
-`cargo xtask build` は既定で開発用 standalone app もビルドします。build コマンドでは、開発専用 target として `standalone` も指定できます。
-build / install / validate では `--dry-run` を使って、実行前に task graph を確認できます。
 
 詳しい使い方:
 

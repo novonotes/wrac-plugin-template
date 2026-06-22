@@ -77,26 +77,6 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
-The repository URL points to this template by default. After generating a new project, update it to your own repository if you publish the crate metadata.
-
-**Steps:**
-
-Check the target files and remaining count.
-
-Example using rg:
-
-```sh
-rg --hidden "wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin" \
-    --glob '!node_modules' --glob '!dist' --glob '!*.lock' \
-    --glob '!package-lock.json' --glob '!*.zip' \
-    --glob '!docs/setup.md' --glob '!docs/setup-ja.md'
-
-rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' --glob 'Cargo.toml'
-```
-
-Once confirmed, **replace all occurrences** according to the table above.
-Re-run the same commands after replacing and verify the output is zero matches.
-
 ### 4. Build & Install
 
 Run the following from the repository root.
@@ -106,16 +86,8 @@ cd /path/to/my_plugin
 cargo xtask install
 ```
 
-`cargo xtask install` expands the selected plugin formats into a task graph before installing them.
-Use `-p/--package` with the Cargo package name when the workspace contains multiple WRAC plugin packages.
-Default plugin formats come from `wrac-plugin.toml` `supported_formats`.
-`cargo xtask build` uses the same plugin-format defaults and also builds the development standalone app.
-`cargo xtask validate` uses the same plugin-format defaults and builds any artifacts required by the selected validators.
-`cargo xtask install --scope=default` installs CLAP/VST3/AU to user-local paths and AAX to the system-wide Avid plugin folder.
-Use `cargo xtask install --scope=system` for hosts that only scan system-wide plugin folders.
-The `--target` option accepts `clap`, `vst3`, `au`, and `aax` as comma-separated values.
-Explicit targets must be listed in `supported_formats`.
-Use `--dry-run` to inspect the task graph and dependency order without building or installing.
+`cargo xtask install` builds and installs the selected plugin formats.
+For detailed usage of each xtask command, see `cargo xtask --help`.
 
 ### 5. Verify
 
@@ -141,24 +113,10 @@ The GUI supports hot reload — try editing the HTML files.
 Attaching a debugger to a DAW can be difficult, so we recommend debugging with the development standalone app first.
 In VS Code, select the "Debug gain plugin standalone" configuration and run it.
 
-The standalone app is a lightweight development host, not a release plugin format or shipping artifact.
-`cargo xtask launch` builds only the standalone target and its dependencies before opening the app.
-If the package exposes multiple plugin products, pass `--plugin-id`; invalid plugin IDs fail before building.
-
 > **Note:** Audio feedback is present in standalone mode. **Use headphones.**
 
 ### Reading Debug Logs
 
 Debug build logs are written to `.log/<plugin_name> Latest.log`.
 To follow the log, use `tail -f ".log/<plugin_name> Latest.log"` on macOS/Linux, or `Get-Content ".log\<plugin_name> Latest.log" -Wait` in Windows PowerShell.
-Use the `RUST_LOG` environment variable to override the default log level.
-In debug builds, WRAC also reads `RUST_LOG` from the repository root `.env` when the process environment does not provide it.
-Do not log from `PluginEntry::init` or `PluginEntry::deinit`; those callbacks may run during plugin scanning or DSO unload. Keep them free of file I/O, stderr writes, worker startup, and worker joins.
-
-### Plugin Logging Responsibilities
-
-Plugins using `wrac_clap_adapter` must provide logging configuration from `PluginEntry::log_config`.
-Do not call `wrac_log` configure APIs from plugin product code; the adapter owns logger installation and the async file-writer lifecycle.
-Use regular `log::*` macros outside realtime paths, and use `wrac_log::rtdebug!` / `wrac_log::rtwarn!` only from realtime paths.
-
-Standalone apps and services do not enter through `wrac_clap_adapter`, so they must initialize logging explicitly with `wrac_log::configure_standalone` and hold the returned runtime while async file logging should remain active. Test binaries should use `wrac_log::init_test`.
+For details about logging, see the `crates/wrac_log` directory.

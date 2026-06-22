@@ -46,7 +46,6 @@ git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
 # Build and install CLAP only for the minimal first run.
-# Run `cargo xtask install` to install every format declared in supported_formats.
 cargo xtask install --target=clap
 
 # Debug builds load the GUI from the Vite dev server, so start it before launching your DAW
@@ -95,29 +94,9 @@ cargo xtask build --target=au --release
 cargo xtask validate
 # Build and install plugins
 cargo xtask install
-```
-
-`cargo xtask validate` builds the requested artifacts, runs WRAC production-readiness checks,
-and then runs external format validators. Use `--checks` to run a narrower validation plan:
-
-```bash
-# Build/package artifacts only
-cargo xtask validate --checks build-artifacts
-# Build/package artifacts and run external format validators
-cargo xtask validate --checks build-artifacts,external-validators
-# Explicitly request the full validation plan
-cargo xtask validate --checks build-artifacts,external-validators,production-readiness
-```
-
-For the check list and disable format, see [Production-Readiness Checks](docs/production-readiness-checks.md).
-
-Build and launch the development standalone app:
-
-```bash
+# Build and launch the development standalone app
 cargo xtask launch
 ```
-
-The standalone app is a lightweight development and smoke-test host. It is not a release plugin format or a shipping artifact.
 
 Supported plugin formats:
 
@@ -126,11 +105,6 @@ Supported plugin formats:
 | macOS | CLAP / VST3 / AU / AAX |
 | Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
-
-Default build, install, and validate targets come from `wrac-plugin.toml` `supported_formats`.
-Use `--target` to request a specific subset; explicit plugin-format targets must be listed in `supported_formats`.
-`cargo xtask build` also builds the development standalone app by default, and the build command accepts `standalone` as a development-only target.
-Use `--dry-run` on build/install/validate commands to inspect the task graph before running it.
 
 For detailed usage:
 

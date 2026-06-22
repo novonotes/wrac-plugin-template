@@ -77,25 +77,6 @@ IDE の機能や `rg`、LLM エージェントなどで全ファイルを検索�
 | GUI / スクリプト内などの kebab-case 名 | `wrac-gain-plugin` | `my-plugin` |
 | `Cargo.toml` 内の repository URL | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
-repository URL は、デフォルトではこのテンプレートを指しています。新しいプロジェクトを作成した後、crate metadata を公開する場合は自分のリポジトリに変更してください。
-
-**手順:**
-
-対象ファイルと残件数を確認します。
-
-rg を用いる例:
-
-```sh
-rg --hidden "wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin" \
-    --glob '!node_modules' --glob '!dist' --glob '!*.lock' \
-    --glob '!package-lock.json' --glob '!*.zip' \
-    --glob '!docs/setup.md' --glob '!docs/setup-ja.md'
-
-rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' --glob 'Cargo.toml'
-```
-
-確認できたら、上の置換テーブルの通りに**全件置換**してください。
-置換後に同じコマンド群を再実行し、出力がゼロ件になれば完了です。
 
 ### 4. ビルド & インストール
 
@@ -106,16 +87,8 @@ cd /path/to/my_plugin
 cargo xtask install
 ```
 
-`cargo xtask install` は選択したプラグインフォーマットを task graph に展開してからインストールします。
-workspace に複数の WRAC plugin package がある場合は、Cargo package 名を `-p/--package` で指定してください。
-既定の plugin format は `wrac-plugin.toml` の `supported_formats` から決まります。
-`cargo xtask build` も同じ plugin format default を使い、さらに開発用 standalone app もビルドします。
-`cargo xtask validate` も同じ plugin format default を使い、選択した validator に必要な artifact をビルドします。
-`cargo xtask install --scope=default` は CLAP/VST3/AU を user-local path に、AAX を system-wide の Avid plugin folder にインストールします。
-system-wide の plugin folder だけをスキャンするホスト向けには、`cargo xtask install --scope=system` を使います。
-`--target` オプションで `clap`、`vst3`、`au`、`aax` をカンマ区切りで指定できます。
-明示した target は `supported_formats` に含まれている必要があります。
-`--dry-run` を使うと、build/install を実行せずに task graph と依存順を確認できます。
+`cargo xtask install` は選択したプラグインフォーマットをビルドしてインストールします。
+各 xtask コマンドの詳しい使い方は `cargo xtask --help` を参照してください。
 
 ### 5. 動作確認
 
@@ -139,24 +112,10 @@ GUI はホットリロード可能です。HTML ファイルを編集してみ�
 DAW はデバッガーのアタッチが難しいケースがあるので、まずは開発用 standalone app でデバッグすることをお勧めします。
 VS Code で「Debug gain plugin standalone」構成を選択して実行します。
 
-Standalone app は軽量な開発用 host であり、リリース用のプラグインフォーマットや出荷物ではありません。
-`cargo xtask launch` は standalone target とその依存 task だけをビルドしてから app を開きます。
-package が複数の plugin product を公開している場合は `--plugin-id` を指定してください。無効な plugin ID はビルド前に失敗します。
-
 > **注意:** スタンドアローンモードでは音声フィードバックがあります。**ヘッドフォンを使用してください。**
 
 ### デバッグログを見る
 
 デバッグビルドのログは `.log/<plugin_name> Latest.log` に出ます。
 追いかける場合は macOS / Linux では `tail -f ".log/<plugin_name> Latest.log"`、Windows PowerShell では `Get-Content ".log\<plugin_name> Latest.log" -Wait` などを使います。
-ログレベルを上書きする場合は `RUST_LOG` 環境変数を使ってください。
-Debug build では、process 環境変数に `RUST_LOG` が無い場合、repository root の `.env` に書いた `RUST_LOG` も参照します。
-`PluginEntry::init` / `PluginEntry::deinit` からログを書かないでください。これらの callback は plugin scan や DSO unload の近くで呼ばれ得るため、File IO、stderr 書き込み、worker 起動、worker join も避けてください。
-
-### Plugin logging の責務
-
-`wrac_clap_adapter` を使う plugin は、`PluginEntry::log_config` からログ設定を返してください。
-Plugin 製品コードから `wrac_log` の configure API を直接呼ばないでください。logger の install と async file writer の lifecycle は adapter が管理します。
-Realtime 経路以外では通常の `log::*` macro を使い、realtime 経路では必要な場合だけ `wrac_log::rtdebug!` / `wrac_log::rtwarn!` を使ってください。
-
-Standalone app / service は `wrac_clap_adapter` を通らないため、`wrac_log::configure_standalone` で明示的に logger を初期化し、async file logging を有効にしたい期間は返り値の runtime を保持してください。test binary は `wrac_log::init_test` を使ってください。
+ログについての詳細は `crates/wrac_log` のディレクトリを参照してください。
