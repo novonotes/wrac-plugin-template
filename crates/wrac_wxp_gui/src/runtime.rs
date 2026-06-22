@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::ThreadId;
 
-use novonotes_run_loop::{RunLoop, RunLoopLocal};
+use novonotes_run_loop::{RunLoop, RunLoopGuard, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::{GuiConfig, GuiSize, PluginError, PluginResult};
 
@@ -15,7 +15,7 @@ thread_local! {
     static GUI_RUNTIMES: RefCell<HashMap<u64, GuiRuntimeEntry>> = RefCell::new(HashMap::new());
     // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
     // cross-thread token; it releases this guard by dispatching back to the owner thread.
-    static GUI_RUN_LOOP_GUARD: RefCell<Option<wrac_log::RtDrainingRunLoopGuard>> = const {
+    static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const {
         RefCell::new(None)
     };
 }
@@ -272,7 +272,6 @@ impl GuiThreadLease {
                 log::debug!("wxp GUI thread lease: RunLoop::init failed");
                 PluginError::UnsupportedHostGuiThreadingModel
             })?;
-            let guard = wrac_log::attach_rt_drain(guard);
             GUI_RUN_LOOP_GUARD.with(|stored_guard| {
                 debug_assert!(stored_guard.borrow().is_none());
                 *stored_guard.borrow_mut() = Some(guard);

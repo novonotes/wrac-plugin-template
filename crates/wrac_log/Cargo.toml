@@ -7,8 +7,6 @@ publish = false
 [dependencies]
 env_logger = "0.11"
 log = "0.4"
-novonotes_run_loop = { workspace = true }
-run_loop_timer = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 
 [lints.rust]

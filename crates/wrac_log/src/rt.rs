@@ -1,95 +1,16 @@
 use log::{Level, LevelFilter};
 use std::array;
-use std::cell::RefCell;
 use std::fmt::{self, Write as _};
-use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 const RT_LOG_CAPACITY: usize = 4096;
 const RT_MESSAGE_CAPACITY: usize = 256;
 const RT_TARGET_CAPACITY: usize = 96;
-const RT_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
 
 static RT_LOG: OnceLock<RtLogInner> = OnceLock::new();
 static RT_FALLBACK_MAX_LEVEL: AtomicU8 = AtomicU8::new(level_filter_to_u8(LevelFilter::Off));
-
-thread_local! {
-    static RT_DRAIN_TIMER: RefCell<Weak<RtDrainInner>> = const { RefCell::new(Weak::new()) };
-}
-
-/// Keeps realtime log draining attached to a [`novonotes_run_loop::RunLoopGuard`].
-///
-/// Dropping this guard stops the drain timer before releasing the wrapped run loop
-/// guard, then drains any remaining realtime log records once on the current thread.
-#[must_use = "keep RtDrainingRunLoopGuard alive while its RunLoop is alive"]
-pub struct RtDrainingRunLoopGuard {
-    _rt_drain: RtDrain,
-    guard: novonotes_run_loop::RunLoopGuard,
-}
-
-impl RtDrainingRunLoopGuard {
-    /// Returns the run-loop-thread-local capability for the wrapped guard.
-    pub fn local(&self) -> &novonotes_run_loop::RunLoopLocal {
-        self.guard.local()
-    }
-}
-
-struct RtDrain {
-    _inner: Rc<RtDrainInner>,
-}
-
-struct RtDrainInner {
-    timer: run_loop_timer::Timer,
-}
-
-impl Drop for RtDrainInner {
-    fn drop(&mut self) {
-        self.timer.stop();
-        drain_existing_rt_logs_once();
-    }
-}
-
-/// Attaches realtime log draining to the given run loop guard.
-///
-/// Multiple calls on the same run-loop thread share one timer. The timer keeps
-/// running until the last returned guard is dropped.
-pub fn attach_rt_drain(guard: novonotes_run_loop::RunLoopGuard) -> RtDrainingRunLoopGuard {
-    let rt_drain = attach_rt_drain_to_local(guard.local());
-    RtDrainingRunLoopGuard {
-        _rt_drain: rt_drain,
-        guard,
-    }
-}
-
-fn attach_rt_drain_to_local(run_loop: &novonotes_run_loop::RunLoopLocal) -> RtDrain {
-    let _ = rt_log();
-    let inner = RT_DRAIN_TIMER.with(|slot| {
-        if let Some(inner) = slot.borrow().upgrade() {
-            return inner;
-        }
-
-        let timer = run_loop_timer::Timer::new(RT_DRAIN_INTERVAL, drain_existing_rt_logs_once);
-        timer.start(run_loop);
-        let inner = Rc::new(RtDrainInner { timer });
-        *slot.borrow_mut() = Rc::downgrade(&inner);
-        inner
-    });
-    drain_existing_rt_logs_once();
-    RtDrain { _inner: inner }
-}
-
-/// Drains the global realtime log once on the current thread.
-pub fn drain_rt_logs_once() {
-    rt_log().drain_to_log();
-}
-
-fn drain_existing_rt_logs_once() {
-    if let Some(rt_log) = RT_LOG.get() {
-        rt_log.drain_to_log();
-    }
-}
+static RT_LOG_ACCEPTING: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn init_rt_buffer() {
     // Initialize from the non-realtime setup path so the first RT log write only
@@ -101,11 +22,32 @@ pub(crate) fn set_rt_fallback_max_level(level: LevelFilter) {
     RT_FALLBACK_MAX_LEVEL.store(level_filter_to_u8(level), Ordering::Relaxed);
 }
 
+pub(crate) fn start_rt_log_drain() {
+    let rt_log = rt_log();
+    rt_log.discard_retained_records();
+    RT_LOG_ACCEPTING.store(true, Ordering::Release);
+}
+
+pub(crate) fn stop_rt_log_drain() {
+    RT_LOG_ACCEPTING.store(false, Ordering::Release);
+}
+
+pub(crate) fn drain_rt_logs_to(mut sink: impl FnMut(&RtLogRecord)) {
+    let Some(rt_log) = RT_LOG.get() else {
+        return;
+    };
+    rt_log.drain_to(&mut sink);
+}
+
 /// Returns whether a realtime log record should be written.
 ///
 /// Exported macros call this before constructing `fmt::Arguments`, so disabled RT logs
 /// do not evaluate formatting arguments on the realtime thread.
 pub fn rt_log_enabled(level: Level, target: &'static str) -> bool {
+    if !RT_LOG_ACCEPTING.load(Ordering::Acquire) {
+        return false;
+    }
+
     if level > log::STATIC_MAX_LEVEL {
         return false;
     }
@@ -123,6 +65,10 @@ pub fn rt_log_enabled(level: Level, target: &'static str) -> bool {
 /// `$crate`. Plugin code should not call or rely on this function directly; use
 /// the `rt*` logging macros instead.
 pub fn write_rt_log(level: Level, target: &'static str, args: fmt::Arguments<'_>) {
+    if !RT_LOG_ACCEPTING.load(Ordering::Acquire) {
+        return;
+    }
+
     rt_log().write_fmt(level, target, args);
 }
 
@@ -158,7 +104,13 @@ impl RtLogInner {
         self.slots[sequence as usize % RT_LOG_CAPACITY].write(sequence, level, target, args);
     }
 
-    fn drain_to_log(&self) {
+    fn discard_retained_records(&self) {
+        let total = self.next_sequence.load(Ordering::Acquire);
+        self.drain_sequence.store(total, Ordering::Release);
+        self.dropped.store(0, Ordering::Release);
+    }
+
+    fn drain_to(&self, sink: &mut impl FnMut(&RtLogRecord)) {
         let total = self.next_sequence.load(Ordering::Acquire);
         let retained_start = total.saturating_sub(RT_LOG_CAPACITY as u64);
         let start = self
@@ -169,24 +121,23 @@ impl RtLogInner {
         let previous_drain_sequence = self.drain_sequence.load(Ordering::Acquire);
         let dropped = self.dropped.swap(0, Ordering::AcqRel);
         if dropped > 0 || start > previous_drain_sequence {
-            log::warn!(
-                target: "wrac_log::rt",
-                "[rt] dropped={} skipped={}",
-                dropped,
-                start.saturating_sub(previous_drain_sequence),
-            );
+            let record = RtLogRecord {
+                sequence: start,
+                level: Level::Warn,
+                target: FixedString::from_str("wrac_log::rt"),
+                message: FixedString::from_string(format!(
+                    "dropped={} skipped={}",
+                    dropped,
+                    start.saturating_sub(previous_drain_sequence),
+                )),
+            };
+            sink(&record);
         }
 
         let mut drained_until = start;
         for sequence in start..total {
             if let Some(record) = self.slots[sequence as usize % RT_LOG_CAPACITY].read(sequence) {
-                log::log!(
-                    target: record.target.as_str(),
-                    record.level,
-                    "[rt] seq={} {}",
-                    record.sequence,
-                    record.message.as_str(),
-                );
+                sink(&record);
                 drained_until = sequence + 1;
             } else {
                 // The writer reserves the sequence before publishing the slot. Stop at the first
@@ -250,11 +201,29 @@ impl RtLogSlot {
     }
 }
 
-struct RtLogRecord {
+pub(crate) struct RtLogRecord {
     sequence: u64,
     level: Level,
     target: FixedString<RT_TARGET_CAPACITY>,
     message: FixedString<RT_MESSAGE_CAPACITY>,
+}
+
+impl RtLogRecord {
+    pub(crate) fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    pub(crate) fn level(&self) -> Level {
+        self.level
+    }
+
+    pub(crate) fn target(&self) -> &str {
+        self.target.as_str()
+    }
+
+    pub(crate) fn message(&self) -> &str {
+        self.message.as_str()
+    }
 }
 
 struct FixedMessage {
@@ -302,6 +271,17 @@ struct FixedString<const N: usize> {
 }
 
 impl<const N: usize> FixedString<N> {
+    fn from_str(value: &str) -> Self {
+        let mut bytes = [0; N];
+        let len = utf8_boundary_len(value, N);
+        bytes[..len].copy_from_slice(&value.as_bytes()[..len]);
+        Self { bytes, len }
+    }
+
+    fn from_string(value: String) -> Self {
+        Self::from_str(&value)
+    }
+
     fn as_str(&self) -> &str {
         std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("<invalid utf8>")
     }
@@ -375,12 +355,14 @@ mod tests {
         let log = RtLogInner::new();
         log.next_sequence.store(1, Ordering::Release);
 
-        log.drain_to_log();
+        let mut records = Vec::new();
+        log.drain_to(&mut |record| records.push(record.sequence()));
         assert_eq!(log.drain_sequence.load(Ordering::Acquire), 0);
 
         log.slots[0].write(0, Level::Debug, "test", format_args!("published"));
-        log.drain_to_log();
+        log.drain_to(&mut |record| records.push(record.sequence()));
         assert_eq!(log.drain_sequence.load(Ordering::Acquire), 1);
+        assert_eq!(records, vec![0]);
     }
 
     #[test]
@@ -398,23 +380,19 @@ mod tests {
     }
 
     #[test]
-    fn rt_drain_guards_share_one_run_loop_timer() {
-        let first_run_loop_guard = novonotes_run_loop::RunLoop::init().expect("init test RunLoop");
-        let second_run_loop_guard =
-            novonotes_run_loop::RunLoop::init().expect("share test RunLoop");
+    fn rt_logs_are_dropped_while_drain_is_stopped() {
+        RT_LOG_ACCEPTING.store(false, Ordering::Release);
 
-        let first_drain = attach_rt_drain(first_run_loop_guard);
-        let second_drain = attach_rt_drain(second_run_loop_guard);
+        write_rt_log(Level::Warn, "test", format_args!("stopped"));
 
-        assert!(Rc::ptr_eq(
-            &first_drain._rt_drain._inner,
-            &second_drain._rt_drain._inner
-        ));
-        assert_eq!(Rc::strong_count(&first_drain._rt_drain._inner), 2);
+        let log = rt_log();
+        let before_start = log.next_sequence.load(Ordering::Acquire);
+        start_rt_log_drain();
+        write_rt_log(Level::Warn, "test", format_args!("started"));
+        stop_rt_log_drain();
 
-        drop(first_drain);
-        assert_eq!(Rc::strong_count(&second_drain._rt_drain._inner), 1);
-
-        drop(second_drain);
+        let mut records = Vec::new();
+        drain_rt_logs_to(|record| records.push(record.sequence()));
+        assert_eq!(records, vec![before_start]);
     }
 }

@@ -6,13 +6,26 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock, mpsc};
 use std::thread::JoinHandle;
+use std::time::Duration;
 use time::{OffsetDateTime, macros::format_description};
 
-const MAX_LOG_FILES: usize = 30;
-const DEFAULT_RECENT_LOG_MAX_FILES: usize = 30;
-const DEFAULT_RECENT_LOG_MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
-const MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS: u32 = 1000;
+mod dotenv;
+mod recent_logs;
+mod rt_drain;
+
+use dotenv::rust_log_from_debug_dotenv;
+#[cfg(test)]
+use dotenv::{debug_dotenv_path, parse_dotenv_rust_log};
+#[cfg(test)]
+use recent_logs::MAX_LOG_FILES;
+use recent_logs::{
+    DEFAULT_RECENT_LOG_MAX_FILES, DEFAULT_RECENT_LOG_MAX_TOTAL_BYTES, archive_existing_latest_log,
+    collect_recent_log_files_from_current, latest_log_file_path, log_file_stem, rotate_logs,
+};
+use rt_drain::drain_rt_records_to_destination;
+
 const ASYNC_LOG_QUEUE_CAPACITY: usize = 4096;
+const ASYNC_WORKER_RT_DRAIN_INTERVAL: Duration = Duration::from_millis(20);
 const ASYNC_MODE: u8 = 0;
 const BLOCKING_MODE: u8 = 1;
 
@@ -165,60 +178,6 @@ impl Drop for AsyncFileLoggerGuard {
     }
 }
 
-fn collect_recent_log_files_from_current(
-    current_log_file: &Path,
-    options: &RecentLogFilesOptions,
-) -> std::io::Result<Vec<PathBuf>> {
-    let Some(log_dir) = current_log_file.parent() else {
-        return Ok(Vec::new());
-    };
-    let Some(current_log_file_name) = current_log_file.file_name().and_then(|name| name.to_str())
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(file_stem) = current_log_file_name.strip_suffix(" Latest.log") else {
-        return Ok(vec![current_log_file.to_path_buf()]);
-    };
-
-    let mut archived_logs = Vec::new();
-    for entry in std::fs::read_dir(log_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path == current_log_file {
-            continue;
-        }
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !is_archived_log_file_name(file_name, file_stem) {
-            continue;
-        }
-        let modified = entry.metadata()?.modified()?;
-        archived_logs.push((modified, path));
-    }
-    archived_logs.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-
-    // After a host crash, the crashed session's previous Latest log becomes an archived
-    // log on the next launch. Include recent archives so diagnostic bundles can still
-    // capture the failure that happened before the current session.
-    let mut selected = vec![current_log_file.to_path_buf()];
-    selected.extend(archived_logs.into_iter().map(|(_, path)| path));
-    selected.truncate(options.max_files.max(1));
-
-    // The current session describes the user's current state and is always included.
-    // Older sessions are included newest first while respecting the total size limit.
-    let mut total_bytes = 0_u64;
-    let mut limited = Vec::new();
-    for path in selected {
-        let size = std::fs::metadata(&path)?.len();
-        if limited.is_empty() || total_bytes.saturating_add(size) <= options.max_total_bytes {
-            total_bytes = total_bytes.saturating_add(size);
-            limited.push(path);
-        }
-    }
-    Ok(limited)
-}
-
 /// Initializes logging for tests.
 ///
 /// In debug builds, `WRAC_LOG_DIR` creates a per-test timestamped log file. Without
@@ -235,196 +194,6 @@ pub fn init_test() {
             init_stderr(None);
         }
     });
-}
-
-fn rotate_logs(log_dir: &Path, file_stem: &str) {
-    let Ok(entries) = std::fs::read_dir(log_dir) else {
-        return;
-    };
-
-    let mut log_files = entries
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| is_archived_log_file_name(&entry.file_name().to_string_lossy(), file_stem))
-        .collect::<Vec<_>>();
-    if log_files.len() <= MAX_LOG_FILES {
-        return;
-    }
-
-    // Rotate by modification time so the newest archived logs survive even if a
-    // timestamped filename was created by a system clock with low precision.
-    log_files.sort_by_key(|entry| {
-        entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .ok()
-    });
-    let files_to_delete = log_files.len() - MAX_LOG_FILES;
-    for entry in log_files.into_iter().take(files_to_delete) {
-        let _ = std::fs::remove_file(entry.path());
-    }
-}
-
-fn latest_log_file_path(log_dir: &Path, file_stem: &str) -> PathBuf {
-    log_dir.join(format!("{file_stem} Latest.log"))
-}
-
-fn archive_existing_latest_log(latest_log_file: &Path, file_stem: &str) -> std::io::Result<()> {
-    if !latest_log_file.exists() {
-        return Ok(());
-    }
-
-    let Some(log_dir) = latest_log_file.parent() else {
-        return Ok(());
-    };
-    match std::fs::rename(
-        latest_log_file,
-        unique_archived_log_file_path(log_dir, file_stem)?,
-    ) {
-        Ok(()) => Ok(()),
-        // Validators and plugin scanners can create multiple short-lived plugin
-        // processes at once. Another process may archive the same Latest log after
-        // our exists check, which is already a successful outcome for this session.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-fn unique_archived_log_file_path(log_dir: &Path, file_stem: &str) -> std::io::Result<PathBuf> {
-    let timestamp = get_timestamp();
-    let first = log_dir.join(format!("{file_stem} {timestamp}.log"));
-    if !first.exists() {
-        return Ok(first);
-    }
-
-    // Fast restarts or coarse system clocks can collide on the same timestamp. Bound
-    // the suffix search so an abnormal directory state cannot turn archive creation
-    // into an infinite loop.
-    for index in 1..MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS {
-        let candidate = log_dir.join(format!("{file_stem} {timestamp}-{index}.log"));
-        if !candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::AlreadyExists,
-        format!(
-            "failed to find a unique archived log file name for '{file_stem}' after {MAX_UNIQUE_ARCHIVED_LOG_FILE_ATTEMPTS} attempts",
-        ),
-    ))
-}
-
-fn is_archived_log_file_name(file_name: &str, file_stem: &str) -> bool {
-    file_name.starts_with(&format!("{file_stem} "))
-        && file_name.ends_with(".log")
-        && file_name != format!("{file_stem} Latest.log")
-}
-
-fn log_file_stem(app_name: &str) -> String {
-    // The app name is also user-visible in the log filename. Replace only characters
-    // that are unsafe or awkward across the major target filesystems.
-    let sanitized = app_name
-        .chars()
-        .map(|ch| {
-            if ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-            {
-                '_'
-            } else {
-                ch
-            }
-        })
-        .collect::<String>()
-        .trim()
-        .to_string();
-
-    if sanitized.is_empty() {
-        "Application".to_string()
-    } else {
-        sanitized
-    }
-}
-
-#[cfg(debug_assertions)]
-fn rust_log_from_debug_dotenv(search_dir: Option<&Path>) -> Option<String> {
-    if std::env::var("RUST_LOG").is_ok() {
-        return None;
-    }
-
-    let dotenv_path = debug_dotenv_path(search_dir?)?;
-    let Ok(content) = std::fs::read_to_string(&dotenv_path) else {
-        return None;
-    };
-    parse_dotenv_rust_log(&content)
-}
-
-#[cfg(not(debug_assertions))]
-fn rust_log_from_debug_dotenv(search_dir: Option<&Path>) -> Option<String> {
-    let _ = search_dir;
-    None
-}
-
-#[cfg(debug_assertions)]
-fn debug_dotenv_path(search_dir: &Path) -> Option<PathBuf> {
-    let mut fallback = None;
-
-    for ancestor in search_dir.ancestors() {
-        let candidate = ancestor.join(".env");
-        if ancestor.join(".git").exists() {
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-            break;
-        }
-        if fallback.is_none() && candidate.is_file() {
-            fallback = Some(candidate);
-        }
-    }
-    fallback
-}
-
-#[cfg(debug_assertions)]
-fn parse_dotenv_rust_log(content: &str) -> Option<String> {
-    let mut rust_log = None;
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key.trim() != "RUST_LOG" {
-            continue;
-        }
-
-        let value = parse_dotenv_value(value.trim());
-        if !value.is_empty() {
-            rust_log = Some(value);
-        }
-    }
-    rust_log
-}
-
-#[cfg(debug_assertions)]
-fn parse_dotenv_value(value: &str) -> String {
-    if let Some(stripped) = value.strip_prefix('"') {
-        if let Some(end) = stripped.find('"') {
-            return stripped[..end].to_string();
-        }
-    } else if let Some(stripped) = value.strip_prefix('\'')
-        && let Some(end) = stripped.find('\'')
-    {
-        return stripped[..end].to_string();
-    }
-
-    value
-        .split_once(" #")
-        .map(|(value, _)| value.trim_end())
-        .unwrap_or(value)
-        .to_string()
 }
 
 #[cfg(not(debug_assertions))]
@@ -803,6 +572,7 @@ impl LazyFileWriter {
             Ok(worker) => {
                 *self.shared.sender.lock().unwrap() = Some(sender);
                 *self.shared.worker.lock().unwrap() = Some(worker);
+                crate::rt::start_rt_log_drain();
                 self.shared.mode.store(ASYNC_MODE, Ordering::Release);
             }
             Err(error) => {
@@ -816,6 +586,7 @@ impl LazyFileWriter {
 
     fn shutdown(&self) {
         let _shutdown = self.shared.shutdown.lock().unwrap();
+        crate::rt::stop_rt_log_drain();
         self.shared.mode.store(BLOCKING_MODE, Ordering::Release);
         drop(self.shared.sender.lock().unwrap().take());
         if let Some(worker) = self.shared.worker.lock().unwrap().take() {
@@ -936,11 +707,22 @@ enum LogDestination {
 }
 
 fn async_file_writer_worker(shared: Arc<LazyFileWriterShared>, receiver: mpsc::Receiver<Vec<u8>>) {
-    while let Ok(buf) = receiver.recv() {
-        write_dropped_record_notice_if_needed(&shared);
-        let _ = write_log_bytes_blocking(&mut shared.destination.lock().unwrap(), &buf);
+    loop {
+        match receiver.recv_timeout(ASYNC_WORKER_RT_DRAIN_INTERVAL) {
+            Ok(buf) => {
+                write_dropped_record_notice_if_needed(&shared);
+                let _ = write_log_bytes_blocking(&mut shared.destination.lock().unwrap(), &buf);
+                drain_rt_records_to_destination(&shared);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                write_dropped_record_notice_if_needed(&shared);
+                drain_rt_records_to_destination(&shared);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
     }
     write_dropped_record_notice_if_needed(&shared);
+    drain_rt_records_to_destination(&shared);
     let _ = flush_log_outputs(&mut shared.destination.lock().unwrap());
 }
 

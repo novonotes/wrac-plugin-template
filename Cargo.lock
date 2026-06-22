@@ -3126,8 +3126,6 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
- "novonotes_run_loop",
- "run_loop_timer",
  "time",
 ]
 

@@ -1,8 +1,12 @@
 //! Logging utilities for WRAC plugins.
 //!
 //! Regular logs are written through the `log` facade. Realtime audio threads must use
-//! the `rt*` macros, which write into a fixed-size global buffer drained later from a
-//! non-realtime run loop timer.
+//! the `rt*` macros, which write into a fixed-size global buffer drained later by the
+//! asynchronous file logger worker.
+//!
+//! Realtime logs preserve their own sequence order, and regular logs preserve their
+//! queue order. Relative ordering between realtime and regular logs is intentionally
+//! not guaranteed because they use separate non-blocking paths.
 
 mod file_logger;
 mod rt;
@@ -24,7 +28,6 @@ pub use rt::rt_log_enabled as __rt_log_enabled;
 /// Plugin code should not call or rely on this symbol directly; use the `rt*`
 /// logging macros instead.
 pub use rt::write_rt_log as __write_rt_log;
-pub use rt::{RtDrainingRunLoopGuard, attach_rt_drain, drain_rt_logs_once};
 
 #[macro_export]
 macro_rules! rttrace {
