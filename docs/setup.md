@@ -89,6 +89,33 @@ cargo xtask install
 `cargo xtask install` builds and installs the selected plugin formats.
 For detailed usage of each xtask command, see `cargo xtask --help`.
 
+### Plugin Resources
+
+Plugins can package additional runtime resources by placing files in one of the
+resource directories below.
+
+```text
+plugins/<plugin>/resources/                 # source-managed resources
+target/wrac-plugins/<plugin>/wrac/resources/ # generated resources
+```
+
+`xtask` merges these directories into a clean staging directory before packaging.
+Source-managed resources are copied first, then generated resources are copied on
+top of them. This lets generated files intentionally replace source-managed files
+with the same relative path while keeping the final packaged resources identical
+across the supported formats.
+
+Resource packaging is currently supported for:
+
+- CLAP on macOS, Windows, and Linux
+- VST3 on macOS
+
+If plugin resources are present and an unsupported wrapper format is requested,
+`xtask` fails during wrapper configure instead of producing an artifact that is
+missing required files. AUv2, AAX, standalone, Windows VST3, and Linux VST3
+resource packaging should be implemented in the wrapper layer before enabling
+those combinations.
+
 ### 5. Verify
 
 Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).

@@ -244,6 +244,7 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
     let bundle = ctx.clap_bundle(profile);
     remove_if_exists(&bundle)?;
     fs::create_dir_all(ctx.plugins_dir(profile))?;
+    let resource_dir = prepare_plugin_resource_dir(ctx)?;
 
     match ctx.platform {
         Platform::Macos => {
@@ -262,6 +263,9 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
                 ctx.dynamic_library(profile),
                 macos.join(&ctx.metadata.bundle_name),
             )?;
+            if let Some(resource_dir) = &resource_dir {
+                copy_resource_directory(resource_dir, &contents.join("Resources"))?;
+            }
             run_with_language(
                 Command::new("install_name_tool")
                     .arg("-id")
@@ -276,10 +280,116 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
             // On Windows/Linux the CLAP artifact is a dynamic library with the .clap extension.
             // Skipping the bundle structure keeps it compatible with each OS's existing host scan conventions.
             fs::copy(ctx.dynamic_library(profile), &bundle)?;
+            if let (Some(resource_dir), Some(parent)) = (&resource_dir, bundle.parent()) {
+                copy_resource_directory(resource_dir, parent)?;
+            }
         }
     }
 
     ensure_exists(&bundle, "CLAP artifact")?;
+    Ok(())
+}
+
+fn prepare_plugin_resource_dir(ctx: &Context) -> Result<Option<PathBuf>> {
+    let source_dirs = plugin_resource_dirs(ctx);
+    let stage_dir = staged_plugin_resource_dir(ctx);
+    remove_if_exists(&stage_dir)?;
+    if source_dirs.is_empty() {
+        return Ok(None);
+    }
+
+    fs::create_dir_all(&stage_dir)?;
+    for source_dir in source_dirs {
+        copy_resource_directory(&source_dir, &stage_dir)?;
+    }
+    Ok(Some(stage_dir))
+}
+
+fn plugin_resource_dirs(ctx: &Context) -> Vec<PathBuf> {
+    [
+        // Source resources are hand-authored plugin assets. They are copied first so generated
+        // resources can intentionally replace them when both trees contain the same relative path.
+        ctx.plugin_root.join("resources"),
+        // Generated resources belong under the build output so large artifacts can be rebuilt and
+        // omitted from source control while still flowing through the same packaging contract.
+        ctx.wrac_dir().join("resources"),
+    ]
+    .into_iter()
+    .filter(|resource_dir| resource_dir.exists())
+    .collect()
+}
+
+fn staged_plugin_resource_dir(ctx: &Context) -> PathBuf {
+    ctx.wrac_dir().join("staged-resources")
+}
+
+fn copy_resource_directory(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    copy_resource_directory_inner(source, destination)
+}
+
+fn copy_resource_directory_inner(source: &Path, destination: &Path) -> Result<()> {
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            copy_symlink(&source_path, &destination_path)?;
+        } else if file_type.is_dir() {
+            if destination_path.is_symlink()
+                || (destination_path.exists() && !destination_path.is_dir())
+            {
+                remove_resource_destination(&destination_path)?;
+            }
+            fs::create_dir_all(&destination_path)?;
+            copy_resource_directory_inner(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            if destination_path.exists() || destination_path.is_symlink() {
+                remove_resource_destination(&destination_path)?;
+            }
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
+    let target = fs::read_link(source)?;
+    if destination.exists() || destination.is_symlink() {
+        remove_resource_destination(destination)?;
+    }
+    std::os::unix::fs::symlink(target, destination)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
+    let target = fs::read_link(source)?;
+    if destination.exists() || destination.is_symlink() {
+        remove_resource_destination(destination)?;
+    }
+    // Preserve symlinks produced by external packagers instead of flattening them, because their
+    // relative loader paths can be part of the runtime's file-system contract.
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(target, destination)?;
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)?;
+    }
+    Ok(())
+}
+
+fn remove_resource_destination(path: &Path) -> Result<()> {
+    // Resource staging intentionally allows generated resources to replace source resources with
+    // the same relative path. Use symlink_metadata so replacement never follows a symlink into the
+    // source tree or a tool-generated runtime directory.
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        fs::remove_file(path)?;
+    } else if metadata.is_dir() {
+        fs::remove_dir_all(path)?;
+    }
     Ok(())
 }
 
@@ -353,6 +463,8 @@ pub(crate) fn configure_wrapper(
         WrapperBuild::Standalone => ctx.standalone_dir(profile),
     };
     fs::create_dir_all(&stage_dir)?;
+    let resource_dir = prepare_plugin_resource_dir(ctx)?;
+    ensure_wrapper_resources_supported(ctx, build, resource_dir.as_deref())?;
 
     let mut args = Vec::<OsString>::new();
     push_cmake_arg(&mut args, "-S");
@@ -395,6 +507,15 @@ pub(crate) fn configure_wrapper(
             ctx.metadata.version
         ),
     );
+    if let Some(resource_dir) = &resource_dir {
+        push_cmake_arg(
+            &mut args,
+            format!(
+                "-DCLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY={}",
+                resource_dir.display()
+            ),
+        );
+    }
     push_cmake_arg(
         &mut args,
         format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()),
@@ -625,6 +746,38 @@ pub(crate) fn standalone_products<'a>(
             .ok_or_else(|| format!("plugin ID not found in WRAC metadata: {plugin_id}").into());
     }
     Ok(ctx.metadata.plugins.iter().enumerate().collect())
+}
+
+fn ensure_wrapper_resources_supported(
+    ctx: &Context,
+    build: WrapperBuild,
+    resource_dir: Option<&Path>,
+) -> Result<()> {
+    if resource_dir.is_none() {
+        return Ok(());
+    }
+
+    match build {
+        WrapperBuild::Plugins { vst3: true, au: false } if ctx.platform == Platform::Macos => {
+            Ok(())
+        }
+        WrapperBuild::Plugins { au: true, .. } => Err(
+            "plugin resources are not supported for AUv2 wrapper builds yet; build CLAP or macOS VST3 only, or remove plugin resources".into(),
+        ),
+        WrapperBuild::Plugins { vst3: true, .. } => Err(
+            "plugin resources are only supported for macOS VST3 wrapper builds; build CLAP or remove plugin resources".into(),
+        ),
+        WrapperBuild::Plugins {
+            vst3: false,
+            au: false,
+        } => Ok(()),
+        WrapperBuild::Aax => Err(
+            "plugin resources are not supported for AAX wrapper builds yet; build CLAP or remove plugin resources".into(),
+        ),
+        WrapperBuild::Standalone => Err(
+            "plugin resources are not supported for standalone app builds yet; build CLAP or remove plugin resources".into(),
+        ),
+    }
 }
 
 fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
