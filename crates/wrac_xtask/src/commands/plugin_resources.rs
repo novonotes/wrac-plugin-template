@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use crate::Result;
 use crate::context::Context;
-use crate::targets::Platform;
 use crate::util::remove_if_exists;
 
 use super::build::WrapperBuild;
@@ -112,7 +111,6 @@ fn remove_resource_destination(path: &Path) -> Result<()> {
 }
 
 pub(super) fn ensure_wrapper_resources_supported(
-    ctx: &Context,
     build: WrapperBuild,
     resource_dir: Option<&Path>,
 ) -> Result<()> {
@@ -120,26 +118,18 @@ pub(super) fn ensure_wrapper_resources_supported(
         return Ok(());
     }
 
+    // Wrapper resource packaging needs format-specific artifact/install semantics and rebuild
+    // dependencies. Failing here avoids producing bundles that pass build steps while silently
+    // omitting or staling required runtime files.
     match build {
-        WrapperBuild::Plugins {
-            vst3: true,
-            au: false,
-        } if ctx.platform == Platform::Macos => Ok(()),
-        WrapperBuild::Plugins { au: true, .. } => Err(
-            "plugin resources are not supported for AUv2 wrapper builds yet; build CLAP or macOS VST3 only, or remove plugin resources".into(),
+        WrapperBuild::Plugins { .. } => Err(
+            "plugin resources are not supported for wrapper plugin builds yet; build macOS CLAP or remove plugin resources".into(),
         ),
-        WrapperBuild::Plugins { vst3: true, .. } => Err(
-            "plugin resources are only supported for macOS VST3 wrapper builds; build CLAP or remove plugin resources".into(),
-        ),
-        WrapperBuild::Plugins {
-            vst3: false,
-            au: false,
-        } => Ok(()),
         WrapperBuild::Aax => Err(
-            "plugin resources are not supported for AAX wrapper builds yet; build CLAP or remove plugin resources".into(),
+            "plugin resources are not supported for AAX wrapper builds yet; build macOS CLAP or remove plugin resources".into(),
         ),
         WrapperBuild::Standalone => Err(
-            "plugin resources are not supported for standalone app builds yet; build CLAP or remove plugin resources".into(),
+            "plugin resources are not supported for standalone app builds yet; build macOS CLAP or remove plugin resources".into(),
         ),
     }
 }

@@ -102,19 +102,22 @@ target/wrac-plugins/<plugin>/wrac/resources/ # generated resources
 `xtask` merges these directories into a clean staging directory before packaging.
 Source-managed resources are copied first, then generated resources are copied on
 top of them. This lets generated files intentionally replace source-managed files
-with the same relative path while keeping the final packaged resources identical
-across the supported formats.
+with the same relative path.
 
 Resource packaging is currently supported for:
 
-- CLAP on macOS, Windows, and Linux
-- VST3 on macOS
+- CLAP on macOS
 
-If plugin resources are present and an unsupported wrapper format is requested,
-`xtask` fails during wrapper configure instead of producing an artifact that is
-missing required files. AUv2, AAX, standalone, Windows VST3, and Linux VST3
-resource packaging should be implemented in the wrapper layer before enabling
-those combinations.
+macOS CLAP is enabled first because its `.clap` bundle has a dedicated
+`Contents/Resources` namespace and the bundle is the same unit that build,
+install, and uninstall commands move around. Windows/Linux CLAP artifacts are
+single `.clap` dynamic libraries, so resource packaging needs an explicit
+artifact layout and install/uninstall contract before it can be enabled there.
+
+If plugin resources are present and an unsupported target is requested, `xtask`
+fails instead of producing an artifact that is missing required files. Wrapper
+formats such as VST3, AUv2, AAX, and standalone also need format-specific
+resource copy and rebuild semantics before resource packaging can be enabled.
 
 ### 5. Verify
 

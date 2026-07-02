@@ -280,12 +280,17 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
             codesign(&bundle, ctx.output_language)?;
         }
         Platform::Windows | Platform::Linux => {
+            if resource_dir.is_some() {
+                // Non-macOS CLAP artifacts are bare dynamic libraries. Until resources have a
+                // namespaced artifact layout and matching install/uninstall behavior there, fail
+                // instead of leaving required files beside an artifact that install will not move.
+                return Err(
+                    "plugin resources are only supported for macOS CLAP bundles; Windows/Linux CLAP resources need an explicit artifact and install layout before they can be enabled".into(),
+                );
+            }
             // On Windows/Linux the CLAP artifact is a dynamic library with the .clap extension.
             // Skipping the bundle structure keeps it compatible with each OS's existing host scan conventions.
             fs::copy(ctx.dynamic_library(profile), &bundle)?;
-            if let (Some(resource_dir), Some(parent)) = (&resource_dir, bundle.parent()) {
-                copy_resource_directory(resource_dir, parent)?;
-            }
         }
     }
 
@@ -364,7 +369,7 @@ pub(crate) fn configure_wrapper(
     };
     fs::create_dir_all(&stage_dir)?;
     let resource_dir = prepare_plugin_resource_dir(ctx)?;
-    ensure_wrapper_resources_supported(ctx, build, resource_dir.as_deref())?;
+    ensure_wrapper_resources_supported(build, resource_dir.as_deref())?;
 
     let mut args = Vec::<OsString>::new();
     push_cmake_arg(&mut args, "-S");
@@ -407,15 +412,6 @@ pub(crate) fn configure_wrapper(
             ctx.metadata.version
         ),
     );
-    if let Some(resource_dir) = &resource_dir {
-        push_cmake_arg(
-            &mut args,
-            format!(
-                "-DCLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY={}",
-                resource_dir.display()
-            ),
-        );
-    }
     push_cmake_arg(
         &mut args,
         format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()),
