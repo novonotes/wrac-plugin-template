@@ -15,6 +15,7 @@ use crate::util::{
 use crate::{BuildProfile, InstallScope, UninstallScope};
 
 mod build;
+mod plugin_resources;
 mod validation;
 
 pub(crate) use self::build::{
