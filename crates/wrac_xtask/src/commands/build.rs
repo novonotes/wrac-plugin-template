@@ -262,6 +262,9 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
                 ctx.dynamic_library(profile),
                 macos.join(&ctx.metadata.bundle_name),
             )?;
+            for resource_dir in plugin_resource_dirs(ctx) {
+                copy_resource_directory(&resource_dir, &contents.join("Resources"))?;
+            }
             run_with_language(
                 Command::new("install_name_tool")
                     .arg("-id")
@@ -276,10 +279,86 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
             // On Windows/Linux the CLAP artifact is a dynamic library with the .clap extension.
             // Skipping the bundle structure keeps it compatible with each OS's existing host scan conventions.
             fs::copy(ctx.dynamic_library(profile), &bundle)?;
+            if let Some(parent) = bundle.parent() {
+                for resource_dir in plugin_resource_dirs(ctx) {
+                    copy_resource_directory(&resource_dir, parent)?;
+                }
+            }
         }
     }
 
     ensure_exists(&bundle, "CLAP artifact")?;
+    Ok(())
+}
+
+fn plugin_resource_dirs(ctx: &Context) -> Vec<PathBuf> {
+    [
+        // Source resources are for small, hand-authored assets that should live with the plugin.
+        ctx.plugin_root.join("resources"),
+        // Generated resources are owned by the build output so large prebuilt runtimes can be
+        // rebuilt and skipped independently of source control.
+        ctx.wrac_dir().join("resources"),
+    ]
+    .into_iter()
+    .filter(|resource_dir| resource_dir.exists())
+    .collect()
+}
+
+fn primary_plugin_resource_dir(ctx: &Context) -> Option<PathBuf> {
+    [
+        ctx.wrac_dir().join("resources"),
+        ctx.plugin_root.join("resources"),
+    ]
+    .into_iter()
+    .find(|resource_dir| resource_dir.exists())
+}
+
+fn copy_resource_directory(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    copy_resource_directory_inner(source, destination)
+}
+
+fn copy_resource_directory_inner(source: &Path, destination: &Path) -> Result<()> {
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            copy_symlink(&source_path, &destination_path)?;
+        } else if file_type.is_dir() {
+            fs::create_dir_all(&destination_path)?;
+            copy_resource_directory_inner(&source_path, &destination_path)?;
+        } else if file_type.is_file() {
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
+    let target = fs::read_link(source)?;
+    if destination.exists() || destination.is_symlink() {
+        remove_if_exists(destination)?;
+    }
+    std::os::unix::fs::symlink(target, destination)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
+    let target = fs::read_link(source)?;
+    if destination.exists() || destination.is_symlink() {
+        remove_if_exists(destination)?;
+    }
+    // Preserve relative symlinks produced by tools such as PyInstaller instead of
+    // flattening them; their loader paths are part of the runtime contract.
+    if source.is_dir() {
+        std::os::windows::fs::symlink_dir(target, destination)?;
+    } else {
+        std::os::windows::fs::symlink_file(target, destination)?;
+    }
     Ok(())
 }
 
@@ -395,6 +474,17 @@ pub(crate) fn configure_wrapper(
             ctx.metadata.version
         ),
     );
+    if let Some(resource_dir) = primary_plugin_resource_dir(ctx) {
+        // Wrapper projects accept a single resource directory; prefer generated resources because
+        // release runtimes are build outputs, while source resources are only lightweight fallbacks.
+        push_cmake_arg(
+            &mut args,
+            format!(
+                "-DCLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY={}",
+                resource_dir.display()
+            ),
+        );
+    }
     push_cmake_arg(
         &mut args,
         format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_config()),

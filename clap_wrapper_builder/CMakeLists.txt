@@ -28,6 +28,9 @@ project(clap_wrapper_builder)
 #     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
 #                                           copied here under fixed names.
 #                                           Leave empty to skip staging.
+#     CLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY
+#                                           Directory copied into plugin bundle
+#                                           resources when supported.
 #
 #   Products
 #     CLAP_WRAPPER_BUILDER_PRODUCT_COUNT    Number of plugin products exposed by
@@ -81,6 +84,7 @@ set(CLAP_WRAPPER_BUILDER_TARGET_NAME "" CACHE STRING "Internal CMake target name
 set(CLAP_WRAPPER_BUILDER_OUTPUT_NAME "" CACHE STRING "Output plugin display/bundle name")
 set(CLAP_WRAPPER_BUILDER_STAGE_DIR "" CACHE PATH "Directory where built artifacts are staged")
 set(CLAP_WRAPPER_BUILDER_BUNDLE_VERSION "1.0.0" CACHE STRING "Version written into wrapped plugin bundles")
+set(CLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY "" CACHE PATH "Directory copied into plugin bundle resources")
 set(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT "1" CACHE STRING "Number of plugin products exposed by the wrapped library")
 option(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE "Build standalone app target in clap_wrapper_builder" OFF)
 option(CLAP_WRAPPER_BUILDER_BUILD_VST3 "Build VST3 target in clap_wrapper_builder" ON)
@@ -121,6 +125,7 @@ message(STATUS "  Target Library: ${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
 message(STATUS "  Plugin Name: ${PLUGIN_NAME}")
 message(STATUS "  Safe Plugin Name: ${PLUGIN_NAME_SAFE}")
 message(STATUS "  Stage Dir: ${CLAP_WRAPPER_BUILDER_STAGE_DIR}")
+message(STATUS "  Resource Dir: ${CLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY}")
 message(STATUS "  Build AAX: ${CLAP_WRAPPER_BUILDER_BUILD_AAX}")
 message(STATUS "  Product Count: ${CLAP_WRAPPER_BUILDER_PRODUCT_COUNT}")
 if(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT LESS 1)
@@ -243,6 +248,7 @@ set(CLAPFIRST_COMMON_ARGS
     # We stage artifacts ourselves into STAGE_DIR below, so suppress
     # clap-wrapper's own install-to-system-folders step.
     COPY_AFTER_BUILD FALSE
+    RESOURCE_DIRECTORY "${CLAP_WRAPPER_BUILDER_RESOURCE_DIRECTORY}"
     WINDOWS_FOLDER_VST3 TRUE
 )
 
