@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 mod audio_ports;
+mod latency;
 mod params;
 mod state;
 
@@ -24,14 +25,15 @@ pub(crate) use params::{
 };
 
 use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudioPorts};
+use latency::WracGainLatencyExtension;
 use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
 use wrac_clap_adapter::{
     AaxDescriptor, AaxStemConfig, ActivateContext, ActivateResult, ActiveProcessor, Auv2Descriptor,
     InactiveProcessor, LogConfig, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension,
-    PluginInstance, PluginInstanceContext, PluginParamsQuery, PluginResult, PluginStateExtension,
-    Vst3Descriptor,
+    PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery, PluginResult,
+    PluginStateExtension, Vst3Descriptor,
 };
 use wrac_wxp_gui::WxpGuiController;
 
@@ -112,6 +114,7 @@ pub(crate) struct WracGainPlugin {
     params: Arc<WracGainParamsExtension>,
     param_output_queue: Arc<WracGainParamOutputQueue>,
     gui: Arc<WxpGuiController>,
+    latency: Arc<WracGainLatencyExtension>,
     // Project state save/restore. A dedicated capability independent of the lifecycle
     // lock so that a committed snapshot can be returned even while active or during a
     // wrapper re-entry.
@@ -128,6 +131,7 @@ impl WracGainPlugin {
         let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
         let param_output_queue =
             Arc::new(WracGainParamOutputQueue::new(context.host_params.clone()));
+        let latency = Arc::new(WracGainLatencyExtension);
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
             descriptor,
@@ -152,6 +156,7 @@ impl WracGainPlugin {
             params,
             param_output_queue,
             gui: gui.controller,
+            latency,
             state_extension,
         }
     }
@@ -255,5 +260,9 @@ impl PluginInstance for WracGainPlugin {
 
     fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         Some(self.gui.clone())
+    }
+
+    fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
+        Some(self.latency.clone())
     }
 }
