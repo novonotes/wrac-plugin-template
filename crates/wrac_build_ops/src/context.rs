@@ -305,7 +305,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "wrac_xtask_layout_test_{}_{}_{}",
+            "wrac_build_ops_layout_test_{}_{}_{}",
             std::process::id(),
             nanos,
             name

@@ -29,7 +29,7 @@ validation_profile = "prototype"
 
 ### `[package]`
 
-`[package]` は任意です。`wrac_xtask` が Cargo パッケージからマニフェストを読む場合、
+`[package]` は任意です。`wrac_build_ops` が Cargo パッケージからマニフェストを読む場合、
 `name`、`version`、`repository` が省略されていれば、パッケージの `Cargo.toml` から補完します。
 
 | フィールド | 型 | 必須 | 受け付ける値 | 意味 |

@@ -1,22 +1,31 @@
 //! Repository-local `cargo xtask` entry point for the WRAC template.
 //!
-//! This crate owns the template command planner. `wrac_xtask` only provides
-//! typed task primitives and shared execution helpers.
+//! This crate owns the template command planner and task executor. Shared
+//! crates provide graph primitives and typed WRAC build operations, but the
+//! task enum and dependencies live here so products can extend the workflow
+//! without changing the template libraries.
 
 use std::{collections::HashMap, path::Path};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use wrac_xtask::{
-    BuildProfile, FailurePolicy, InstallScope, TaskId, TaskKind, TaskNode, TaskPlan,
-    UninstallScope, WracContext, XtaskConfig, XtaskOutputLanguage,
-    plan::{
-        execute_plan, failure_policy, print_build_outputs, resolve_build_targets_from_metadata,
-        resolve_plugin_targets_from_metadata, resolve_validate_targets_from_metadata,
-    },
+use wrac_build_ops::{
+    BuildProfile, InstallScope, RustPluginBuild, UninstallScope, WracContext, WrapperBuild,
+    WrapperTarget, XtaskConfig, XtaskOutputLanguage, build_gui, build_rust_plugin,
+    build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
+    launch, load_workspace_dotenv, package_clap, package_task_id, print_build_outputs,
+    resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
+    resolve_validate_targets_from_metadata, select_packages, select_single_package,
     targets::{PluginTarget, Target, ValidateTarget},
+    uninstall_plugin_target, validate_plugin_target, validate_wrac_rules_for_targets,
+};
+use xtask_workflow::{
+    FailurePolicy, TaskGraph, TaskNode, WorkflowMessages, execute_plan, failure_policy,
 };
 
-fn main() -> wrac_xtask::Result<()> {
+type Result<T> = wrac_build_ops::Result<T>;
+type TaskPlan = TaskGraph<TaskKind>;
+
+fn main() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("xtask must be a direct child of the repository root")
@@ -28,7 +37,7 @@ fn main() -> wrac_xtask::Result<()> {
         output_language: XtaskOutputLanguage::English,
         root,
     };
-    wrac_xtask::load_workspace_dotenv(&config)?;
+    load_workspace_dotenv(&config)?;
     let cli = Cli::parse();
     match cli.command {
         Command::Build(args) => execute_build(&config, args),
@@ -37,7 +46,7 @@ fn main() -> wrac_xtask::Result<()> {
         Command::Validate(args) => execute_validate(&config, args),
         Command::Launch(args) => execute_launch(&config, args),
         Command::Clean(args) => execute_clean(&config, args),
-        Command::Quality => wrac_xtask::run_quality(&config.root),
+        Command::Quality => wrac_build_ops::run_quality(&config.root),
     }
 }
 
@@ -205,14 +214,211 @@ impl From<UninstallScopeArg> for UninstallScope {
     }
 }
 
-fn execute_build(config: &XtaskConfig, args: BuildArgs) -> wrac_xtask::Result<()> {
+#[derive(Debug, Clone)]
+enum TaskKind {
+    Clean,
+    BuildGui,
+    BuildRustDefault,
+    BuildRustStandalone,
+    PackageClap,
+    ConfigureWrapperPlugins {
+        vst3: bool,
+        au: bool,
+    },
+    ConfigureWrapperAax,
+    ConfigureWrapperStandalone,
+    BuildVst3Bundle,
+    BuildAuBundle,
+    BuildAaxBundle,
+    BuildStandaloneBundle {
+        plugin_id: Option<String>,
+    },
+    LaunchStandalone {
+        plugin_id: Option<String>,
+    },
+    CheckInstallScope {
+        target: PluginTarget,
+        scope: InstallScope,
+    },
+    InstallBundle {
+        target: PluginTarget,
+        scope: InstallScope,
+    },
+    UninstallBundle {
+        target: PluginTarget,
+        scope: UninstallScope,
+        dry_run: bool,
+    },
+    ValidateWracRules {
+        targets: Vec<ValidateTarget>,
+    },
+    ValidateBundle {
+        target: ValidateTarget,
+    },
+}
+
+impl TaskKind {
+    fn label(&self) -> String {
+        match self {
+            Self::Clean => "clean generated artifacts".to_string(),
+            Self::BuildGui => "build GUI".to_string(),
+            Self::BuildRustDefault => "build Rust plugin library".to_string(),
+            Self::BuildRustStandalone => "build Rust standalone library".to_string(),
+            Self::PackageClap => "package CLAP bundle".to_string(),
+            Self::ConfigureWrapperPlugins { vst3, au } => {
+                let mut formats = Vec::new();
+                if *vst3 {
+                    formats.push("VST3");
+                }
+                if *au {
+                    formats.push("AU");
+                }
+                format!("configure clap-wrapper ({})", formats.join(", "))
+            }
+            Self::ConfigureWrapperAax => "configure clap-wrapper (AAX)".to_string(),
+            Self::ConfigureWrapperStandalone => "configure clap-wrapper (standalone)".to_string(),
+            Self::BuildVst3Bundle => "build VST3 bundle".to_string(),
+            Self::BuildAuBundle => "build AU bundle".to_string(),
+            Self::BuildAaxBundle => "build AAX bundle".to_string(),
+            Self::BuildStandaloneBundle { plugin_id } => match plugin_id {
+                Some(plugin_id) => format!("build standalone artifact ({plugin_id})"),
+                None => "build standalone artifact".to_string(),
+            },
+            Self::LaunchStandalone { plugin_id } => match plugin_id {
+                Some(plugin_id) => format!("launch standalone artifact ({plugin_id})"),
+                None => "launch standalone artifact".to_string(),
+            },
+            Self::CheckInstallScope { target, scope } => {
+                format!("check install scope for {} ({scope:?})", target.display())
+            }
+            Self::InstallBundle { target, scope } => {
+                format!("install {} ({scope:?})", target.display())
+            }
+            Self::UninstallBundle {
+                target, dry_run, ..
+            } => {
+                if *dry_run {
+                    format!("plan uninstall {}", target.display())
+                } else {
+                    format!("uninstall {}", target.display())
+                }
+            }
+            Self::ValidateWracRules { targets } => {
+                let targets = targets
+                    .iter()
+                    .map(|target| target.display())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("run WRAC production-readiness checks ({targets})")
+            }
+            Self::ValidateBundle { target } => format!("validate {}", target.display()),
+        }
+    }
+}
+
+fn execute_package_plan(
+    ctx: &WracContext,
+    profile: BuildProfile,
+    graph: TaskPlan,
+    dry_run: bool,
+    policy: FailurePolicy,
+) -> Result<()> {
+    execute_plan(
+        graph,
+        dry_run,
+        policy,
+        &WorkflowMessages::ENGLISH,
+        |kind| kind.label(),
+        |kind| run_task(ctx, profile, kind),
+    )
+}
+
+fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result<()> {
+    match kind {
+        TaskKind::Clean => clean(ctx),
+        TaskKind::BuildGui => build_gui(ctx),
+        TaskKind::BuildRustDefault => build_rust_plugin(ctx, profile, RustPluginBuild::Default),
+        TaskKind::BuildRustStandalone => {
+            build_rust_plugin(ctx, profile, RustPluginBuild::Standalone)
+        }
+        TaskKind::PackageClap => package_clap(ctx, profile),
+        TaskKind::ConfigureWrapperPlugins { vst3, au } => configure_wrapper(
+            ctx,
+            profile,
+            WrapperBuild::Plugins {
+                vst3: *vst3,
+                au: *au,
+            },
+        ),
+        TaskKind::ConfigureWrapperAax => configure_wrapper(ctx, profile, WrapperBuild::Aax),
+        TaskKind::ConfigureWrapperStandalone => {
+            configure_wrapper(ctx, profile, WrapperBuild::Standalone)
+        }
+        TaskKind::BuildVst3Bundle => build_wrapper_target(
+            ctx,
+            profile,
+            WrapperBuild::Plugins {
+                vst3: true,
+                au: false,
+            },
+            WrapperTarget::Vst3,
+            None,
+        ),
+        TaskKind::BuildAuBundle => build_wrapper_target(
+            ctx,
+            profile,
+            WrapperBuild::Plugins {
+                vst3: false,
+                au: true,
+            },
+            WrapperTarget::Au,
+            None,
+        ),
+        TaskKind::BuildAaxBundle => {
+            build_wrapper_target(ctx, profile, WrapperBuild::Aax, WrapperTarget::Aax, None)
+        }
+        TaskKind::BuildStandaloneBundle { plugin_id } => build_wrapper_target(
+            ctx,
+            profile,
+            WrapperBuild::Standalone,
+            WrapperTarget::Standalone,
+            plugin_id.as_deref(),
+        ),
+        TaskKind::LaunchStandalone { plugin_id } => launch(ctx, profile, plugin_id.as_deref()),
+        TaskKind::CheckInstallScope { target, scope } => {
+            check_install_dir(ctx, *scope, target.format())
+        }
+        TaskKind::InstallBundle { target, scope } => {
+            install_plugin_target(ctx, profile, *scope, *target)
+        }
+        TaskKind::UninstallBundle {
+            target,
+            scope,
+            dry_run,
+        } => {
+            let (removed, missing) = uninstall_plugin_target(ctx, *scope, *target, *dry_run)?;
+            if *dry_run {
+                println!("  {}", uninstall_summary(*target, removed, missing, true));
+            } else {
+                println!("  {}", uninstall_summary(*target, removed, missing, false));
+            }
+            Ok(())
+        }
+        TaskKind::ValidateWracRules { targets } => {
+            validate_wrac_rules_for_targets(ctx, profile, targets)
+        }
+        TaskKind::ValidateBundle { target } => validate_plugin_target(ctx, profile, *target),
+    }
+}
+
+fn execute_build(config: &XtaskConfig, args: BuildArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let profile = BuildProfile::from_release(args.release);
         let targets = resolve_build_targets_from_metadata(&ctx, &args.target)?;
         let artifact_plan =
             build_artifact_plan(&ctx, &targets, args.clean, args.plugin_id.clone(), None);
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -226,7 +432,7 @@ fn execute_build(config: &XtaskConfig, args: BuildArgs) -> wrac_xtask::Result<()
     Ok(())
 }
 
-fn execute_install(config: &XtaskConfig, args: InstallArgs) -> wrac_xtask::Result<()> {
+fn execute_install(config: &XtaskConfig, args: InstallArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let profile = BuildProfile::from_release(args.release);
@@ -240,14 +446,14 @@ fn execute_install(config: &XtaskConfig, args: InstallArgs) -> wrac_xtask::Resul
             build_artifact_plan(&ctx, &build_targets, false, None, Some((&targets, scope)));
         for target in targets {
             let install = artifact_plan.graph.task(
-                task_id(&ctx, &format!("install-{target:?}")),
+                package_task_id(&ctx, &format!("install-{target:?}")),
                 TaskKind::InstallBundle { target, scope },
             );
             artifact_plan
                 .graph
                 .depends_on(install, artifact_plan.build_by_target[&target.target()]);
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -258,14 +464,14 @@ fn execute_install(config: &XtaskConfig, args: InstallArgs) -> wrac_xtask::Resul
     Ok(())
 }
 
-fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> wrac_xtask::Result<()> {
+fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let targets = resolve_plugin_targets_from_metadata(&ctx, &args.target)?;
         let mut plan = TaskPlan::new();
         for target in targets {
             plan.task(
-                task_id(&ctx, &format!("uninstall-{target:?}")),
+                package_task_id(&ctx, &format!("uninstall-{target:?}")),
                 TaskKind::UninstallBundle {
                     target,
                     scope: args.scope.into(),
@@ -273,7 +479,7 @@ fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> wrac_xtask::R
                 },
             );
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             BuildProfile::Debug,
             plan,
@@ -284,7 +490,7 @@ fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> wrac_xtask::R
     Ok(())
 }
 
-fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> wrac_xtask::Result<()> {
+fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let profile = BuildProfile::from_release(args.release);
@@ -300,7 +506,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> wrac_xtask::Res
         let mut artifact_plan = build_artifact_plan(&ctx, &build_targets, false, None, None);
         let rules = if run_readiness {
             let rules = artifact_plan.graph.task(
-                task_id(&ctx, "validate-wrac-rules"),
+                package_task_id(&ctx, "validate-wrac-rules"),
                 TaskKind::ValidateWracRules {
                     targets: validate_targets.clone(),
                 },
@@ -315,7 +521,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> wrac_xtask::Res
         if validate_checks(&args).run_external_validators {
             for target in validate_targets {
                 let validate = artifact_plan.graph.task(
-                    task_id(&ctx, &format!("validate-{target:?}")),
+                    package_task_id(&ctx, &format!("validate-{target:?}")),
                     TaskKind::ValidateBundle { target },
                 );
                 if let Some(rules) = rules {
@@ -323,7 +529,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> wrac_xtask::Res
                 }
                 if target == ValidateTarget::Au {
                     let install = artifact_plan.graph.task(
-                        task_id(&ctx, "install-Au-for-validation"),
+                        package_task_id(&ctx, "install-Au-for-validation"),
                         TaskKind::InstallBundle {
                             target: PluginTarget::Au,
                             scope: InstallScope::User,
@@ -340,7 +546,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> wrac_xtask::Res
                 }
             }
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -370,7 +576,7 @@ fn validate_checks(args: &ValidateArgs) -> ValidateChecks {
     }
 }
 
-fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> wrac_xtask::Result<()> {
+fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> Result<()> {
     let package = select_single_package(config, args.package.as_deref())?;
     let ctx = WracContext::new(config, &package)?;
     let profile = BuildProfile::from_release(args.release);
@@ -382,7 +588,7 @@ fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> wrac_xtask::Result<
         None,
     );
     let launch = artifact_plan.graph.task(
-        task_id(&ctx, "launch-standalone"),
+        package_task_id(&ctx, "launch-standalone"),
         TaskKind::LaunchStandalone {
             plugin_id: args.plugin_id,
         },
@@ -390,7 +596,7 @@ fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> wrac_xtask::Result<
     artifact_plan
         .graph
         .depends_on(launch, artifact_plan.build_by_target[&Target::Standalone]);
-    execute_plan(
+    execute_package_plan(
         &ctx,
         profile,
         artifact_plan.graph,
@@ -399,12 +605,12 @@ fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> wrac_xtask::Result<
     )
 }
 
-fn execute_clean(config: &XtaskConfig, args: CleanArgs) -> wrac_xtask::Result<()> {
+fn execute_clean(config: &XtaskConfig, args: CleanArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let mut plan = TaskPlan::new();
-        plan.task(task_id(&ctx, "clean"), TaskKind::Clean);
-        execute_plan(
+        plan.task(package_task_id(&ctx, "clean"), TaskKind::Clean);
+        execute_package_plan(
             &ctx,
             BuildProfile::Debug,
             plan,
@@ -413,6 +619,28 @@ fn execute_clean(config: &XtaskConfig, args: CleanArgs) -> wrac_xtask::Result<()
         )?;
     }
     Ok(())
+}
+
+fn uninstall_summary(
+    target: PluginTarget,
+    removed: usize,
+    missing: usize,
+    dry_run: bool,
+) -> String {
+    match dry_run {
+        true => format!(
+            "Summary: {} {} would be removed, {} not found",
+            target.display(),
+            removed,
+            missing
+        ),
+        false => format!(
+            "Summary: {} {} removed, {} not found",
+            target.display(),
+            removed,
+            missing
+        ),
+    }
 }
 
 struct ArtifactPlan {
@@ -429,14 +657,14 @@ fn build_artifact_plan(
 ) -> ArtifactPlan {
     let mut graph = TaskPlan::new();
     let mut build_by_target = HashMap::new();
-    let clean = clean_first.then(|| graph.task(task_id(ctx, "clean"), TaskKind::Clean));
+    let clean = clean_first.then(|| graph.task(package_task_id(ctx, "clean"), TaskKind::Clean));
     let checks = install_checks
         .map(|(targets, scope)| {
             targets
                 .iter()
                 .map(|target| {
                     let check = graph.task(
-                        task_id(ctx, &format!("check-install-scope-{target:?}")),
+                        package_task_id(ctx, &format!("check-install-scope-{target:?}")),
                         TaskKind::CheckInstallScope {
                             target: *target,
                             scope,
@@ -455,7 +683,7 @@ fn build_artifact_plan(
     });
     let needs_standalone = targets.contains(&Target::Standalone);
     let build_gui = if needs_default || needs_standalone {
-        let build_gui = graph.task(task_id(ctx, "build-gui"), TaskKind::BuildGui);
+        let build_gui = graph.task(package_task_id(ctx, "build-gui"), TaskKind::BuildGui);
         if let Some(clean) = clean {
             graph.depends_on(build_gui, clean);
         }
@@ -465,7 +693,7 @@ fn build_artifact_plan(
     };
     let rust_default = if needs_default {
         let rust = graph.task(
-            task_id(ctx, "build-rust-default"),
+            package_task_id(ctx, "build-rust-default"),
             TaskKind::BuildRustDefault,
         );
         graph.depends_on(rust, build_gui.expect("default Rust build needs GUI"));
@@ -475,7 +703,7 @@ fn build_artifact_plan(
     };
     let rust_standalone = if needs_standalone {
         let rust = graph.task(
-            task_id(ctx, "build-rust-standalone"),
+            package_task_id(ctx, "build-rust-standalone"),
             TaskKind::BuildRustStandalone,
         );
         graph.depends_on(rust, build_gui.expect("standalone Rust build needs GUI"));
@@ -484,7 +712,7 @@ fn build_artifact_plan(
         None
     };
     if targets.contains(&Target::Clap) {
-        let clap = graph.task(task_id(ctx, "package-clap"), TaskKind::PackageClap);
+        let clap = graph.task(package_task_id(ctx, "package-clap"), TaskKind::PackageClap);
         graph.depends_on(
             clap,
             rust_default.expect("CLAP packaging needs default Rust build"),
@@ -498,7 +726,7 @@ fn build_artifact_plan(
     let needs_au = targets.contains(&Target::Au);
     if needs_vst3 || needs_au {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-plugins"),
+            package_task_id(ctx, "configure-wrapper-plugins"),
             TaskKind::ConfigureWrapperPlugins {
                 vst3: needs_vst3 || ctx.platform.supports_vst3(),
                 au: needs_au || ctx.platform.supports_au(),
@@ -514,19 +742,22 @@ fn build_artifact_plan(
             }
         }
         if needs_vst3 {
-            let vst3 = graph.task(task_id(ctx, "build-vst3"), TaskKind::BuildVst3Bundle);
+            let vst3 = graph.task(
+                package_task_id(ctx, "build-vst3"),
+                TaskKind::BuildVst3Bundle,
+            );
             graph.depends_on(vst3, configure);
             build_by_target.insert(Target::Vst3, vst3);
         }
         if needs_au {
-            let au = graph.task(task_id(ctx, "build-au"), TaskKind::BuildAuBundle);
+            let au = graph.task(package_task_id(ctx, "build-au"), TaskKind::BuildAuBundle);
             graph.depends_on(au, configure);
             build_by_target.insert(Target::Au, au);
         }
     }
     if targets.contains(&Target::Aax) {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-aax"),
+            package_task_id(ctx, "configure-wrapper-aax"),
             TaskKind::ConfigureWrapperAax,
         );
         graph.depends_on(
@@ -536,13 +767,13 @@ fn build_artifact_plan(
         if let Some(check) = checks.get(&Target::Aax) {
             graph.depends_on(configure, *check);
         }
-        let aax = graph.task(task_id(ctx, "build-aax"), TaskKind::BuildAaxBundle);
+        let aax = graph.task(package_task_id(ctx, "build-aax"), TaskKind::BuildAaxBundle);
         graph.depends_on(aax, configure);
         build_by_target.insert(Target::Aax, aax);
     }
     if targets.contains(&Target::Standalone) {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-standalone"),
+            package_task_id(ctx, "configure-wrapper-standalone"),
             TaskKind::ConfigureWrapperStandalone,
         );
         graph.depends_on(
@@ -550,7 +781,7 @@ fn build_artifact_plan(
             rust_standalone.expect("standalone wrapper needs Rust build"),
         );
         let standalone = graph.task(
-            task_id(ctx, "build-standalone"),
+            package_task_id(ctx, "build-standalone"),
             TaskKind::BuildStandaloneBundle {
                 plugin_id: standalone_plugin_id,
             },
@@ -562,55 +793,4 @@ fn build_artifact_plan(
         graph,
         build_by_target,
     }
-}
-
-fn select_packages(
-    config: &XtaskConfig,
-    package: Option<&str>,
-    all: bool,
-) -> wrac_xtask::Result<Vec<String>> {
-    if all {
-        if package.is_some() {
-            return Err("--package and --all cannot be used together".into());
-        }
-        let packages = wrac_xtask::discover_plugin_packages(config)?
-            .into_iter()
-            .map(|package| package.package_name)
-            .collect::<Vec<_>>();
-        if packages.is_empty() {
-            return Err("no WRAC plugin packages found in workspace members".into());
-        }
-        return Ok(packages);
-    }
-    if let Some(package) = package {
-        return Ok(vec![package.to_string()]);
-    }
-    Ok(vec![select_single_package(config, None)?])
-}
-
-fn select_single_package(
-    config: &XtaskConfig,
-    package: Option<&str>,
-) -> wrac_xtask::Result<String> {
-    if let Some(package) = package {
-        return Ok(package.to_string());
-    }
-    let packages = wrac_xtask::discover_plugin_packages(config)?;
-    match packages.as_slice() {
-        [] => Err("no WRAC plugin packages found in workspace members".into()),
-        [package] => Ok(package.package_name.clone()),
-        _ => Err(format!(
-            "multiple WRAC plugin packages found: {}. Use -p <PACKAGE> or --all.",
-            packages
-                .iter()
-                .map(|package| package.package_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .into()),
-    }
-}
-
-fn task_id(ctx: &WracContext, suffix: &str) -> TaskId {
-    TaskId::new(format!("{}:{suffix}", ctx.package_name))
 }

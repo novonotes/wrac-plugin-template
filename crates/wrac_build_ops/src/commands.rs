@@ -17,13 +17,13 @@ use crate::{BuildProfile, InstallScope, UninstallScope};
 mod build;
 mod validation;
 
-pub(crate) use self::build::{
+pub use self::build::{
     RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
     build_wrapper_target, configure_wrapper, package_clap, standalone_products,
 };
-pub(crate) use self::validation::{validate_plugin_target, validate_wrac_rules_for_targets};
+pub use self::validation::{validate_plugin_target, validate_wrac_rules_for_targets};
 
-pub(crate) fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> Result<()> {
+pub fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> Result<()> {
     let plugin = standalone_plugin_to_launch(ctx, plugin_id)?;
     let artifact = ctx.standalone_artifact_for(profile, plugin);
     if !artifact.exists() {
@@ -86,7 +86,7 @@ fn standalone_plugin_to_launch<'a>(
     }
 }
 
-pub(crate) fn install_plugin_target(
+pub fn install_plugin_target(
     ctx: &Context,
     profile: BuildProfile,
     scope: InstallScope,
@@ -118,7 +118,7 @@ pub(crate) fn install_plugin_target(
     Ok(())
 }
 
-pub(crate) fn uninstall_plugin_target(
+pub fn uninstall_plugin_target(
     ctx: &Context,
     scope: UninstallScope,
     target: PluginTarget,
@@ -177,11 +177,11 @@ fn removing_label(language: XtaskOutputLanguage) -> &'static str {
     }
 }
 
-pub(crate) fn install_dir(
-    ctx: &Context,
-    scope: InstallScope,
-    format: PluginFormat,
-) -> Result<PathBuf> {
+pub fn check_install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Result<()> {
+    install_dir(ctx, scope, format).map(|_| ())
+}
+
+fn install_dir(ctx: &Context, scope: InstallScope, format: PluginFormat) -> Result<PathBuf> {
     let scope = effective_install_scope(scope, format);
     let dir = match (ctx.platform, scope, format) {
         (Platform::Macos, InstallScope::User, PluginFormat::Clap) => {
@@ -259,7 +259,7 @@ pub(crate) fn install_dir(
     Ok(dir)
 }
 
-pub(crate) fn install_artifact(
+fn install_artifact(
     artifact: &Path,
     destination_dir: &Path,
     language: XtaskOutputLanguage,
@@ -283,7 +283,7 @@ pub(crate) fn install_artifact(
     Ok(())
 }
 
-pub(crate) fn installed_artifacts(
+fn installed_artifacts(
     ctx: &Context,
     scope: UninstallScope,
     target: PluginTarget,
@@ -327,7 +327,7 @@ fn uninstall_scopes(
     }
 }
 
-pub(crate) fn effective_install_scope(scope: InstallScope, format: PluginFormat) -> InstallScope {
+fn effective_install_scope(scope: InstallScope, format: PluginFormat) -> InstallScope {
     match (scope, format) {
         (InstallScope::Default, PluginFormat::Aax) => InstallScope::System,
         (InstallScope::Default, _) => InstallScope::User,
@@ -335,7 +335,7 @@ pub(crate) fn effective_install_scope(scope: InstallScope, format: PluginFormat)
     }
 }
 
-pub(crate) fn clean(ctx: &Context) -> Result<()> {
+pub fn clean(ctx: &Context) -> Result<()> {
     remove_if_exists(&ctx.wrac_dir())?;
     Ok(())
 }
@@ -438,7 +438,7 @@ fn config_path(ctx: &Context, path: Option<&PathBuf>) -> Option<PathBuf> {
     }
 }
 
-pub(crate) fn print_outputs(
+pub fn print_build_outputs(
     ctx: &Context,
     profile: BuildProfile,
     targets: &[Target],
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn command_exists_in_paths_checks_exact_candidate_files() {
         let temp_dir = std::env::temp_dir().join(format!(
-            "wrac_xtask_command_path_test_{}",
+            "wrac_build_ops_command_path_test_{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&temp_dir);

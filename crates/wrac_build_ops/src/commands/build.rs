@@ -22,7 +22,7 @@ use super::{
     macos_clap_info_plist,
 };
 
-pub(crate) fn build_gui(ctx: &Context) -> Result<()> {
+pub fn build_gui(ctx: &Context) -> Result<()> {
     print_section(ctx.output_language, "Build GUI", "GUI ビルド");
     let package_json = ctx.gui_dir().join("package.json");
     if !package_json.exists() {
@@ -164,13 +164,13 @@ pub(super) fn command_exists_in_paths(
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum RustPluginBuild {
+pub enum RustPluginBuild {
     Default,
     Standalone,
 }
 
 impl RustPluginBuild {
-    pub(crate) fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Default => "default",
             Self::Standalone => "standalone",
@@ -198,7 +198,7 @@ impl RustPluginBuild {
     }
 }
 
-pub(crate) fn build_rust_plugin(
+pub fn build_rust_plugin(
     ctx: &Context,
     profile: BuildProfile,
     build: RustPluginBuild,
@@ -239,7 +239,7 @@ pub(crate) fn build_rust_plugin(
     Ok(())
 }
 
-pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
+pub fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
     print_section(ctx.output_language, "Package CLAP", "CLAP packaging");
     let bundle = ctx.clap_bundle(profile);
     remove_if_exists(&bundle)?;
@@ -284,7 +284,7 @@ pub(crate) fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum WrapperBuild {
+pub enum WrapperBuild {
     // VST3 and AU share the same private-SDK-free wrapper configure. AAX is
     // deliberately separate so VST3/AU builds do not require AAX_SDK_ROOT.
     Plugins { vst3: bool, au: bool },
@@ -293,7 +293,7 @@ pub(crate) enum WrapperBuild {
 }
 
 impl WrapperBuild {
-    pub(crate) fn purpose(self) -> &'static str {
+    pub fn purpose(self) -> &'static str {
         match self {
             Self::Plugins { .. } => "wrap-plugins",
             Self::Aax => "wrap-aax",
@@ -320,11 +320,7 @@ impl WrapperBuild {
     }
 }
 
-pub(crate) fn configure_wrapper(
-    ctx: &Context,
-    profile: BuildProfile,
-    build: WrapperBuild,
-) -> Result<()> {
+pub fn configure_wrapper(ctx: &Context, profile: BuildProfile, build: WrapperBuild) -> Result<()> {
     // Keep SDK/submodule diagnostics close to the configure task even when the
     // DAG was created by install, validate, or launch. Checking before the CMake
     // stamp shortcut avoids silently relying on a stale cache after an SDK
@@ -507,7 +503,7 @@ pub(crate) fn configure_wrapper(
     Ok(())
 }
 
-pub(crate) fn build_wrapper_target(
+pub fn build_wrapper_target(
     ctx: &Context,
     profile: BuildProfile,
     build: WrapperBuild,
@@ -585,7 +581,7 @@ pub(crate) fn build_wrapper_target(
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum WrapperTarget {
+pub enum WrapperTarget {
     Vst3,
     Au,
     Aax,
@@ -610,7 +606,7 @@ fn cmake_wrapper_targets(
     })
 }
 
-pub(crate) fn standalone_products<'a>(
+pub fn standalone_products<'a>(
     ctx: &'a Context,
     plugin_id: Option<&str>,
 ) -> Result<Vec<(usize, &'a PluginProductMetadata)>> {

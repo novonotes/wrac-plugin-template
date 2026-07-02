@@ -3084,6 +3084,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "wrac_build_ops"
+version = "0.1.0"
+dependencies = [
+ "cargo_metadata",
+ "clap",
+ "clap-sys",
+ "dotenvy",
+ "libloading",
+ "serde",
+ "serde_json",
+ "toml",
+ "wrac_manifest",
+ "xtask_workflow",
+]
+
+[[package]]
 name = "wrac_clap_adapter"
 version = "0.1.0"
 dependencies = [
@@ -3156,22 +3172,6 @@ dependencies = [
  "wrac_host_context",
  "wrac_log",
  "wxp",
-]
-
-[[package]]
-name = "wrac_xtask"
-version = "0.1.0"
-dependencies = [
- "cargo_metadata",
- "clap",
- "clap-sys",
- "dotenvy",
- "libloading",
- "petgraph",
- "serde",
- "serde_json",
- "toml",
- "wrac_manifest",
 ]
 
 [[package]]
@@ -3269,7 +3269,15 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "clap",
- "wrac_xtask",
+ "wrac_build_ops",
+ "xtask_workflow",
+]
+
+[[package]]
+name = "xtask_workflow"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
 ]
 
 [[package]]
