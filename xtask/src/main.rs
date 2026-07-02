@@ -11,14 +11,16 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use wrac_build_ops::{
     BuildProfile, InstallScope, RustPluginBuild, UninstallScope, WracContext, WrapperBuild,
     WrapperTarget, XtaskConfig, XtaskOutputLanguage, build_gui, build_rust_plugin,
-    build_wrapper_target, check_install_dir, clean, configure_wrapper, discover_plugin_packages,
-    install_plugin_target, launch, load_workspace_dotenv, package_clap, print_build_outputs,
+    build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
+    launch, load_workspace_dotenv, package_clap, package_task_id, print_build_outputs,
     resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
-    resolve_validate_targets_from_metadata,
+    resolve_validate_targets_from_metadata, select_packages, select_single_package,
     targets::{PluginTarget, Target, ValidateTarget},
     uninstall_plugin_target, validate_plugin_target, validate_wrac_rules_for_targets,
 };
-use xtask_workflow::{FailurePolicy, TaskGraph, TaskId, TaskNode, TaskStatus};
+use xtask_workflow::{
+    FailurePolicy, TaskGraph, TaskNode, WorkflowMessages, execute_plan, failure_policy,
+};
 
 type Result<T> = wrac_build_ops::Result<T>;
 type TaskPlan = TaskGraph<TaskKind>;
@@ -314,69 +316,21 @@ impl TaskKind {
     }
 }
 
-fn execute_plan(
+fn execute_package_plan(
     ctx: &WracContext,
     profile: BuildProfile,
     graph: TaskPlan,
     dry_run: bool,
     policy: FailurePolicy,
 ) -> Result<()> {
-    let ordered = graph.ordered()?;
-    print_plan(&graph, &ordered, dry_run);
-    if dry_run {
-        return Ok(());
-    }
-
-    let mut statuses = HashMap::<TaskNode, TaskStatus>::new();
-    for index in &ordered {
-        statuses.insert(*index, TaskStatus::Planned);
-    }
-    let mut failures = Vec::new();
-
-    for index in ordered {
-        // A failed dependency makes the dependent task meaningless, so continuing
-        // never tries to run downstream work with missing artifacts. Independent
-        // branches still run under FailurePolicy::Continue.
-        let failed_deps = graph
-            .failed_dependency_ids(index, &statuses)
-            .into_iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        if !failed_deps.is_empty() {
-            println!("{}\n  ⏭️ skipped", graph.id(index));
-            println!("  {}", skip_reason(&failed_deps));
-            println!();
-            statuses.insert(index, TaskStatus::Skipped);
-            continue;
-        }
-
-        println!("{}\n  {}", graph.id(index), graph.kind(index).label());
-        match run_task(ctx, profile, graph.kind(index)) {
-            Ok(()) => {
-                println!("  ✅ completed");
-                println!();
-                statuses.insert(index, TaskStatus::Ok);
-            }
-            Err(err) => {
-                println!("  ❌ failed");
-                println!("  Error: {err}");
-                statuses.insert(index, TaskStatus::Failed);
-                failures.push(format!("{}: {err}", graph.id(index)));
-                if matches!(policy, FailurePolicy::FailFast) {
-                    print_summary(&graph, &statuses);
-                    return Err(failures.join("\n").into());
-                }
-                println!();
-            }
-        }
-    }
-
-    print_summary(&graph, &statuses);
-    if failures.is_empty() {
-        Ok(())
-    } else {
-        Err(failures.join("\n").into())
-    }
+    execute_plan(
+        graph,
+        dry_run,
+        policy,
+        &WorkflowMessages::ENGLISH,
+        |kind| kind.label(),
+        |kind| run_task(ctx, profile, kind),
+    )
 }
 
 fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result<()> {
@@ -464,7 +418,7 @@ fn execute_build(config: &XtaskConfig, args: BuildArgs) -> Result<()> {
         let targets = resolve_build_targets_from_metadata(&ctx, &args.target)?;
         let artifact_plan =
             build_artifact_plan(&ctx, &targets, args.clean, args.plugin_id.clone(), None);
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -492,14 +446,14 @@ fn execute_install(config: &XtaskConfig, args: InstallArgs) -> Result<()> {
             build_artifact_plan(&ctx, &build_targets, false, None, Some((&targets, scope)));
         for target in targets {
             let install = artifact_plan.graph.task(
-                task_id(&ctx, &format!("install-{target:?}")),
+                package_task_id(&ctx, &format!("install-{target:?}")),
                 TaskKind::InstallBundle { target, scope },
             );
             artifact_plan
                 .graph
                 .depends_on(install, artifact_plan.build_by_target[&target.target()]);
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -517,7 +471,7 @@ fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> Result<()> {
         let mut plan = TaskPlan::new();
         for target in targets {
             plan.task(
-                task_id(&ctx, &format!("uninstall-{target:?}")),
+                package_task_id(&ctx, &format!("uninstall-{target:?}")),
                 TaskKind::UninstallBundle {
                     target,
                     scope: args.scope.into(),
@@ -525,7 +479,7 @@ fn execute_uninstall(config: &XtaskConfig, args: UninstallArgs) -> Result<()> {
                 },
             );
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             BuildProfile::Debug,
             plan,
@@ -552,7 +506,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
         let mut artifact_plan = build_artifact_plan(&ctx, &build_targets, false, None, None);
         let rules = if run_readiness {
             let rules = artifact_plan.graph.task(
-                task_id(&ctx, "validate-wrac-rules"),
+                package_task_id(&ctx, "validate-wrac-rules"),
                 TaskKind::ValidateWracRules {
                     targets: validate_targets.clone(),
                 },
@@ -567,7 +521,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
         if validate_checks(&args).run_external_validators {
             for target in validate_targets {
                 let validate = artifact_plan.graph.task(
-                    task_id(&ctx, &format!("validate-{target:?}")),
+                    package_task_id(&ctx, &format!("validate-{target:?}")),
                     TaskKind::ValidateBundle { target },
                 );
                 if let Some(rules) = rules {
@@ -575,7 +529,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
                 }
                 if target == ValidateTarget::Au {
                     let install = artifact_plan.graph.task(
-                        task_id(&ctx, "install-Au-for-validation"),
+                        package_task_id(&ctx, "install-Au-for-validation"),
                         TaskKind::InstallBundle {
                             target: PluginTarget::Au,
                             scope: InstallScope::User,
@@ -592,7 +546,7 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
                 }
             }
         }
-        execute_plan(
+        execute_package_plan(
             &ctx,
             profile,
             artifact_plan.graph,
@@ -634,7 +588,7 @@ fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> Result<()> {
         None,
     );
     let launch = artifact_plan.graph.task(
-        task_id(&ctx, "launch-standalone"),
+        package_task_id(&ctx, "launch-standalone"),
         TaskKind::LaunchStandalone {
             plugin_id: args.plugin_id,
         },
@@ -642,7 +596,7 @@ fn execute_launch(config: &XtaskConfig, args: LaunchArgs) -> Result<()> {
     artifact_plan
         .graph
         .depends_on(launch, artifact_plan.build_by_target[&Target::Standalone]);
-    execute_plan(
+    execute_package_plan(
         &ctx,
         profile,
         artifact_plan.graph,
@@ -655,8 +609,8 @@ fn execute_clean(config: &XtaskConfig, args: CleanArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
         let ctx = WracContext::new(config, &package)?;
         let mut plan = TaskPlan::new();
-        plan.task(task_id(&ctx, "clean"), TaskKind::Clean);
-        execute_plan(
+        plan.task(package_task_id(&ctx, "clean"), TaskKind::Clean);
+        execute_package_plan(
             &ctx,
             BuildProfile::Debug,
             plan,
@@ -665,82 +619,6 @@ fn execute_clean(config: &XtaskConfig, args: CleanArgs) -> Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn print_plan(graph: &TaskPlan, ordered: &[TaskNode], dry_run: bool) {
-    println!("== Plan ==\n");
-    for (position, index) in ordered.iter().enumerate() {
-        println!(
-            "{}. {}  {}",
-            position + 1,
-            graph.id(*index),
-            graph.kind(*index).label()
-        );
-    }
-    let dependencies = ordered
-        .iter()
-        .filter_map(|index| {
-            let deps = graph
-                .dependency_ids(*index)
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>();
-            (!deps.is_empty()).then_some((index, deps))
-        })
-        .collect::<Vec<_>>();
-    if !dependencies.is_empty() {
-        println!("\n== Dependencies ==\n");
-    }
-    for (index, deps) in dependencies {
-        println!("{} <- {}", graph.id(*index), deps.join(", "));
-    }
-    if dry_run {
-        println!("\nNothing was executed because --dry-run was set.");
-    } else {
-        println!("\n== Execution ==\n");
-    }
-}
-
-fn print_summary(graph: &TaskPlan, statuses: &HashMap<TaskNode, TaskStatus>) {
-    let mut counts = HashMap::<TaskStatus, usize>::new();
-    for status in statuses.values() {
-        *counts.entry(*status).or_default() += 1;
-    }
-    println!(
-        "== Result ==\n\n✅ ok {} / ❌ failed {} / ⏭️ skipped {}",
-        counts.get(&TaskStatus::Ok).copied().unwrap_or(0),
-        counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
-        counts.get(&TaskStatus::Skipped).copied().unwrap_or(0)
-    );
-    for (index, status) in statuses {
-        if matches!(status, TaskStatus::Failed | TaskStatus::Skipped) {
-            println!("{}: {}", status_label(*status), graph.id(*index));
-        }
-    }
-}
-
-fn failure_policy(continue_on_error: bool) -> FailurePolicy {
-    if continue_on_error {
-        FailurePolicy::Continue
-    } else {
-        FailurePolicy::FailFast
-    }
-}
-
-fn status_label(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Planned => "planned",
-        TaskStatus::Ok => "ok",
-        TaskStatus::Failed => "failed",
-        TaskStatus::Skipped => "skipped",
-    }
-}
-
-fn skip_reason(failed_deps: &[String]) -> String {
-    format!(
-        "Reason: dependency failed or was skipped ({})",
-        failed_deps.join(", ")
-    )
 }
 
 fn uninstall_summary(
@@ -779,14 +657,14 @@ fn build_artifact_plan(
 ) -> ArtifactPlan {
     let mut graph = TaskPlan::new();
     let mut build_by_target = HashMap::new();
-    let clean = clean_first.then(|| graph.task(task_id(ctx, "clean"), TaskKind::Clean));
+    let clean = clean_first.then(|| graph.task(package_task_id(ctx, "clean"), TaskKind::Clean));
     let checks = install_checks
         .map(|(targets, scope)| {
             targets
                 .iter()
                 .map(|target| {
                     let check = graph.task(
-                        task_id(ctx, &format!("check-install-scope-{target:?}")),
+                        package_task_id(ctx, &format!("check-install-scope-{target:?}")),
                         TaskKind::CheckInstallScope {
                             target: *target,
                             scope,
@@ -805,7 +683,7 @@ fn build_artifact_plan(
     });
     let needs_standalone = targets.contains(&Target::Standalone);
     let build_gui = if needs_default || needs_standalone {
-        let build_gui = graph.task(task_id(ctx, "build-gui"), TaskKind::BuildGui);
+        let build_gui = graph.task(package_task_id(ctx, "build-gui"), TaskKind::BuildGui);
         if let Some(clean) = clean {
             graph.depends_on(build_gui, clean);
         }
@@ -815,7 +693,7 @@ fn build_artifact_plan(
     };
     let rust_default = if needs_default {
         let rust = graph.task(
-            task_id(ctx, "build-rust-default"),
+            package_task_id(ctx, "build-rust-default"),
             TaskKind::BuildRustDefault,
         );
         graph.depends_on(rust, build_gui.expect("default Rust build needs GUI"));
@@ -825,7 +703,7 @@ fn build_artifact_plan(
     };
     let rust_standalone = if needs_standalone {
         let rust = graph.task(
-            task_id(ctx, "build-rust-standalone"),
+            package_task_id(ctx, "build-rust-standalone"),
             TaskKind::BuildRustStandalone,
         );
         graph.depends_on(rust, build_gui.expect("standalone Rust build needs GUI"));
@@ -834,7 +712,7 @@ fn build_artifact_plan(
         None
     };
     if targets.contains(&Target::Clap) {
-        let clap = graph.task(task_id(ctx, "package-clap"), TaskKind::PackageClap);
+        let clap = graph.task(package_task_id(ctx, "package-clap"), TaskKind::PackageClap);
         graph.depends_on(
             clap,
             rust_default.expect("CLAP packaging needs default Rust build"),
@@ -848,7 +726,7 @@ fn build_artifact_plan(
     let needs_au = targets.contains(&Target::Au);
     if needs_vst3 || needs_au {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-plugins"),
+            package_task_id(ctx, "configure-wrapper-plugins"),
             TaskKind::ConfigureWrapperPlugins {
                 vst3: needs_vst3 || ctx.platform.supports_vst3(),
                 au: needs_au || ctx.platform.supports_au(),
@@ -864,19 +742,22 @@ fn build_artifact_plan(
             }
         }
         if needs_vst3 {
-            let vst3 = graph.task(task_id(ctx, "build-vst3"), TaskKind::BuildVst3Bundle);
+            let vst3 = graph.task(
+                package_task_id(ctx, "build-vst3"),
+                TaskKind::BuildVst3Bundle,
+            );
             graph.depends_on(vst3, configure);
             build_by_target.insert(Target::Vst3, vst3);
         }
         if needs_au {
-            let au = graph.task(task_id(ctx, "build-au"), TaskKind::BuildAuBundle);
+            let au = graph.task(package_task_id(ctx, "build-au"), TaskKind::BuildAuBundle);
             graph.depends_on(au, configure);
             build_by_target.insert(Target::Au, au);
         }
     }
     if targets.contains(&Target::Aax) {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-aax"),
+            package_task_id(ctx, "configure-wrapper-aax"),
             TaskKind::ConfigureWrapperAax,
         );
         graph.depends_on(
@@ -886,13 +767,13 @@ fn build_artifact_plan(
         if let Some(check) = checks.get(&Target::Aax) {
             graph.depends_on(configure, *check);
         }
-        let aax = graph.task(task_id(ctx, "build-aax"), TaskKind::BuildAaxBundle);
+        let aax = graph.task(package_task_id(ctx, "build-aax"), TaskKind::BuildAaxBundle);
         graph.depends_on(aax, configure);
         build_by_target.insert(Target::Aax, aax);
     }
     if targets.contains(&Target::Standalone) {
         let configure = graph.task(
-            task_id(ctx, "configure-wrapper-standalone"),
+            package_task_id(ctx, "configure-wrapper-standalone"),
             TaskKind::ConfigureWrapperStandalone,
         );
         graph.depends_on(
@@ -900,7 +781,7 @@ fn build_artifact_plan(
             rust_standalone.expect("standalone wrapper needs Rust build"),
         );
         let standalone = graph.task(
-            task_id(ctx, "build-standalone"),
+            package_task_id(ctx, "build-standalone"),
             TaskKind::BuildStandaloneBundle {
                 plugin_id: standalone_plugin_id,
             },
@@ -912,48 +793,4 @@ fn build_artifact_plan(
         graph,
         build_by_target,
     }
-}
-
-fn select_packages(config: &XtaskConfig, package: Option<&str>, all: bool) -> Result<Vec<String>> {
-    if all {
-        if package.is_some() {
-            return Err("--package and --all cannot be used together".into());
-        }
-        let packages = discover_plugin_packages(config)?
-            .into_iter()
-            .map(|package| package.package_name)
-            .collect::<Vec<_>>();
-        if packages.is_empty() {
-            return Err("no WRAC plugin packages found in workspace members".into());
-        }
-        return Ok(packages);
-    }
-    if let Some(package) = package {
-        return Ok(vec![package.to_string()]);
-    }
-    Ok(vec![select_single_package(config, None)?])
-}
-
-fn select_single_package(config: &XtaskConfig, package: Option<&str>) -> Result<String> {
-    if let Some(package) = package {
-        return Ok(package.to_string());
-    }
-    let packages = discover_plugin_packages(config)?;
-    match packages.as_slice() {
-        [] => Err("no WRAC plugin packages found in workspace members".into()),
-        [package] => Ok(package.package_name.clone()),
-        _ => Err(format!(
-            "multiple WRAC plugin packages found: {}. Use -p <PACKAGE> or --all.",
-            packages
-                .iter()
-                .map(|package| package.package_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .into()),
-    }
-}
-
-fn task_id(ctx: &WracContext, suffix: &str) -> TaskId {
-    TaskId::new(format!("{}:{suffix}", ctx.package_name))
 }

@@ -6,6 +6,8 @@
 
 use std::{env, error::Error, path::PathBuf};
 
+use xtask_workflow::TaskId;
+
 mod commands;
 mod context;
 mod metadata;
@@ -77,6 +79,95 @@ pub enum UninstallScope {
 /// function only applies WRAC manifest discovery and layout validation.
 pub fn discover_plugin_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
     context::available_packages(config)
+}
+
+/// Selects WRAC packages using the standard `-p/--package` and `--all` rules.
+///
+/// Package discovery is WRAC-specific, so this helper lives with the build
+/// operations. The caller still decides which selected packages become workflow
+/// roots and how product-specific tasks depend on them.
+pub fn select_packages(
+    config: &XtaskConfig,
+    package: Option<&str>,
+    all: bool,
+) -> Result<Vec<String>> {
+    if all {
+        if package.is_some() {
+            return Err(select_package_error(
+                config.output_language,
+                "--package and --all cannot be used together",
+                "--package と --all は同時に指定できません",
+            ));
+        }
+        let packages = discover_plugin_packages(config)?
+            .into_iter()
+            .map(|package| package.package_name)
+            .collect::<Vec<_>>();
+        if packages.is_empty() {
+            return Err(select_package_error(
+                config.output_language,
+                "no WRAC plugin packages found in workspace members",
+                "workspace member に WRAC plugin package が見つかりません",
+            ));
+        }
+        return Ok(packages);
+    }
+    if let Some(package) = package {
+        return Ok(vec![package.to_string()]);
+    }
+    Ok(vec![select_single_package(config, None)?])
+}
+
+/// Selects exactly one WRAC package for commands that cannot act on many roots.
+pub fn select_single_package(config: &XtaskConfig, package: Option<&str>) -> Result<String> {
+    if let Some(package) = package {
+        return Ok(package.to_string());
+    }
+    let packages = discover_plugin_packages(config)?;
+    match packages.as_slice() {
+        [] => Err(select_package_error(
+            config.output_language,
+            "no WRAC plugin packages found in workspace members",
+            "workspace member に WRAC plugin package が見つかりません",
+        )),
+        [package] => Ok(package.package_name.clone()),
+        _ => {
+            let packages = packages
+                .iter()
+                .map(|package| package.package_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            match config.output_language {
+                XtaskOutputLanguage::English => Err(format!(
+                    "multiple WRAC plugin packages found: {packages}. Use -p <PACKAGE> or --all."
+                )
+                .into()),
+                XtaskOutputLanguage::Japanese => Err(format!(
+                    "複数の WRAC plugin package が見つかりました: {packages}。-p <PACKAGE> または --all を指定してください。"
+                )
+                .into()),
+            }
+        }
+    }
+}
+
+/// Creates a stable per-package task ID without prescribing task semantics.
+///
+/// Product repositories can add custom task kinds after standard WRAC build
+/// operations while keeping plan output namespaced by package.
+pub fn package_task_id(ctx: &WracContext, suffix: &str) -> TaskId {
+    TaskId::new(format!("{}:{suffix}", ctx.package_name))
+}
+
+fn select_package_error(
+    language: XtaskOutputLanguage,
+    english: &'static str,
+    japanese: &'static str,
+) -> Box<dyn Error> {
+    match language {
+        XtaskOutputLanguage::English => english.into(),
+        XtaskOutputLanguage::Japanese => japanese.into(),
+    }
 }
 
 /// Loads repository-local `.env` values without overriding existing variables.

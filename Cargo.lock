@@ -3096,6 +3096,7 @@ dependencies = [
  "serde_json",
  "toml",
  "wrac_manifest",
+ "xtask_workflow",
 ]
 
 [[package]]
