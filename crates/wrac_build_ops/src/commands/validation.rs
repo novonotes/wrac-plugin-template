@@ -52,7 +52,7 @@ const AAX_VALIDATOR_SKIPPED_TESTS: &[(&str, &str)] = &[
 ];
 const AAX_VALIDATOR_TIMEOUT_SECS: u64 = 15 * 60;
 
-pub(crate) fn validate_wrac_rules_for_targets(
+pub fn validate_wrac_rules_for_targets(
     ctx: &Context,
     profile: BuildProfile,
     targets: &[ValidateTarget],
@@ -60,7 +60,7 @@ pub(crate) fn validate_wrac_rules_for_targets(
     validate_wrac_rules(ctx, profile, targets)
 }
 
-pub(crate) fn validate_plugin_target(
+pub fn validate_plugin_target(
     ctx: &Context,
     profile: BuildProfile,
     target: ValidateTarget,

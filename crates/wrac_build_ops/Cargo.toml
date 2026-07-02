@@ -1,8 +1,8 @@
 [package]
-name = "wrac_xtask"
+name = "wrac_build_ops"
 version = "0.1.0"
 edition = "2024"
-description = "Shared build tasks for WRAC plugin repositories"
+description = "Typed WRAC plugin build operations for repository-local xtask crates"
 license = "MIT"
 repository = "https://github.com/novonotes/wrac-plugin-template"
 publish = false
@@ -13,7 +13,6 @@ clap-sys = { workspace = true }
 clap = { version = "4.5.38", features = ["derive"] }
 dotenvy = "0.15"
 libloading = "0.8"
-petgraph = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

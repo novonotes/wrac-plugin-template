@@ -29,7 +29,7 @@ validation_profile = "prototype"
 
 ### `[package]`
 
-`[package]` is optional. When `wrac_xtask` reads a manifest from a Cargo
+`[package]` is optional. When `wrac_build_ops` reads a manifest from a Cargo
 package, missing `name`, `version`, and `repository` values are filled from the
 package `Cargo.toml`.
 

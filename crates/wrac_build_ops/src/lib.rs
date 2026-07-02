@@ -1,24 +1,33 @@
-//! Low-level WRAC xtask building blocks.
+//! Typed WRAC build operations for repository-local `xtask` crates.
 //!
-//! Repository-local `xtask` crates own command parsing, package selection, and
-//! build/validation planning. This crate provides typed task primitives,
-//! metadata discovery, and shared execution helpers for those planners.
+//! Repository-local `xtask` crates own command parsing, workflow construction,
+//! and task execution policy. This crate only exposes WRAC-specific operations
+//! that those workflows can call from their own task executors.
 
 use std::{env, error::Error, path::PathBuf};
 
 mod commands;
 mod context;
 mod metadata;
-pub mod plan;
 pub mod profile;
 mod quality;
+pub mod target_resolution;
 pub mod targets;
 mod util;
 mod validation;
 
+pub use commands::{
+    RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
+    build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
+    launch, package_clap, print_build_outputs, uninstall_plugin_target, validate_plugin_target,
+    validate_wrac_rules_for_targets,
+};
 pub use context::WracContext;
-pub use plan::{FailurePolicy, TaskId, TaskKind, TaskNode, TaskPlan};
 pub use profile::BuildProfile;
+pub use target_resolution::{
+    resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
+    resolve_validate_targets_from_metadata,
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 

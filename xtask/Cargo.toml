@@ -9,4 +9,5 @@ publish = false
 
 [dependencies]
 clap = { version = "4.5.38", features = ["derive"] }
-wrac_xtask = { path = "../crates/wrac_xtask" }
+wrac_build_ops = { workspace = true }
+xtask_workflow = { workspace = true }
