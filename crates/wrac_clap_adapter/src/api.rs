@@ -29,7 +29,7 @@
 //! uses `[control-thread]` when native CLAP says `[main-thread]` but the exact main
 //! thread is not guaranteed. FFI, raw pointers, and panic barriers are contained
 //! inside the adapter; products only need to implement these safe traits.
-//! 
+//!
 //! Host-facing ABI callbacks that require a synchronous return must not wait for a
 //! main-thread or run-loop hop unless the trait method is explicitly `[main-thread]`.
 //! Some hosts call plugin ABI callbacks from a background thread while blocking the
