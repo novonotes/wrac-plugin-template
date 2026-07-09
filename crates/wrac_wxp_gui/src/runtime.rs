@@ -149,6 +149,15 @@ impl GuiRuntimeHandle {
     pub(crate) fn set_scale(&self, scale: f64) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: set_scale requested: scale={scale}");
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                let result = entry.runtime.set_scale(scale);
+                log::debug!("wxp runtime {id}: set_scale completed: result={result:?}");
+                result
+            });
+        }
         // Host GUI callbacks are synchronous ABI calls; post into the GUI thread so they never
         // wait on the run loop while still preserving GUI-thread affinity for the runtime.
         RunLoop::post(move |_| {
@@ -172,6 +181,15 @@ impl GuiRuntimeHandle {
             size.width,
             size.height
         );
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                let result = entry.runtime.set_size(size);
+                log::debug!("wxp runtime {id}: set_size completed: result={result:?}");
+                result
+            });
+        }
         RunLoop::post(move |_| {
             GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
@@ -230,6 +248,15 @@ impl GuiRuntimeHandle {
     pub(crate) fn hide(&self) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: hide requested");
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                let result = entry.runtime.hide();
+                log::debug!("wxp runtime {id}: hide completed: result={result:?}");
+                result
+            });
+        }
         RunLoop::post(move |_| {
             GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
