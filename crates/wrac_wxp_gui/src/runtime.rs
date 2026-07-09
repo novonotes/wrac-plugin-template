@@ -231,6 +231,19 @@ impl GuiRuntimeHandle {
     pub(crate) fn show(&self) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: show requested");
+        if is_gui_thread() {
+            // RunLoop::call is immediate on the GUI thread; this preserves show/hide ordering.
+            return RunLoop::call(move |run_loop| {
+                GUI_RUNTIMES.with(|runtimes| {
+                    let mut runtimes = runtimes.borrow_mut();
+                    let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                    let result = entry.runtime.show(run_loop);
+                    log::debug!("wxp runtime {id}: show completed: result={result:?}");
+                    result
+                })
+            })
+            .map_err(|_| PluginError::InvalidState)?;
+        }
         RunLoop::post(move |run_loop| {
             GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
