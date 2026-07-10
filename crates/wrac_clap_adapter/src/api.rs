@@ -52,7 +52,7 @@ pub use extensions::{
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiApiSupportExtension,
     PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension,
     PluginLatencyExtension, PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension,
-    PluginTailExtension,
+    PluginTailExtension, PreparedStateSave, StateSaveCompletion, StateSaveOutcome,
 };
 pub use host::{
     HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState, HostTail,

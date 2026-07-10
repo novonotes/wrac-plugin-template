@@ -47,7 +47,7 @@ impl WracGainStateExtension {
 // `save_state` is called on project save, `restore_state` on load. The byte format is
 // unrestricted, so JSON is used here to keep project-state payloads inspectable.
 impl PluginStateExtension for WracGainStateExtension {
-    fn save_state(&self) -> PluginResult<State> {
+    fn save_state(&self) -> PluginResult<wrac_clap_adapter::PreparedStateSave> {
         let project = self.project_state.snapshot();
         let params = self.shared.snapshot_parameters();
         let bytes = serde_json::to_vec(&SavedState {
@@ -56,7 +56,7 @@ impl PluginStateExtension for WracGainStateExtension {
             editor_page: project.editor_page,
         })
         .map_err(|_| PluginError::InvalidState)?;
-        Ok(State { bytes })
+        Ok(wrac_clap_adapter::PreparedStateSave::new(State { bytes }))
     }
 
     fn restore_state(&self, state: State) -> PluginResult<()> {

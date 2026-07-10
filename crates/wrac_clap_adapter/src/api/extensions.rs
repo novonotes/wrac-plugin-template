@@ -16,5 +16,5 @@ pub use gui::{
 pub use latency::PluginLatencyExtension;
 pub use note_ports::PluginNotePortsExtension;
 pub use render::PluginRenderExtension;
-pub use state::PluginStateExtension;
+pub use state::{PluginStateExtension, PreparedStateSave, StateSaveCompletion, StateSaveOutcome};
 pub use tail::PluginTailExtension;

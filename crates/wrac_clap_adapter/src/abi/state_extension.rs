@@ -33,24 +33,38 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
             log::debug!("state.save: plugin has no state support");
             return false;
         };
-        let state = match state_support.save_state() {
-            Ok(state) => state,
+        let prepared = match state_support.save_state() {
+            Ok(prepared) => prepared,
             Err(error) => {
                 log::warn!("state.save: plugin save_state failed: {error}");
                 return false;
             }
         };
-        let ok = unsafe { write_stream(stream, &state.bytes) };
+        let ok = unsafe { write_stream(stream, &prepared.state.bytes) };
         if !ok {
             log::warn!(
                 "state.save: writing state stream failed byte_len={}",
-                state.bytes.len()
+                prepared.state.bytes.len()
             );
         } else {
-            log::debug!("state.save: wrote byte_len={}", state.bytes.len());
+            log::debug!("state.save: wrote byte_len={}", prepared.state.bytes.len());
         }
+        complete_state_save(prepared.completion, ok);
         ok
     })
+}
+
+fn complete_state_save(
+    completion: Option<Box<dyn crate::StateSaveCompletion>>,
+    write_succeeded: bool,
+) {
+    if let Some(completion) = completion {
+        completion.complete(if write_succeeded {
+            crate::StateSaveOutcome::Written
+        } else {
+            crate::StateSaveOutcome::StreamWriteFailed
+        });
+    }
 }
 
 unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_istream) -> bool {
@@ -93,4 +107,42 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
         log::debug!("state.load: restored byte_len={byte_len}");
         true
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use crate::{StateSaveCompletion, StateSaveOutcome};
+
+    use super::complete_state_save;
+
+    struct RecordingCompletion(Arc<Mutex<Vec<StateSaveOutcome>>>);
+
+    impl StateSaveCompletion for RecordingCompletion {
+        fn complete(self: Box<Self>, outcome: StateSaveOutcome) {
+            self.0.lock().unwrap().push(outcome);
+        }
+    }
+
+    #[test]
+    fn completion_receives_the_matching_stream_write_outcome() {
+        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        complete_state_save(
+            Some(Box::new(RecordingCompletion(Arc::clone(&outcomes)))),
+            true,
+        );
+        complete_state_save(
+            Some(Box::new(RecordingCompletion(Arc::clone(&outcomes)))),
+            false,
+        );
+
+        assert_eq!(
+            *outcomes.lock().unwrap(),
+            vec![
+                StateSaveOutcome::Written,
+                StateSaveOutcome::StreamWriteFailed
+            ]
+        );
+    }
 }

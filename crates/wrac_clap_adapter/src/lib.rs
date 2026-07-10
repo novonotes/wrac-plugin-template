@@ -31,8 +31,8 @@ pub use api::{
     PluginFormat, PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
     PluginGuiQueryExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
     PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginRenderMode,
-    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus, State,
-    SystemContext,
+    PluginResult, PluginStateExtension, PluginTailExtension, PreparedStateSave, ProcessContext,
+    ProcessStatus, State, StateSaveCompletion, StateSaveOutcome, SystemContext,
 };
 #[cfg(feature = "raw-clap-forwarding")]
 pub use api::{RawParamFlushContext, RawProcessContext};
