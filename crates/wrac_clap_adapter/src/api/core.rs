@@ -85,7 +85,11 @@ pub trait PluginInstance: Send + 'static {
     ) -> PluginResult<Box<dyn InactiveProcessor>>;
 
     /// Called from the plugin destruction callback after processor teardown.
-    /// `[main-thread & !active]`
+    ///
+    /// Wrapper formats may destroy their plugin object from a background control thread instead of
+    /// preserving native CLAP's main-thread contract, so implementations must not require
+    /// main-thread affinity here.
+    /// `[control-thread & !active]`
     fn destroy(&mut self) {}
 
     /// Called from CLAP `plugin.on_main_thread`, usually after `HostLifecycle::request_callback`.

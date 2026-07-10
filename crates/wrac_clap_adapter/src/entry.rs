@@ -24,6 +24,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// directly. Standalone apps and other binaries that do not enter through
     /// this adapter are responsible for calling `wrac_log::configure_standalone`
     /// and holding the returned runtime themselves.
+    /// `[control-thread]`
     fn log_config(&'static self) -> Option<&'static LogConfig>;
 
     /// Initializes entry-level state.
@@ -35,6 +36,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// not log, open files, write to stderr, start worker threads, initialize COM
     /// or GUI state, launch external processes, or perform expensive computation
     /// here.
+    /// `[control-thread]`
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
@@ -45,18 +47,45 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// perform file I/O, join worker threads, or release thread-affine GUI/COM
     /// state here; per-instance cleanup must happen when the last plugin instance
     /// is destroyed.
+    /// `[control-thread]`
     fn deinit(&self) {}
 
+    /// Begins one host/wrapper-designated plugin-main-thread lifetime.
+    ///
+    /// Plugin objects may be created concurrently on wrapper control threads, so implementations
+    /// must synchronize entry-wide attachment state.
+    /// `[thread-safe & control-thread]`
     fn attach_main_thread(&self) {}
 
+    /// Ends one host/wrapper-designated plugin-main-thread lifetime.
+    ///
+    /// Plugin objects may be destroyed concurrently on wrapper control threads, so implementations
+    /// must synchronize entry-wide attachment state and must not infer native CLAP thread affinity.
+    /// `[thread-safe & control-thread]`
     fn detach_main_thread(&self) {}
 
+    /// Returns the static factory used for descriptor discovery and product instance creation.
+    ///
+    /// The factory is requested during descriptor cache initialization and may later be requested
+    /// concurrently by independent plugin initialization callbacks.
+    /// `[thread-safe & control-thread]`
     fn plugin_factory(&self) -> Option<&dyn PluginFactory>;
 }
 
+/// Product factory behind the adapter's immutable ABI descriptor cache.
+///
+/// The adapter snapshots descriptor metadata during serialized cache initialization, while product
+/// instances may be created concurrently by independent plugin initialization callbacks.
 pub trait PluginFactory: Send + Sync + 'static {
+    /// `[control-thread]`
     fn plugin_count(&self) -> u32;
+
+    /// `[control-thread]`
     fn plugin_descriptor(&self, index: u32) -> Option<PluginDescriptor>;
+
+    /// Independent plugin instances may initialize concurrently, so shared factory state must be
+    /// synchronized.
+    /// `[thread-safe & control-thread]`
     fn create_plugin(
         &self,
         plugin_id: &str,

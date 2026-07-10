@@ -13,7 +13,8 @@
 //! Method docs use thread annotations for the Rust trait call contract:
 //! - `[main-thread]`: native CLAP/UI main thread. Non-realtime and serialized.
 //! - `[control-thread]`: non-realtime host/adapter control work. This includes the
-//!   main thread and background/control worker threads. Serialized per plugin instance.
+//!   main thread, loader threads, and background/control worker threads. Unless marked
+//!   thread-safe, calls are serialized for the relevant object or lifecycle.
 //! - `[audio-thread]`: realtime audio callback work. Serialized per plugin instance,
 //!   but the OS thread id is not stable.
 //! - `[thread-safe & control-thread]`: may be called concurrently from control threads.
