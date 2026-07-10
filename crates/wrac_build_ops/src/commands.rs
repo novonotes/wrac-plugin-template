@@ -9,8 +9,8 @@ use crate::context::Context;
 use crate::metadata::PluginMetadata;
 use crate::targets::{Platform, PluginFormat, PluginTarget, Target};
 use crate::util::{
-    common_program_files, copy_path, ensure_exists, home_dir, local_app_data, print_section,
-    print_success, remove_if_exists, run_with_language,
+    common_program_files, copy_path, ensure_exists, home_dir, local_app_data, print_detail,
+    print_section, remove_if_exists, run_with_language,
 };
 use crate::{BuildProfile, InstallScope, UninstallScope};
 
@@ -40,8 +40,7 @@ pub fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> 
         .into());
     }
 
-    print_section(ctx.output_language, "Launch standalone", "standalone 起動");
-    print_success(
+    print_detail(
         ctx.output_language,
         &format!("Launching standalone artifact: {}", artifact.display()),
         &format!("standalone artifact: {}", artifact.display()),
@@ -275,7 +274,7 @@ fn install_artifact(
     // Remove the destination first, then copy the whole artifact so the installed result matches the build output exactly.
     remove_if_exists(&destination)?;
     copy_path(artifact, &destination)?;
-    print_success(
+    print_detail(
         language,
         &format!("Installed: {}", destination.display()),
         &format!("インストール: {}", destination.display()),

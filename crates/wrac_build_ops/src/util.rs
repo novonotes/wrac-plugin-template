@@ -47,8 +47,7 @@ pub(crate) fn run_with_language(
 ) -> Result<()> {
     // xtask is a build orchestrator, so seeing the exact external command on failure is important.
     // Run directly via Command without a shell, but print in a form that humans can re-run easily.
-    print_section(language, "Running command", "コマンド実行");
-    println!("$ {}", format_command(command));
+    println!("  $ {}", format_command(command));
     let status = command.status()?;
     if !status.success() {
         return Err(command_failed_message(language, status, &format_command(command)).into());
@@ -64,8 +63,7 @@ pub(crate) fn run_with_optional_xcbeautify_language(
         return run_with_language(command, language);
     }
 
-    print_section(language, "Running command", "コマンド実行");
-    println!("$ {} 2>&1 | xcbeautify", format_command(command));
+    println!("  $ {} 2>&1 | xcbeautify", format_command(command));
 
     let mut child = command
         .stdout(Stdio::piped())
@@ -152,8 +150,7 @@ pub(crate) fn run_output_with_language(
     command: &mut Command,
     language: XtaskOutputLanguage,
 ) -> Result<Output> {
-    print_section(language, "Running command", "コマンド実行");
-    println!("$ {}", format_command(command));
+    println!("  $ {}", format_command(command));
     let output = command.output()?;
     if !output.status.success() {
         return Err(
@@ -175,19 +172,11 @@ pub(crate) fn print_section(language: XtaskOutputLanguage, english: &str, japane
     println!();
 }
 
-pub(crate) fn print_success(language: XtaskOutputLanguage, english: &str, japanese: &str) {
+// The workflow owns task outcome icons; operation-level messages stay as
+// details so one task cannot appear to have multiple final results.
+pub(crate) fn print_detail(language: XtaskOutputLanguage, english: &str, japanese: &str) {
     println!(
-        "  ✅ {}",
-        match language {
-            XtaskOutputLanguage::English => english,
-            XtaskOutputLanguage::Japanese => japanese,
-        }
-    );
-}
-
-pub(crate) fn print_skip(language: XtaskOutputLanguage, english: &str, japanese: &str) {
-    println!(
-        "  ⏭️ {}",
+        "  {}",
         match language {
             XtaskOutputLanguage::English => english,
             XtaskOutputLanguage::Japanese => japanese,

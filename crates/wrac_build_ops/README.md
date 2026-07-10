@@ -12,6 +12,10 @@ artifact node selection, and task execution dispatch. That boundary keeps
 product-specific tasks, such as attaching generated assets after a standard
 package step, outside the WRAC operation layer.
 
+Operations that can intentionally avoid work, such as a GUI build without a
+frontend package or an up-to-date CMake configure, return `TaskOutcome` so the
+repository workflow can print one task result with the concrete skip reason.
+
 The standard `wrac-plugin.toml` schema is documented in
 [`wrac_manifest`](../wrac_manifest/README.md).
 
