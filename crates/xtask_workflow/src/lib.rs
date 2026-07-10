@@ -51,8 +51,10 @@ pub struct WorkflowMessages {
     pub ok: &'static str,
     pub failed: &'static str,
     pub skipped: &'static str,
+    pub blocked: &'static str,
     pub planned: &'static str,
-    pub dependency_skip_reason: &'static str,
+    pub reason: &'static str,
+    pub dependency_block_reason: &'static str,
 }
 
 impl WorkflowMessages {
@@ -66,8 +68,10 @@ impl WorkflowMessages {
         ok: "ok",
         failed: "failed",
         skipped: "skipped",
+        blocked: "blocked",
         planned: "planned",
-        dependency_skip_reason: "Reason: dependency failed or was skipped",
+        reason: "Reason",
+        dependency_block_reason: "dependency failed or was blocked",
     };
 
     pub const JAPANESE: Self = Self {
@@ -80,16 +84,38 @@ impl WorkflowMessages {
         ok: "成功",
         failed: "失敗",
         skipped: "スキップ",
+        blocked: "依存失敗",
         planned: "未実行",
-        dependency_skip_reason: "理由: 依存タスクが失敗またはスキップされました",
+        reason: "理由",
+        dependency_block_reason: "依存タスクが失敗または依存失敗になったため",
     };
 
     fn status_label(&self, status: TaskStatus) -> &'static str {
         match status {
             TaskStatus::Planned => self.planned,
-            TaskStatus::Ok => self.ok,
+            TaskStatus::Succeeded => self.ok,
             TaskStatus::Failed => self.failed,
             TaskStatus::Skipped => self.skipped,
+            TaskStatus::Blocked => self.blocked,
+        }
+    }
+}
+
+/// The outcome of a task that ran without an execution error.
+///
+/// A skipped task remains a valid dependency because it deliberately decided
+/// that no work was necessary. Dependency failures are tracked separately as
+/// [`TaskStatus::Blocked`] by the workflow executor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskOutcome {
+    Completed,
+    Skipped { reason: String },
+}
+
+impl TaskOutcome {
+    pub fn skipped(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
         }
     }
 }
@@ -124,9 +150,10 @@ struct Task<K> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TaskStatus {
     Planned,
-    Ok,
+    Succeeded,
     Failed,
     Skipped,
+    Blocked,
 }
 
 /// A dependency graph whose task semantics are owned by the caller.
@@ -181,7 +208,7 @@ impl<K> TaskGraph<K> {
         ids
     }
 
-    pub fn failed_dependency_ids(
+    pub fn blocking_dependency_ids(
         &self,
         task: TaskNode,
         statuses: &HashMap<TaskNode, TaskStatus>,
@@ -192,7 +219,7 @@ impl<K> TaskGraph<K> {
             .filter(|dep| {
                 matches!(
                     statuses.get(dep),
-                    Some(TaskStatus::Failed | TaskStatus::Skipped)
+                    Some(TaskStatus::Failed | TaskStatus::Blocked)
                 )
             })
             .map(|dep| &self.graph[dep].id)
@@ -256,7 +283,7 @@ impl<K> Default for TaskGraph<K> {
 /// Executes a workflow graph while keeping task semantics in the caller.
 ///
 /// The graph executor handles stable ordering, dry-run output, failure policy,
-/// downstream skipping, and summary reporting. The caller still owns the task
+/// downstream blocking, and summary reporting. The caller still owns the task
 /// enum, labels, and dispatch to WRAC operations or product-specific work.
 pub fn execute_plan<K, Label, Run>(
     graph: TaskGraph<K>,
@@ -268,7 +295,7 @@ pub fn execute_plan<K, Label, Run>(
 ) -> Result<()>
 where
     Label: FnMut(&K) -> String,
-    Run: FnMut(&K) -> Result<()>,
+    Run: FnMut(&K) -> Result<TaskOutcome>,
 {
     let ordered = graph.ordered()?;
     print_plan(&graph, &ordered, dry_run, messages, &mut label_task);
@@ -284,35 +311,44 @@ where
 
     for index in &ordered {
         let index = *index;
-        // A failed dependency makes the dependent task meaningless, so continuing
-        // never tries to run downstream work with missing artifacts. Independent
-        // branches still run under FailurePolicy::Continue.
-        let failed_deps = graph
-            .failed_dependency_ids(index, &statuses)
+        // A failed or blocked dependency makes the dependent task meaningless,
+        // so continuing never runs downstream work with missing artifacts.
+        // Deliberately skipped dependencies remain valid because they completed
+        // their decision successfully and require no generated work.
+        let blocking_deps = graph
+            .blocking_dependency_ids(index, &statuses)
             .into_iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>();
-        if !failed_deps.is_empty() {
-            println!("{}\n  ⏭️ {}", graph.id(index), messages.skipped);
+        let label = label_task(graph.kind(index));
+        println!("== {label} ==\n\n  {}", graph.id(index));
+        if !blocking_deps.is_empty() {
+            println!("  🚫 {}: {label}", messages.blocked);
             println!(
-                "  {} ({})",
-                messages.dependency_skip_reason,
-                failed_deps.join(", ")
+                "  {}: {} ({})",
+                messages.reason,
+                messages.dependency_block_reason,
+                blocking_deps.join(", ")
             );
             println!();
-            statuses.insert(index, TaskStatus::Skipped);
+            statuses.insert(index, TaskStatus::Blocked);
             continue;
         }
 
-        println!("{}\n  {}", graph.id(index), label_task(graph.kind(index)));
         match run_task(graph.kind(index)) {
-            Ok(()) => {
-                println!("  ✅ {}", messages.completed);
+            Ok(TaskOutcome::Completed) => {
+                println!("  ✅ {}: {label}", messages.completed);
                 println!();
-                statuses.insert(index, TaskStatus::Ok);
+                statuses.insert(index, TaskStatus::Succeeded);
+            }
+            Ok(TaskOutcome::Skipped { reason }) => {
+                println!("  ⏭️ {}: {label}", messages.skipped);
+                println!("  {}: {reason}", messages.reason);
+                println!();
+                statuses.insert(index, TaskStatus::Skipped);
             }
             Err(err) => {
-                println!("  ❌ {}", messages.failed);
+                println!("  ❌ {}: {label}", messages.failed);
                 println!("  Error: {err}");
                 statuses.insert(index, TaskStatus::Failed);
                 failures.push(format!("{}: {err}", graph.id(index)));
@@ -386,20 +422,25 @@ fn print_summary<K>(
         *counts.entry(*status).or_default() += 1;
     }
     println!(
-        "== {} ==\n\n✅ {} {} / ❌ {} {} / ⏭️ {} {}",
+        "== {} ==\n\n✅ {} {} / ❌ {} {} / ⏭️ {} {} / 🚫 {} {}",
         messages.result_heading,
         messages.ok,
-        counts.get(&TaskStatus::Ok).copied().unwrap_or(0),
+        counts.get(&TaskStatus::Succeeded).copied().unwrap_or(0),
         messages.failed,
         counts.get(&TaskStatus::Failed).copied().unwrap_or(0),
         messages.skipped,
-        counts.get(&TaskStatus::Skipped).copied().unwrap_or(0)
+        counts.get(&TaskStatus::Skipped).copied().unwrap_or(0),
+        messages.blocked,
+        counts.get(&TaskStatus::Blocked).copied().unwrap_or(0)
     );
     for index in ordered {
         let Some(status) = statuses.get(index) else {
             continue;
         };
-        if matches!(status, TaskStatus::Failed | TaskStatus::Skipped) {
+        if matches!(
+            status,
+            TaskStatus::Failed | TaskStatus::Skipped | TaskStatus::Blocked
+        ) {
             println!("{}: {}", messages.status_label(*status), graph.id(*index));
         }
     }
@@ -446,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_plan_skips_dependents_after_failed_dependencies() {
+    fn execute_plan_blocks_dependents_after_failed_dependencies() {
         let mut graph = TaskGraph::new();
         let root = graph.task(TaskId::new("root"), TestTask::Root);
         let dependent = graph.task(TaskId::new("dependent"), TestTask::Dependent);
@@ -464,7 +505,7 @@ mod tests {
                 executed.push(*task);
                 match task {
                     TestTask::Root => Err("root failed".into()),
-                    TestTask::Dependent | TestTask::Independent => Ok(()),
+                    TestTask::Dependent | TestTask::Independent => Ok(TaskOutcome::Completed),
                 }
             },
         );
@@ -473,5 +514,32 @@ mod tests {
 
         assert!(error.contains("root failed"));
         assert_eq!(executed, [TestTask::Root, TestTask::Independent]);
+    }
+
+    #[test]
+    fn execute_plan_runs_dependents_after_deliberately_skipped_dependencies() {
+        let mut graph = TaskGraph::new();
+        let root = graph.task(TaskId::new("root"), TestTask::Root);
+        let dependent = graph.task(TaskId::new("dependent"), TestTask::Dependent);
+        graph.depends_on(dependent, root);
+
+        let mut executed = Vec::new();
+        let result = execute_plan(
+            graph,
+            false,
+            FailurePolicy::Continue,
+            &WorkflowMessages::ENGLISH,
+            |task| format!("{task:?}"),
+            |task| {
+                executed.push(*task);
+                match task {
+                    TestTask::Root => Ok(TaskOutcome::skipped("nothing to build")),
+                    TestTask::Dependent | TestTask::Independent => Ok(TaskOutcome::Completed),
+                }
+            },
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(executed, [TestTask::Root, TestTask::Dependent]);
     }
 }

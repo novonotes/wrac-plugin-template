@@ -19,7 +19,7 @@ use wrac_build_ops::{
     uninstall_plugin_target, validate_plugin_target, validate_wrac_rules_for_targets,
 };
 use xtask_workflow::{
-    FailurePolicy, TaskGraph, TaskNode, WorkflowMessages, execute_plan, failure_policy,
+    FailurePolicy, TaskGraph, TaskNode, TaskOutcome, WorkflowMessages, execute_plan, failure_policy,
 };
 
 type Result<T> = wrac_build_ops::Result<T>;
@@ -333,15 +333,17 @@ fn execute_package_plan(
     )
 }
 
-fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result<()> {
+fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result<TaskOutcome> {
     match kind {
-        TaskKind::Clean => clean(ctx),
+        TaskKind::Clean => completed(clean(ctx)),
         TaskKind::BuildGui => build_gui(ctx),
-        TaskKind::BuildRustDefault => build_rust_plugin(ctx, profile, RustPluginBuild::Default),
-        TaskKind::BuildRustStandalone => {
-            build_rust_plugin(ctx, profile, RustPluginBuild::Standalone)
+        TaskKind::BuildRustDefault => {
+            completed(build_rust_plugin(ctx, profile, RustPluginBuild::Default))
         }
-        TaskKind::PackageClap => package_clap(ctx, profile),
+        TaskKind::BuildRustStandalone => {
+            completed(build_rust_plugin(ctx, profile, RustPluginBuild::Standalone))
+        }
+        TaskKind::PackageClap => completed(package_clap(ctx, profile)),
         TaskKind::ConfigureWrapperPlugins { vst3, au } => configure_wrapper(
             ctx,
             profile,
@@ -354,7 +356,7 @@ fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result
         TaskKind::ConfigureWrapperStandalone => {
             configure_wrapper(ctx, profile, WrapperBuild::Standalone)
         }
-        TaskKind::BuildVst3Bundle => build_wrapper_target(
+        TaskKind::BuildVst3Bundle => completed(build_wrapper_target(
             ctx,
             profile,
             WrapperBuild::Plugins {
@@ -363,8 +365,8 @@ fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result
             },
             WrapperTarget::Vst3,
             None,
-        ),
-        TaskKind::BuildAuBundle => build_wrapper_target(
+        )),
+        TaskKind::BuildAuBundle => completed(build_wrapper_target(
             ctx,
             profile,
             WrapperBuild::Plugins {
@@ -373,23 +375,29 @@ fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result
             },
             WrapperTarget::Au,
             None,
-        ),
-        TaskKind::BuildAaxBundle => {
-            build_wrapper_target(ctx, profile, WrapperBuild::Aax, WrapperTarget::Aax, None)
-        }
-        TaskKind::BuildStandaloneBundle { plugin_id } => build_wrapper_target(
+        )),
+        TaskKind::BuildAaxBundle => completed(build_wrapper_target(
+            ctx,
+            profile,
+            WrapperBuild::Aax,
+            WrapperTarget::Aax,
+            None,
+        )),
+        TaskKind::BuildStandaloneBundle { plugin_id } => completed(build_wrapper_target(
             ctx,
             profile,
             WrapperBuild::Standalone,
             WrapperTarget::Standalone,
             plugin_id.as_deref(),
-        ),
-        TaskKind::LaunchStandalone { plugin_id } => launch(ctx, profile, plugin_id.as_deref()),
+        )),
+        TaskKind::LaunchStandalone { plugin_id } => {
+            completed(launch(ctx, profile, plugin_id.as_deref()))
+        }
         TaskKind::CheckInstallScope { target, scope } => {
-            check_install_dir(ctx, *scope, target.format())
+            completed(check_install_dir(ctx, *scope, target.format()))
         }
         TaskKind::InstallBundle { target, scope } => {
-            install_plugin_target(ctx, profile, *scope, *target)
+            completed(install_plugin_target(ctx, profile, *scope, *target))
         }
         TaskKind::UninstallBundle {
             target,
@@ -402,13 +410,21 @@ fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result
             } else {
                 println!("  {}", uninstall_summary(*target, removed, missing, false));
             }
-            Ok(())
+            Ok(TaskOutcome::Completed)
         }
         TaskKind::ValidateWracRules { targets } => {
-            validate_wrac_rules_for_targets(ctx, profile, targets)
+            completed(validate_wrac_rules_for_targets(ctx, profile, targets))
         }
-        TaskKind::ValidateBundle { target } => validate_plugin_target(ctx, profile, *target),
+        TaskKind::ValidateBundle { target } => {
+            completed(validate_plugin_target(ctx, profile, *target))
+        }
     }
+}
+
+fn completed(result: Result<()>) -> Result<TaskOutcome> {
+    // Operations that cannot skip still return a workflow outcome so the
+    // workflow remains the single owner of the user-facing task result.
+    result.map(|()| TaskOutcome::Completed)
 }
 
 fn execute_build(config: &XtaskConfig, args: BuildArgs) -> Result<()> {

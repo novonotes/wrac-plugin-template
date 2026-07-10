@@ -5,14 +5,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+use xtask_workflow::TaskOutcome;
 
 use crate::context::Context;
 use crate::metadata::PluginProductMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::util::{
-    ensure_exists, env_value_or, on_off, print_section, print_skip, remove_if_exists,
-    run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
+    ensure_exists, env_value_or, on_off, remove_if_exists, run_output_with_language,
+    run_with_language, run_with_optional_xcbeautify_language,
 };
 use crate::{Result, XtaskOutputLanguage};
 
@@ -22,30 +23,26 @@ use super::{
     macos_clap_info_plist,
 };
 
-pub fn build_gui(ctx: &Context) -> Result<()> {
-    print_section(ctx.output_language, "Build GUI", "GUI ビルド");
+pub fn build_gui(ctx: &Context) -> Result<TaskOutcome> {
     let package_json = ctx.gui_dir().join("package.json");
     if !package_json.exists() {
-        print_skip(
-            ctx.output_language,
-            "No src-gui/package.json found; skipping GUI build.",
-            "src-gui/package.json がないため GUI ビルドをスキップ",
-        );
-        return Ok(());
+        return Ok(TaskOutcome::skipped(match ctx.output_language {
+            XtaskOutputLanguage::English => "src-gui/package.json was not found",
+            XtaskOutputLanguage::Japanese => "src-gui/package.json が存在しないため",
+        }));
     }
     if !has_package_script(&package_json, "build")? {
-        print_skip(
-            ctx.output_language,
-            &format!(
-                "No build script found in {}; skipping GUI build.",
-                package_json.display()
-            ),
-            &format!(
-                "{} に build script がないため GUI ビルドをスキップ",
-                package_json.display()
-            ),
-        );
-        return Ok(());
+        return Ok(TaskOutcome::skipped(match ctx.output_language {
+            XtaskOutputLanguage::English => {
+                format!("no build script was found in {}", package_json.display())
+            }
+            XtaskOutputLanguage::Japanese => {
+                format!(
+                    "{} に build script が存在しないため",
+                    package_json.display()
+                )
+            }
+        }));
     }
     let package = read_package_json(&package_json)?;
     if !is_pnpm_workspace(ctx) {
@@ -63,7 +60,7 @@ pub fn build_gui(ctx: &Context) -> Result<()> {
                 .current_dir(ctx.gui_dir()),
             ctx.output_language,
         )?;
-        return Ok(());
+        return Ok(TaskOutcome::Completed);
     }
 
     let package_name = package_name(&package, &package_json)?;
@@ -90,7 +87,7 @@ pub fn build_gui(ctx: &Context) -> Result<()> {
             .current_dir(&ctx.root),
         ctx.output_language,
     )?;
-    Ok(())
+    Ok(TaskOutcome::Completed)
 }
 
 fn is_pnpm_workspace(ctx: &Context) -> bool {
@@ -203,11 +200,6 @@ pub fn build_rust_plugin(
     profile: BuildProfile,
     build: RustPluginBuild,
 ) -> Result<()> {
-    print_section(
-        ctx.output_language,
-        &format!("Build Rust plugin ({})", build.label()),
-        &format!("Rust plugin ビルド ({})", build.label()),
-    );
     let mut command = Command::new("cargo");
     command
         .arg("build")
@@ -240,7 +232,6 @@ pub fn build_rust_plugin(
 }
 
 pub fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
-    print_section(ctx.output_language, "Package CLAP", "CLAP packaging");
     let bundle = ctx.clap_bundle(profile);
     remove_if_exists(&bundle)?;
     fs::create_dir_all(ctx.plugins_dir(profile))?;
@@ -320,7 +311,11 @@ impl WrapperBuild {
     }
 }
 
-pub fn configure_wrapper(ctx: &Context, profile: BuildProfile, build: WrapperBuild) -> Result<()> {
+pub fn configure_wrapper(
+    ctx: &Context,
+    profile: BuildProfile,
+    build: WrapperBuild,
+) -> Result<TaskOutcome> {
     // Keep SDK/submodule diagnostics close to the configure task even when the
     // DAG was created by install, validate, or launch. Checking before the CMake
     // stamp shortcut avoids silently relying on a stale cache after an SDK
@@ -474,20 +469,18 @@ pub fn configure_wrapper(ctx: &Context, profile: BuildProfile, build: WrapperBui
     }
 
     if cmake_configure_is_current(&build_dir, &args, &ctx.wrapper_dir)? {
-        print_skip(
-            ctx.output_language,
-            &format!(
+        return Ok(TaskOutcome::skipped(match ctx.output_language {
+            XtaskOutputLanguage::English => format!(
                 "CMake configure is up to date for {} ({})",
                 build.purpose(),
                 profile.cmake_config()
             ),
-            &format!(
+            XtaskOutputLanguage::Japanese => format!(
                 "CMake configure は最新です: {} ({})",
                 build.purpose(),
                 profile.cmake_config()
             ),
-        );
-        return Ok(());
+        }));
     }
 
     let mut configure = Command::new("cmake");
@@ -500,7 +493,7 @@ pub fn configure_wrapper(ctx: &Context, profile: BuildProfile, build: WrapperBui
     }
     run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
     write_cmake_configure_stamp(&build_dir, &args, &ctx.wrapper_dir)?;
-    Ok(())
+    Ok(TaskOutcome::Completed)
 }
 
 pub fn build_wrapper_target(

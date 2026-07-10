@@ -12,7 +12,7 @@ use crate::context::Context;
 use crate::profile::BuildProfile;
 use crate::targets::{Platform, ValidateTarget};
 use crate::util::{
-    copy_path, ensure_exists, print_section, print_skip, print_success, remove_if_exists,
+    copy_path, ensure_exists, print_detail, print_section, remove_if_exists,
     run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
 };
 use crate::validation::validate_wrac_rules;
@@ -90,7 +90,7 @@ pub fn validate_plugin_target(
                     .skip_reason
                     .as_deref()
                     .unwrap_or("no reason provided");
-                print_skip(
+                print_detail(
                     ctx.output_language,
                     &format!("CLAP validator skip filter: {filter} ({reason})"),
                     &format!("CLAP validator skip filter: {filter} ({reason})"),
@@ -183,7 +183,7 @@ fn validate_vst3_component_ids(
         .into());
     }
 
-    print_success(
+    print_detail(
         ctx.output_language,
         "VST3 component IDs match plugins.vst3_component_id",
         "VST3 component ID は plugins.vst3_component_id と一致",
@@ -233,7 +233,7 @@ fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
         AAX_VALIDATOR_REQUIRED_TESTS.len()
     );
     for (test_id, reason) in AAX_VALIDATOR_SKIPPED_TESTS {
-        print_skip(
+        print_detail(
             ctx.output_language,
             &format!("Skipping {test_id}: {reason}."),
             &format!("{test_id}: {reason}"),
@@ -250,8 +250,7 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
     let aax_search_dir = aax
         .parent()
         .ok_or_else(|| format!("AAX bundle path has no parent directory: {}", aax.display()))?;
-    print_section(ctx.output_language, "Running command", "コマンド実行");
-    println!("$ {}", dtt.display());
+    println!("  $ {}", dtt.display());
 
     for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
         let test_dir =
@@ -367,7 +366,7 @@ fn assert_aax_validator_results(ctx: &Context, results_dir: &Path) -> Result<()>
         // and artifacts can be audited against.
         let status = aax_validator_result_status(&result_path)?;
         if status == "E_COMPLETED_PASS" {
-            print_success(
+            print_detail(
                 ctx.output_language,
                 &format!("AAX validator PASS: {test_id}"),
                 &format!("AAX validator 成功: {test_id}"),
