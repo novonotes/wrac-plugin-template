@@ -8,6 +8,6 @@ pub trait PluginRenderExtension: Send + Sync + 'static {
         false
     }
 
-    /// Called from CLAP `render.set`. `[thread-safe]`
+    /// Called from CLAP `render.set`. `[non-realtime & thread-safe]`
     fn set_render_mode(&self, mode: PluginRenderMode) -> PluginResult<()>;
 }

@@ -13,21 +13,23 @@
 //! Method docs use annotations to state the requirements product authors must satisfy:
 //! - `[main-thread]`: runs on the main thread, so the implementation may use
 //!   main-thread-affine APIs such as GUI operations.
-//! - `[default]`: runs serially on an arbitrary non-realtime thread. The implementation
+//! - `[non-realtime]`: runs serially on an arbitrary non-realtime thread. The implementation
 //!   must not assume affinity to a particular thread.
-//! - `[realtime-safe]`: runs serially on a realtime path. The implementation must avoid
-//!   heap allocation, blocking locks, I/O, and non-realtime logging.
-//! - `[thread-safe]`: may run concurrently on multiple non-realtime threads. The
-//!   implementation must be thread-safe.
-//! - `[realtime-safe & thread-safe]`: may run concurrently on multiple threads,
-//!   including realtime paths. The implementation must be both realtime-safe and thread-safe.
+//! - `[realtime-safe]`: may also run on realtime paths, with calls to the same object
+//!   serialized. The implementation must avoid heap allocation, blocking locks, I/O, and
+//!   non-realtime logging.
+//! - `[non-realtime & thread-safe]`: may run concurrently on multiple non-realtime
+//!   threads. The implementation must be thread-safe.
+//! - `[realtime-safe & thread-safe]`: may run concurrently on multiple threads, including
+//!   realtime paths. The implementation must be both realtime-safe and thread-safe.
 //!
 //! On product-implemented callbacks, an annotation states the implementation requirement.
 //! On `Host*` methods supplied by the adapter, it states where product code may call the
 //! method. Calls to the same `Host*` object include calls through cloned `Arc` references
-//! to that object. `[main-thread]` permits calls only from the main thread; `[default]`
-//! and `[realtime-safe]` require serialized calls from non-realtime and realtime paths,
-//! respectively; the thread-safe variants permit concurrent calls in the stated context.
+//! to that object. `[main-thread]` permits calls only from the main thread;
+//! `[non-realtime]` requires serialized calls from non-realtime paths, and
+//! `[realtime-safe]` also permits serialized calls from realtime paths. The thread-safe
+//! variants permit concurrent calls in the stated context.
 //!
 //! Host-facing ABI callbacks that require a synchronous return must not wait for a
 //! main-thread or run-loop hop from a method not annotated `[main-thread]`.

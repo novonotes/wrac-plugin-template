@@ -21,7 +21,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// directly. Standalone apps and other binaries that do not enter through
     /// this adapter are responsible for calling `wrac_log::configure_standalone`
     /// and holding the returned runtime themselves.
-    /// `[default]`
+    /// `[non-realtime]`
     fn log_config(&'static self) -> Option<&'static LogConfig>;
 
     /// Initializes entry-level state.
@@ -33,7 +33,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// not log, open files, write to stderr, start worker threads, initialize COM
     /// or GUI state, launch external processes, or perform expensive computation
     /// here.
-    /// `[default]`
+    /// `[non-realtime]`
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
@@ -44,20 +44,20 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// perform file I/O, join worker threads, or release thread-affine GUI/COM
     /// state here; per-instance cleanup must happen when the last plugin instance
     /// is destroyed.
-    /// `[default]`
+    /// `[non-realtime]`
     fn deinit(&self) {}
 
     /// Begins one host/wrapper-designated plugin-main-thread lifetime.
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn attach_main_thread(&self) {}
 
     /// Ends one host/wrapper-designated plugin-main-thread lifetime.
     ///
     /// Implementations must not infer native CLAP thread affinity.
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn detach_main_thread(&self) {}
 
     /// Returns the static factory used for descriptor discovery and product instance creation.
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn plugin_factory(&self) -> Option<&dyn PluginFactory>;
 }

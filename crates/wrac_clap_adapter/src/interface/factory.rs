@@ -4,13 +4,13 @@ use crate::interface::{PluginDescriptor, PluginInstance, PluginInstanceContext};
 ///
 /// The adapter snapshots descriptor metadata during cache initialization.
 pub trait PluginFactory: Send + Sync + 'static {
-    /// `[default]`
+    /// `[non-realtime]`
     fn plugin_count(&self) -> u32;
 
-    /// `[default]`
+    /// `[non-realtime]`
     fn plugin_descriptor(&self, index: u32) -> Option<PluginDescriptor>;
 
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn create_plugin(
         &self,
         plugin_id: &str,

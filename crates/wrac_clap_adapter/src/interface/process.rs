@@ -16,7 +16,7 @@ use clap_sys::{
 /// State passed in must be either an immutable snapshot copied at activate time, or
 /// atomic/lock-free shared state the audio thread never waits on.
 pub trait ActiveProcessor: Send {
-    /// Converts to `Any` so `deactivate` can recover owned state. `[default]`
+    /// Converts to `Any` so `deactivate` can recover owned state. `[non-realtime]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
     /// Called from CLAP `plugin.reset`. `[realtime-safe]`
@@ -31,10 +31,10 @@ pub trait ActiveProcessor: Send {
 
 /// Processing state used while the CLAP plugin is inactive.
 pub trait InactiveProcessor: Send {
-    /// Converts to `Any` so `activate` can recover owned state. `[default]`
+    /// Converts to `Any` so `activate` can recover owned state. `[non-realtime]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
-    /// Called from CLAP `params.flush` while inactive. `[default]`
+    /// Called from CLAP `params.flush` while inactive. `[non-realtime]`
     fn flush_params(&mut self, context: ParamFlushContext<'_>) -> PluginResult<()>;
 }
 

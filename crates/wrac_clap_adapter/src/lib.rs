@@ -7,15 +7,8 @@ mod abi;
 mod descriptor;
 mod entry;
 mod factory;
-mod host_audio_ports;
-mod host_gui;
-mod host_latency;
-mod host_lifecycle;
-mod host_note_ports;
-mod host_state;
-mod host_tail;
+mod host_proxy;
 pub mod interface;
-mod params;
 
 /// Macro support items used by [`export_clap_entry!`].
 ///

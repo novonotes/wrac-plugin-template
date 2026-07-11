@@ -6,7 +6,7 @@ use crate::interface::{GuiSize, NoteDialects, PluginResult};
 /// carry parameter values; plugins emit those as output events from `process` or
 /// `flush_params`.
 pub trait HostParams: Send + Sync {
-    /// Calls CLAP `host_params.request_flush`. `[thread-safe]`
+    /// Calls CLAP `host_params.request_flush`. `[non-realtime & thread-safe]`
     fn request_flush(&self);
 
     /// Calls CLAP `host_params.rescan`. `[main-thread]`
@@ -49,13 +49,13 @@ pub trait HostNotePorts: Send + Sync {
 
 /// Requests CLAP core host actions.
 pub trait HostLifecycle: Send + Sync {
-    /// Calls CLAP `host.request_restart`. `[thread-safe]`
+    /// Calls CLAP `host.request_restart`. `[non-realtime & thread-safe]`
     fn request_restart(&self);
 
-    /// Calls CLAP `host.request_process`. `[thread-safe]`
+    /// Calls CLAP `host.request_process`. `[non-realtime & thread-safe]`
     fn request_process(&self);
 
-    /// Calls CLAP `host.request_callback`. `[thread-safe]`
+    /// Calls CLAP `host.request_callback`. `[non-realtime & thread-safe]`
     ///
     /// The host is expected to schedule a later `PluginInstance::on_main_thread` call.
     fn request_callback(&self);

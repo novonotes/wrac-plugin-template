@@ -12,27 +12,27 @@ pub trait PluginGuiApiSupportExtension: Send + Sync + 'static {
 pub trait PluginGuiQueryExtension: Send + Sync + 'static {
     /// Called from CLAP `gui.get_preferred_api`.
     ///
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn preferred_api(&self) -> Option<GuiConfig>;
 
     /// Called from CLAP `gui.get_size`.
     ///
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn get_size(&self) -> PluginResult<GuiSize>;
 
     /// Called from CLAP `gui.can_resize`.
     ///
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn can_resize(&self) -> bool;
 
     /// Called from CLAP `gui.get_resize_hints`.
     ///
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn resize_hints(&self) -> Option<GuiResizeHints>;
 
     /// Called from CLAP `gui.adjust_size`.
     ///
-    /// `[thread-safe]`
+    /// `[non-realtime & thread-safe]`
     fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize>;
 }
 
@@ -79,12 +79,12 @@ pub trait PluginGuiMainThreadExtension: 'static {
 /// Query methods and main-thread lifecycle methods are split so product code can
 /// implement thread-safe host queries separately from native UI operations.
 pub trait PluginGuiExtension: Send + Sync + 'static {
-    /// `[default]`
+    /// `[non-realtime]`
     fn api_support(&self) -> &(dyn PluginGuiApiSupportExtension + Send + Sync);
 
-    /// `[default]`
+    /// `[non-realtime]`
     fn query(&self) -> &(dyn PluginGuiQueryExtension + Send + Sync);
 
-    /// `[default]`
+    /// `[non-realtime]`
     fn main_thread(&self) -> &dyn PluginGuiMainThreadExtension;
 }

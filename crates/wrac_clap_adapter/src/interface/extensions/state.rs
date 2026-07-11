@@ -15,7 +15,7 @@ pub enum StateSaveOutcome {
 /// slot when concurrent saves need distinct completion state. Completion runs on the ABI caller's
 /// thread, so expensive work or thread-affine notifications should be scheduled elsewhere.
 pub trait StateSaveCompletion: Send {
-    /// `[default]`
+    /// `[non-realtime]`
     fn complete(self: Box<Self>, outcome: StateSaveOutcome);
 }
 
@@ -46,9 +46,9 @@ impl PreparedStateSave {
 
 /// CLAP state extension.
 pub trait PluginStateExtension: Send + Sync + 'static {
-    /// Called from CLAP `state.save`. `[thread-safe]`
+    /// Called from CLAP `state.save`. `[non-realtime & thread-safe]`
     fn save_state(&self) -> PluginResult<PreparedStateSave>;
 
-    /// Called from CLAP `state.load`. `[default]`
+    /// Called from CLAP `state.load`. `[non-realtime]`
     fn restore_state(&self, state: State) -> PluginResult<()>;
 }

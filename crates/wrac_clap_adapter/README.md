@@ -26,6 +26,12 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 related types from `wrac_clap_adapter::interface`; the remaining modules own the ABI callbacks,
 registration storage, and concrete host proxy implementations.
 
+## Internal boundaries
+
+- `interface`: the complete product-facing contract
+- `abi`: CLAP callbacks that invoke product implementations
+- `host_proxy`: private concrete proxies used by products to invoke CLAP host callbacks
+
 ## Instance lifecycle
 
 `clap.plugin-factory.create_plugin` creates only the CLAP ABI shell. Product instance construction is deferred until `plugin.init`, where CLAP and clap-wrapper initialize the plugin-facing lifecycle. Capability objects such as ports, parameters, state, GUI, latency, and tail are frozen during `plugin.init` so later host callbacks can answer without taking the product lifecycle lock.
