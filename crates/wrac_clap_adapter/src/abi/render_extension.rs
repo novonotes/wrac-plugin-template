@@ -15,7 +15,7 @@ pub(super) static RENDER: clap_plugin_render = clap_plugin_render {
 unsafe extern "C" fn render_has_hard_realtime_requirement(plugin: *const clap_plugin) -> bool {
     ffi_bool(|| {
         let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
-            log::warn!("render.has_hard_realtime_requirement: missing plugin instance");
+            wrac_log::rtwarn!("render.has_hard_realtime_requirement: missing plugin instance");
             return false;
         };
         let Some(render) = instance
@@ -23,7 +23,7 @@ unsafe extern "C" fn render_has_hard_realtime_requirement(plugin: *const clap_pl
             .get()
             .and_then(|runtime| runtime.render.as_ref())
         else {
-            log::warn!("render.has_hard_realtime_requirement: plugin has no render support");
+            wrac_log::rtwarn!("render.has_hard_realtime_requirement: plugin has no render support");
             return false;
         };
         render.has_hard_realtime_requirement()

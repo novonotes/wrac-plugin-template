@@ -48,16 +48,23 @@ pub trait PluginEntry: Send + Sync + 'static {
     fn deinit(&self) {}
 
     /// Begins one host/wrapper-designated plugin-main-thread lifetime.
+    ///
+    /// Plugin objects may be created concurrently on wrapper control threads, so implementations
+    /// must synchronize entry-wide attachment state.
     /// `[non-realtime & thread-safe]`
     fn attach_main_thread(&self) {}
 
     /// Ends one host/wrapper-designated plugin-main-thread lifetime.
     ///
-    /// Implementations must not infer native CLAP thread affinity.
+    /// Plugin objects may be destroyed concurrently on wrapper control threads, so implementations
+    /// must synchronize entry-wide attachment state and must not infer native CLAP thread affinity.
     /// `[non-realtime & thread-safe]`
     fn detach_main_thread(&self) {}
 
     /// Returns the static factory used for descriptor discovery and product instance creation.
+    ///
+    /// The factory is requested during descriptor cache initialization and may later be requested
+    /// concurrently by independent plugin initialization callbacks.
     /// `[non-realtime & thread-safe]`
     fn plugin_factory(&self) -> Option<&dyn PluginFactory>;
 }

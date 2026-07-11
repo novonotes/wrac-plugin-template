@@ -36,18 +36,15 @@ pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
 unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
         let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
-            log::warn!("params.count: missing plugin instance");
+            wrac_log::rtwarn!("params.count: missing plugin instance");
             return 0;
         };
         let Some(runtime) = instance.runtime.get() else {
-            log::warn!("params.count: plugin instance is not initialized");
+            wrac_log::rtwarn!("params.count: plugin instance is not initialized");
             return 0;
         };
         let count = runtime.parameters.count();
-        log::debug!(
-            "params.count: count={count} thread={:?}",
-            std::thread::current().id()
-        );
+        wrac_log::rtdebug!("params.count: count={count}");
         count
     })
 }
@@ -122,25 +119,24 @@ unsafe extern "C" fn params_get_value(
 ) -> bool {
     ffi_bool(|| {
         if out_value.is_null() {
-            log::warn!("params.get_value: null output pointer param_id={param_id}");
+            wrac_log::rtwarn!("params.get_value: null output pointer param_id={param_id}");
             return false;
         }
         let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
-            log::warn!("params.get_value: missing plugin instance param_id={param_id}");
+            wrac_log::rtwarn!("params.get_value: missing plugin instance param_id={param_id}");
             return false;
         };
         let Some(runtime) = instance.runtime.get() else {
-            log::warn!("params.get_value: plugin instance is not initialized param_id={param_id}");
+            wrac_log::rtwarn!(
+                "params.get_value: plugin instance is not initialized param_id={param_id}"
+            );
             return false;
         };
         let Ok(value) = runtime.parameters.get_value(param_id) else {
-            log::warn!("params.get_value: invalid param_id={param_id}");
+            wrac_log::rtwarn!("params.get_value: invalid param_id={param_id}");
             return false;
         };
-        log::debug!(
-            "params.get_value: param_id={param_id} value={value} thread={:?}",
-            std::thread::current().id()
-        );
+        wrac_log::rtdebug!("params.get_value: param_id={param_id} value={value}");
         unsafe {
             *out_value = value;
         }

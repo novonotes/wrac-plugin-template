@@ -1,6 +1,10 @@
 use crate::interface::{GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginResult};
 
-/// Query surface for CLAP GUI API support.
+/// Realtime-safe query surface for CLAP GUI API support.
+///
+/// The AUv2 wrapper reaches CLAP `gui.is_api_supported` while answering
+/// `GetPropertyInfo(kAudioUnitProperty_CocoaUI)`. Keep implementations independent of GUI runtime
+/// state: do not allocate, lock, or touch thread-affine UI objects here.
 pub trait PluginGuiApiSupportExtension: Send + Sync + 'static {
     /// Called from CLAP `gui.is_api_supported`.
     ///
@@ -79,7 +83,7 @@ pub trait PluginGuiMainThreadExtension: 'static {
 /// Query methods and main-thread lifecycle methods are split so product code can
 /// implement thread-safe host queries separately from native UI operations.
 pub trait PluginGuiExtension: Send + Sync + 'static {
-    /// `[non-realtime]`
+    /// `[realtime-safe & thread-safe]`
     fn api_support(&self) -> &(dyn PluginGuiApiSupportExtension + Send + Sync);
 
     /// `[non-realtime]`

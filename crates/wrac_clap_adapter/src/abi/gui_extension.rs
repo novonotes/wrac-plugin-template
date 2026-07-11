@@ -40,15 +40,34 @@ unsafe extern "C" fn gui_is_api_supported(
     is_floating: bool,
 ) -> bool {
     ffi_bool(|| {
-        let Some(gui) = (unsafe { plugin_gui_query(plugin) }) else {
+        let Some(gui) = (unsafe { plugin_gui_query_realtime(plugin) }) else {
             return false;
         };
         let Some(api) = gui_api_from_c(api) else {
-            log::warn!("gui.is_api_supported: invalid API pointer");
+            wrac_log::rtwarn!("gui.is_api_supported: invalid API pointer");
             return false;
         };
         gui.api_support().is_api_supported(api, is_floating)
     })
+}
+
+// Keep this path separate because `is_api_supported` may run on a realtime thread, while the
+// remaining GUI queries use non-realtime diagnostics.
+unsafe fn plugin_gui_query_realtime(
+    plugin: *const clap_plugin,
+) -> Option<Arc<dyn PluginGuiExtension>> {
+    let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
+        wrac_log::rtwarn!("gui.is_api_supported: missing plugin instance");
+        return None;
+    };
+    let gui = instance
+        .runtime
+        .get()
+        .and_then(|runtime| runtime.gui.clone());
+    if gui.is_none() {
+        wrac_log::rtdebug!("gui.is_api_supported: plugin has no GUI");
+    }
+    gui
 }
 
 unsafe extern "C" fn gui_get_preferred_api(
