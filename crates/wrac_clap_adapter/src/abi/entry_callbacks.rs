@@ -13,8 +13,8 @@ use super::{
     PluginInstanceState, WRAC_PLUGIN_MAIN_THREAD_HOOK,
 };
 use crate::entry::{
-    EntryContext, EntryRegistration, decrement_entry_init_count, entry_init_count,
-    increment_entry_init_count, reset_entry_init_count, retain_entry_instance,
+    EntryRegistration, decrement_entry_init_count, entry_init_count, increment_entry_init_count,
+    reset_entry_init_count, retain_entry_instance,
 };
 use crate::factory::{
     AaxFactoryState, Auv2FactoryState, ClapPluginFactoryAsAax, ClapPluginFactoryAsAuv2,
@@ -23,6 +23,7 @@ use crate::factory::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
+use wrac_interface::EntryContext;
 
 unsafe fn clap_host_name(host: *const clap_host) -> Option<String> {
     if host.is_null() {

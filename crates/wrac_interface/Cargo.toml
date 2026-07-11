@@ -1,24 +1,25 @@
 [package]
-name = "wrac_clap_adapter"
+name = "wrac_interface"
 version = "0.1.0"
 edition = "2024"
-description = "Defensive CLAP adapter for the WRAC plugin template"
+description = "Product implementation interface for the WRAC plugin stack"
 license = "MIT"
 repository = "https://github.com/novonotes/wrac-plugin-template"
-readme = "README.md"
 publish = false
 
 [dependencies]
 clap-sys = { workspace = true }
 log = "0.4"
-parking_lot = "0.12"
 wrac_host_context = { workspace = true }
-wrac_interface = { workspace = true }
 wrac_log = { workspace = true }
 
 [features]
 default = []
-raw-clap-forwarding = ["wrac_interface/raw-clap-forwarding"]
+raw-clap-forwarding = []
+
+[package.metadata.cargo-machete]
+# wrac_log's realtime macros expand through the log crate in the caller crate.
+ignored = ["log"]
 
 [lints.rust]
 unreachable_pub = "deny"

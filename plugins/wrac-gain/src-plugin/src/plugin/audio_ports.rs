@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use wrac_clap_adapter::{
+use wrac_interface::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginResult,
 };
@@ -176,7 +176,7 @@ fn is_supported_audio_port_request(request: &AudioPortConfigRequest) -> bool {
 mod tests {
     // Unit test examples for pure logic that can be verified without a host or CLAP runtime.
 
-    use wrac_clap_adapter::{AudioPortConfigRequest, AudioPortType};
+    use wrac_interface::{AudioPortConfigRequest, AudioPortType};
 
     use super::resolve_audio_channel_count;
 

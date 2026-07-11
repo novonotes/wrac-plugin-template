@@ -1,4 +1,4 @@
-use wrac_clap_adapter::{GuiApi, GuiConfig};
+use wrac_interface::{GuiApi, GuiConfig};
 
 pub(super) fn default_gui_api() -> GuiApi {
     if cfg!(target_os = "macos") {

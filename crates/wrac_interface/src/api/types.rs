@@ -156,19 +156,19 @@ pub enum HostWindow {
 }
 
 impl HostWindow {
-    pub(crate) fn cocoa(ns_view: *mut std::ffi::c_void) -> Option<Self> {
+    pub fn cocoa(ns_view: *mut std::ffi::c_void) -> Option<Self> {
         Some(Self::Cocoa {
             ns_view: NonZeroUsize::new(ns_view as usize)?,
         })
     }
 
-    pub(crate) fn win32(hwnd: *mut std::ffi::c_void) -> Option<Self> {
+    pub fn win32(hwnd: *mut std::ffi::c_void) -> Option<Self> {
         Some(Self::Win32 {
             hwnd: NonZeroIsize::new(hwnd as isize)?,
         })
     }
 
-    pub(crate) fn x11(window: u64) -> Option<Self> {
+    pub fn x11(window: u64) -> Option<Self> {
         Some(Self::X11 {
             window: NonZeroU64::new(window)?,
         })

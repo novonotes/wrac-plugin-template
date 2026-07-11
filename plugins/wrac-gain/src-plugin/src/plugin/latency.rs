@@ -1,4 +1,4 @@
-use wrac_clap_adapter::PluginLatencyExtension;
+use wrac_interface::PluginLatencyExtension;
 
 pub(super) struct WracGainLatencyExtension;
 

@@ -33,7 +33,13 @@ pub struct EventLists<'a> {
 }
 
 impl<'a> EventLists<'a> {
-    pub(crate) unsafe fn from_raw(
+    /// Creates callback-lifetime event views from the CLAP event lists.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must remain valid for `'a`, and `output` must be exclusively writable
+    /// for the duration of that lifetime.
+    pub unsafe fn from_raw(
         input: *const clap_input_events,
         output: *const clap_output_events,
     ) -> Self {
@@ -51,7 +57,12 @@ pub struct InputEvents<'a> {
 }
 
 impl<'a> InputEvents<'a> {
-    pub(crate) unsafe fn from_raw(raw: *const clap_input_events) -> Self {
+    /// Creates an input-event view borrowed from a CLAP callback.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must remain valid and immutable for `'a`.
+    pub unsafe fn from_raw(raw: *const clap_input_events) -> Self {
         Self {
             raw,
             _marker: PhantomData,
@@ -163,7 +174,12 @@ pub struct OutputEvents<'a> {
 }
 
 impl<'a> OutputEvents<'a> {
-    pub(crate) unsafe fn from_raw(raw: *const clap_output_events) -> Self {
+    /// Creates an output-event view borrowed from a CLAP callback.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must remain valid and exclusively writable for `'a`.
+    pub unsafe fn from_raw(raw: *const clap_output_events) -> Self {
         Self {
             raw,
             _marker: PhantomData,
@@ -667,7 +683,7 @@ impl TransportEvent {
         self.song_position_seconds
     }
 
-    pub(crate) fn from_raw(raw: &clap_event_transport) -> Self {
+    pub fn from_raw(raw: &clap_event_transport) -> Self {
         Self {
             time: raw.header.time,
             flags: TransportFlags(raw.flags),

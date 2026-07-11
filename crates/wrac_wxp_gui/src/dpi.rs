@@ -1,4 +1,4 @@
-use wrac_clap_adapter::GuiSize;
+use wrac_interface::GuiSize;
 use wxp::dpi::{LogicalPosition, LogicalSize, Size};
 
 /// Conversion between CLAP GUI sizes and wxp bounds.

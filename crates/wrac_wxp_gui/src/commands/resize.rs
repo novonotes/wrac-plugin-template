@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::HostGui;
+use wrac_interface::HostGui;
 use wxp::{WxpCommandHandler, dpi::LogicalSize};
 
 use crate::{controller::WxpGuiResizeHandle, resize_drag::WxpNativeResizeDrag};

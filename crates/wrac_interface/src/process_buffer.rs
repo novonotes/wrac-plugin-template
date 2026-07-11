@@ -39,7 +39,14 @@ pub struct AudioProcessBuffer<'a> {
 }
 
 impl<'a> AudioProcessBuffer<'a> {
-    pub(crate) unsafe fn from_raw_buffers(
+    /// Creates a safe callback-lifetime view over CLAP audio buffers.
+    ///
+    /// # Safety
+    ///
+    /// Every channel pointer reachable from `inputs` and `outputs` must be valid for
+    /// `frames_count` samples and for `'a`. Writable output channels must not alias except
+    /// where CLAP explicitly identifies an in-place input/output pair.
+    pub unsafe fn from_raw_buffers(
         inputs: &'a [clap_audio_buffer],
         outputs: &'a mut [clap_audio_buffer],
         frames_count: u32,

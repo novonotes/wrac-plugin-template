@@ -5,7 +5,7 @@ use std::thread::ThreadId;
 
 use novonotes_run_loop::{RunLoop, RunLoopGuard, RunLoopLocal};
 use parking_lot::Mutex;
-use wrac_clap_adapter::{GuiConfig, GuiSize, PluginError, PluginResult};
+use wrac_interface::{GuiConfig, GuiSize, PluginError, PluginResult};
 
 use crate::window::ParentWindowHandle;
 

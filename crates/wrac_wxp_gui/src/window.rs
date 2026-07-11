@@ -6,7 +6,7 @@ use raw_window_handle::{
     AppKitWindowHandle, HandleError, HasWindowHandle, RawWindowHandle, Win32WindowHandle,
     WindowHandle, XcbWindowHandle,
 };
-use wrac_clap_adapter::{HostWindow, PluginError, PluginResult};
+use wrac_interface::{HostWindow, PluginError, PluginResult};
 
 /// Wrapper that exposes the host parent window as a `raw-window-handle`.
 /// Platform branching and handle lifetime concerns are absorbed here once and

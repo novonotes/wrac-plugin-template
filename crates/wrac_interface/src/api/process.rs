@@ -46,13 +46,13 @@ pub struct ProcessContext<'a> {
     pub events: EventLists<'a>,
     pub transport: Option<TransportEvent>,
     #[cfg(feature = "raw-clap-forwarding")]
-    pub(crate) raw: RawProcessContext<'a>,
+    pub raw: RawProcessContext<'a>,
 }
 
 pub struct ParamFlushContext<'a> {
     pub events: EventLists<'a>,
     #[cfg(feature = "raw-clap-forwarding")]
-    pub(crate) raw: RawParamFlushContext<'a>,
+    pub raw: RawParamFlushContext<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,7 +95,12 @@ pub struct RawProcessContext<'a> {
 
 #[cfg(feature = "raw-clap-forwarding")]
 impl<'a> RawProcessContext<'a> {
-    pub(crate) unsafe fn from_raw(process: *const clap_process) -> Self {
+    /// Creates a raw forwarding view for one process callback.
+    ///
+    /// # Safety
+    ///
+    /// `process` must remain valid for `'a` and must only be forwarded synchronously.
+    pub unsafe fn from_raw(process: *const clap_process) -> Self {
         Self {
             process,
             _marker: PhantomData,
@@ -118,7 +123,13 @@ pub struct RawParamFlushContext<'a> {
 
 #[cfg(feature = "raw-clap-forwarding")]
 impl<'a> RawParamFlushContext<'a> {
-    pub(crate) unsafe fn from_raw(
+    /// Creates raw forwarding views for one parameter-flush callback.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must remain valid for `'a`, and `output_events` must be exclusively
+    /// writable for the duration of the synchronous forwarding call.
+    pub unsafe fn from_raw(
         input_events: *const clap_input_events,
         output_events: *const clap_output_events,
     ) -> Self {

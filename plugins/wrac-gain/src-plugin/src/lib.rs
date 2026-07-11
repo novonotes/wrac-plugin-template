@@ -2,7 +2,7 @@
 //!
 //! A minimal gain (volume) plugin. `src-plugin` contains only product-specific logic
 //! (parameters, state, DSP, GUI); the messy CLAP ABI and FFI invariants are encapsulated
-//! in the separate `wrac_clap_adapter` crate. When building a plugin from this template,
+//! in the separate `wrac_interface` crate. When building a plugin from this template,
 //! you'll mostly be editing the files in this crate.
 //!
 //! File layout:

@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use wrac_clap_adapter::{
+use wrac_interface::{
     HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags, ParamGestureEvent, ParamInfo,
     ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
 };

@@ -23,7 +23,7 @@ use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{GuiConfig, GuiSize, HostContext, HostGui, PluginResult};
+use wrac_interface::{GuiConfig, GuiSize, HostContext, HostGui, PluginResult};
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
     WxpGuiRuntime,
@@ -63,7 +63,7 @@ impl WxpGuiFactory for WracGainGuiFactory {
 /// Assembles the complete GUI extension set used by the plugin core.
 /// Entry point that keeps GUI-specific details out of `plugin.rs`.
 pub(crate) fn create_gui_integration(
-    descriptor: wrac_clap_adapter::PluginDescriptor,
+    descriptor: wrac_interface::PluginDescriptor,
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
     param_output_queue: Arc<WracGainParamOutputQueue>,

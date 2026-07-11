@@ -1,15 +1,12 @@
 //! Adapter crate that connects the CLAP ABI to the plugin core.
 //!
-//! Product crates only need to implement the safe traits in [`api`] and declare
-//! the CLAP entry with [`export_clap_entry!`]. `clap-sys`, raw pointers, event
-//! conversion, and host callbacks are all encapsulated inside the adapter.
-//! See `api.rs` for the trait contracts.
+//! Product crates implement the contracts from `wrac_interface` and use this crate only
+//! to export the CLAP entry. ABI callbacks, registration storage, and host proxy
+//! implementations stay confined to this adapter.
 
 mod abi;
-mod api;
 mod descriptor;
 mod entry;
-mod events;
 mod factory;
 mod host_audio_ports;
 mod host_gui;
@@ -19,43 +16,18 @@ mod host_note_ports;
 mod host_state;
 mod host_tail;
 mod params;
-mod process_buffer;
-
-pub use api::{
-    ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor,
-    AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, DetectedHost, GuiApi,
-    GuiConfig, GuiResizeHints, GuiSize, HostAudioPorts, HostContext, HostFamily, HostGui,
-    HostLifecycle, HostNotePorts, HostParams, HostState, HostTail, HostVersion, HostWindow,
-    InactiveProcessor, NoteDialects, NotePortInfo, ParamFlags, ParamFlushContext, ParamInfo,
-    ParamValueEvent, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError,
-    PluginFormat, PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
-    PluginGuiQueryExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginRenderMode,
-    PluginResult, PluginStateExtension, PluginTailExtension, PreparedStateSave, ProcessContext,
-    ProcessStatus, State, StateSaveCompletion, StateSaveOutcome, SystemContext,
-};
+// Adapter modules share the complete contract vocabulary internally, while none of these names
+// are re-exported from the adapter crate.
+#[allow(unused_imports)]
+use wrac_interface::*;
 #[cfg(feature = "raw-clap-forwarding")]
-pub use api::{RawParamFlushContext, RawProcessContext};
-pub use descriptor::{
-    AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
-};
-pub use entry::{EntryContext, LogConfig, LogOutput, PluginEntry, PluginFactory};
-pub use events::{
-    EventLists, InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent,
-    NoteExpressionEvent, OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents,
-    ParamModEvent, TransportEvent, TransportFlags, UnknownEvent,
-};
-pub use process_buffer::{
-    AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,
-    AudioPortPairs, AudioProcessBuffer,
-};
+use wrac_interface::{RawParamFlushContext, RawProcessContext};
 
 /// Macro support items used by [`export_clap_entry!`].
 ///
 /// These items stay public because exported macros must refer to them through
 /// `$crate`. They are not part of the plugin authoring API: plugin code should
-/// not import, call, or rely on them directly. Use the safe API reexports above
-/// and the exported macros instead.
+/// not import, call, or rely on them directly.
 pub mod __private {
     pub use crate::entry::EntryRegistration;
 

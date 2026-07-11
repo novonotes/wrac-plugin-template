@@ -1,7 +1,6 @@
 # wrac_clap_adapter
 
-Defines the traits that each product crate must implement,
-and provides an adapter that maps those trait implementations to the CLAP ABI so they can be used as plugins.
+Maps the product contracts defined by `wrac_interface` to the CLAP ABI.
 
 Conversion to VST3 / AU / AAX is the responsibility of `clap-wrapper`. This crate focuses solely on implementing CLAP plugins and CLAP extensions on the Rust side.
 
@@ -23,25 +22,9 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 
 ## Public API
 
-- `PluginEntry`: DSO-level lifecycle and typed factory provider
-- `PluginFactory`: CLAP `clap.plugin-factory`
-- `PluginInstance`: instance lifecycle and declaration of supported extensions
-- `ActiveProcessor`: active audio processing and active `params.flush`
-- `InactiveProcessor`: inactive `params.flush`
-- `PluginAudioPortsExtension`: CLAP `audio-ports`
-- `PluginConfigurableAudioPortsExtension`: CLAP `configurable-audio-ports`
-- `PluginNotePortsExtension`: CLAP `note-ports`
-- `PluginParamsQuery`: CLAP params query surface
-- `PluginStateExtension`: CLAP `state`
-- `PluginGuiExtension`: CLAP `gui`
-- `PluginRenderExtension`: CLAP `render`
-- `PluginTailExtension`: CLAP `tail`
-- `PluginLatencyExtension`: CLAP `latency`
-- `HostParams`, `HostState`, `HostAudioPorts`, `HostNotePorts`, `HostLifecycle`,
-  `HostGui`, `HostTail`: thin proxies for plugin-to-host CLAP callbacks
-- `export_clap_entry!`: exports the CLAP entry point
-
-Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.
+`export_clap_entry!` exports the CLAP entry point. Product implementations use the traits and
+related types from `wrac_interface`; this crate owns the ABI callbacks, registration storage,
+and concrete host proxy implementations.
 
 ## Instance lifecycle
 
