@@ -2,9 +2,9 @@ use std::any::Any;
 #[cfg(feature = "raw-clap-forwarding")]
 use std::{marker::PhantomData, rc::Rc};
 
-use crate::PluginResult;
-use crate::events::{EventLists, TransportEvent};
-use crate::process_buffer::AudioProcessBuffer;
+use super::events::{EventLists, TransportEvent};
+use super::process_buffer::AudioProcessBuffer;
+use crate::interface::PluginResult;
 #[cfg(feature = "raw-clap-forwarding")]
 use clap_sys::{
     events::{clap_input_events, clap_output_events},
@@ -16,27 +16,25 @@ use clap_sys::{
 /// State passed in must be either an immutable snapshot copied at activate time, or
 /// atomic/lock-free shared state the audio thread never waits on.
 pub trait ActiveProcessor: Send {
-    /// Converts to `Any` so `deactivate` can recover owned state. `[control-thread]`
+    /// Converts to `Any` so `deactivate` can recover owned state. `[non-realtime]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
-    /// Called from CLAP `plugin.reset`. `[audio-thread]`
+    /// Called from CLAP `plugin.reset`. `[realtime-safe]`
     fn reset(&mut self) {}
 
-    /// Called from CLAP `plugin.process`. `[audio-thread]`
+    /// Called from CLAP `plugin.process`. `[realtime-safe]`
     fn process(&mut self, context: ProcessContext<'_>) -> PluginResult<ProcessStatus>;
 
-    /// Called from CLAP `params.flush` while active. `[audio-thread]`
-    ///
-    /// This has the same realtime constraints as `process`.
+    /// Called from CLAP `params.flush` while active. `[realtime-safe]`
     fn flush_params(&mut self, context: ParamFlushContext<'_>) -> PluginResult<()>;
 }
 
 /// Processing state used while the CLAP plugin is inactive.
 pub trait InactiveProcessor: Send {
-    /// Converts to `Any` so `activate` can recover owned state. `[control-thread]`
+    /// Converts to `Any` so `activate` can recover owned state. `[non-realtime]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
-    /// Called from CLAP `params.flush` while inactive. `[control-thread]`
+    /// Called from CLAP `params.flush` while inactive. `[non-realtime]`
     fn flush_params(&mut self, context: ParamFlushContext<'_>) -> PluginResult<()>;
 }
 
@@ -46,13 +44,13 @@ pub struct ProcessContext<'a> {
     pub events: EventLists<'a>,
     pub transport: Option<TransportEvent>,
     #[cfg(feature = "raw-clap-forwarding")]
-    pub(crate) raw: RawProcessContext<'a>,
+    pub raw: RawProcessContext<'a>,
 }
 
 pub struct ParamFlushContext<'a> {
     pub events: EventLists<'a>,
     #[cfg(feature = "raw-clap-forwarding")]
-    pub(crate) raw: RawParamFlushContext<'a>,
+    pub raw: RawParamFlushContext<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +93,11 @@ pub struct RawProcessContext<'a> {
 
 #[cfg(feature = "raw-clap-forwarding")]
 impl<'a> RawProcessContext<'a> {
+    /// Creates a raw forwarding view for one process callback.
+    ///
+    /// # Safety
+    ///
+    /// `process` must remain valid for `'a` and must only be forwarded synchronously.
     pub(crate) unsafe fn from_raw(process: *const clap_process) -> Self {
         Self {
             process,
@@ -118,6 +121,12 @@ pub struct RawParamFlushContext<'a> {
 
 #[cfg(feature = "raw-clap-forwarding")]
 impl<'a> RawParamFlushContext<'a> {
+    /// Creates raw forwarding views for one parameter-flush callback.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must remain valid for `'a`, and `output_events` must be exclusively
+    /// writable for the duration of the synchronous forwarding call.
     pub(crate) unsafe fn from_raw(
         input_events: *const clap_input_events,
         output_events: *const clap_output_events,

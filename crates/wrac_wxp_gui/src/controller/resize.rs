@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
-use wrac_clap_adapter::{GuiResizeHints, GuiSize, HostGui, PluginError, PluginResult};
+use wrac_clap_adapter::interface::{GuiResizeHints, GuiSize, HostGui, PluginError, PluginResult};
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
 use crate::dpi::{DpiConverter, HostGuiSizeUnit};

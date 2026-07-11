@@ -4,7 +4,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::HostLifecycle;
+use crate::interface::HostLifecycle;
 
 pub(crate) struct HostLifecycleProxy {
     callbacks: HostLifecycleCallbacks,

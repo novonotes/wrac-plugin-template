@@ -28,7 +28,7 @@ use super::{
     params_extension, render_extension, state_extension, tail_extension, vst3_extension,
 };
 use crate::entry::release_entry_instance;
-use crate::{
+use crate::interface::{
     ActivateContext, PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
 };
 
@@ -367,7 +367,9 @@ pub(super) unsafe extern "C" fn plugin_process(
         }
         let _process_depth_guard = RtDepthGuard::enter(&instance.rt_process_depth);
         let process = unsafe { &*process };
-        let events = unsafe { crate::EventLists::from_raw(process.in_events, process.out_events) };
+        let events = unsafe {
+            crate::interface::EventLists::from_raw(process.in_events, process.out_events)
+        };
         let audio = match unsafe { audio_buffers(process) } {
             Ok(audio) => audio,
             Err(error) => {
@@ -392,7 +394,7 @@ pub(super) unsafe extern "C" fn plugin_process(
                 events,
                 transport: unsafe { process.transport.as_ref() }.map(TransportEvent::from_raw),
                 #[cfg(feature = "raw-clap-forwarding")]
-                raw: unsafe { crate::RawProcessContext::from_raw(process) },
+                raw: unsafe { crate::interface::RawProcessContext::from_raw(process) },
             }) {
                 Ok(ProcessStatus::Continue) => CLAP_PROCESS_CONTINUE,
                 Ok(ProcessStatus::ContinueIfNotQuiet) => CLAP_PROCESS_CONTINUE_IF_NOT_QUIET,

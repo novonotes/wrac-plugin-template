@@ -13,7 +13,7 @@ use clap_sys::events::{
     clap_output_events,
 };
 
-use crate::api::ParamValueEvent;
+use super::ParamValueEvent;
 
 const CLAP_FIXED_TIME_FACTOR: f64 = (1_i64 << 31) as f64;
 const TRANSPORT_HAS_TEMPO: u32 = 1 << 0;
@@ -33,6 +33,12 @@ pub struct EventLists<'a> {
 }
 
 impl<'a> EventLists<'a> {
+    /// Creates callback-lifetime event views from the CLAP event lists.
+    ///
+    /// # Safety
+    ///
+    /// Both pointers must remain valid for `'a`, and `output` must be exclusively writable
+    /// for the duration of that lifetime.
     pub(crate) unsafe fn from_raw(
         input: *const clap_input_events,
         output: *const clap_output_events,
@@ -51,6 +57,11 @@ pub struct InputEvents<'a> {
 }
 
 impl<'a> InputEvents<'a> {
+    /// Creates an input-event view borrowed from a CLAP callback.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must remain valid and immutable for `'a`.
     pub(crate) unsafe fn from_raw(raw: *const clap_input_events) -> Self {
         Self {
             raw,
@@ -163,6 +174,11 @@ pub struct OutputEvents<'a> {
 }
 
 impl<'a> OutputEvents<'a> {
+    /// Creates an output-event view borrowed from a CLAP callback.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must remain valid and exclusively writable for `'a`.
     pub(crate) unsafe fn from_raw(raw: *const clap_output_events) -> Self {
         Self {
             raw,

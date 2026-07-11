@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::HostAudioPorts;
+use crate::interface::HostAudioPorts;
 
 pub(crate) struct HostAudioPortsProxy {
     host: *const clap_host,

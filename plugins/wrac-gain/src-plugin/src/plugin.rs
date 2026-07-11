@@ -7,7 +7,7 @@
 //!    capabilities are bundled
 //!
 //! Parameter, audio port, and state-persistence implementations live under `plugin/`.
-//! Format differences between CLAP, VST3, and AU are absorbed by `wrac_clap_adapter`,
+//! Format differences between CLAP, VST3, and AU are absorbed by `wrac_clap_adapter::interface`,
 //! so this module focuses solely on "which capabilities this plugin offers."
 
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudi
 use latency::WracGainLatencyExtension;
 use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
-use wrac_clap_adapter::{
+use wrac_clap_adapter::interface::{
     AaxDescriptor, AaxStemConfig, ActivateContext, ActivateResult, ActiveProcessor, Auv2Descriptor,
     InactiveProcessor, LogConfig, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension,

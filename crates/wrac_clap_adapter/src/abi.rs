@@ -41,15 +41,11 @@ use self::plugin_callbacks::{
     plugin_stop_processing,
 };
 use crate::entry::EntryRegistration;
-use crate::host_audio_ports::HostAudioPortsProxy;
-use crate::host_gui::HostGuiProxy;
-use crate::host_latency::HostLatencyProxy;
-use crate::host_lifecycle::HostLifecycleProxy;
-use crate::host_note_ports::HostNotePortsProxy;
-use crate::host_state::HostStateProxy;
-use crate::host_tail::HostTailFactory;
-use crate::params::HostParamsProxy;
-use crate::{
+use crate::host_proxy::{
+    HostAudioPortsProxy, HostGuiProxy, HostLatencyProxy, HostLifecycleProxy, HostNotePortsProxy,
+    HostParamsProxy, HostStateProxy, HostTailFactory,
+};
+use crate::interface::{
     ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
     PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginInstance,
     PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension,

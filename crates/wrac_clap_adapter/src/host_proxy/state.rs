@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::HostState;
+use crate::interface::HostState;
 
 pub(crate) struct HostStateProxy {
     host: *const clap_host,

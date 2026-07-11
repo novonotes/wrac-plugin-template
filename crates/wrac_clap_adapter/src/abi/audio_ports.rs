@@ -10,7 +10,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_u32, fill_c_char_array};
-use crate::{AudioPortFlags, AudioPortType};
+use crate::interface::{AudioPortFlags, AudioPortType};
 
 pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports {
     count: Some(audio_ports_count),

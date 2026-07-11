@@ -8,7 +8,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use wrac_clap_adapter::{
+use wrac_clap_adapter::interface::{
     ActiveProcessor, AudioPairedChannels, AudioPortChannels, AudioProcessBuffer, InactiveProcessor,
     InputEvent, ParamFlushContext, PluginResult, ProcessContext, ProcessStatus,
 };

@@ -8,7 +8,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::HostParams;
+use crate::interface::HostParams;
 
 /// Thin proxy for the CLAP host params extension.
 pub(crate) struct HostParamsProxy {

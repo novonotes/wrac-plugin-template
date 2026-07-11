@@ -55,14 +55,14 @@ unsafe extern "C" fn state_save(plugin: *const clap_plugin, stream: *const clap_
 }
 
 fn complete_state_save(
-    completion: Option<Box<dyn crate::StateSaveCompletion>>,
+    completion: Option<Box<dyn crate::interface::StateSaveCompletion>>,
     write_succeeded: bool,
 ) {
     if let Some(completion) = completion {
         completion.complete(if write_succeeded {
-            crate::StateSaveOutcome::Written
+            crate::interface::StateSaveOutcome::Written
         } else {
-            crate::StateSaveOutcome::StreamWriteFailed
+            crate::interface::StateSaveOutcome::StreamWriteFailed
         });
     }
 }
@@ -99,7 +99,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: rejected lifecycle re-entry");
             return false;
         };
-        if let Err(error) = state_support.restore_state(crate::State { bytes }) {
+        if let Err(error) = state_support.restore_state(crate::interface::State { bytes }) {
             log::warn!("state.load: plugin restore_state failed: {error}");
             return false;
         }
@@ -113,7 +113,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::{StateSaveCompletion, StateSaveOutcome};
+    use crate::interface::{StateSaveCompletion, StateSaveOutcome};
 
     use super::complete_state_save;
 

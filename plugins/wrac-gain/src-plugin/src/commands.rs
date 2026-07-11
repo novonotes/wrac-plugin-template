@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::{HostContext, HostFamily, HostGui, PluginDescriptor};
+use wrac_clap_adapter::interface::{HostContext, HostFamily, HostGui, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };

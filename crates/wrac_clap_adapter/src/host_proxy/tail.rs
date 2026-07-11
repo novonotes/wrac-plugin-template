@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::HostTail;
+use crate::interface::HostTail;
 
 pub(crate) struct HostTailFactory {
     host: *const clap_host,

@@ -8,7 +8,7 @@ use crate::runtime::{
 use crate::window::StoredParentWindow;
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
-use wrac_clap_adapter::{
+use wrac_clap_adapter::interface::{
     GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError,
     PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
     PluginGuiQueryExtension, PluginResult,
