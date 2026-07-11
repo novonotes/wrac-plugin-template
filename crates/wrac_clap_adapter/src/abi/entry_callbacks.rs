@@ -23,7 +23,7 @@ use crate::factory::{
     auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
     main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
 };
-use wrac_interface::EntryContext;
+use crate::interface::EntryContext;
 
 unsafe fn clap_host_name(host: *const clap_host) -> Option<String> {
     if host.is_null() {

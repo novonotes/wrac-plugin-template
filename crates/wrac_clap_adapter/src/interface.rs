@@ -36,23 +36,38 @@
 //! snapshots, or asynchronous follow-up notifications instead.
 
 mod core;
+mod descriptor;
+mod entry;
 mod error;
+mod events;
 mod extensions;
+mod factory;
 mod host;
 mod params;
 mod process;
+mod process_buffer;
 mod types;
 
 pub use core::{
     ActivateContext, ActivateNotifications, ActivateResult, PluginInstance, PluginInstanceContext,
 };
+pub use descriptor::{
+    AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
+};
+pub use entry::{EntryContext, LogConfig, LogOutput, PluginEntry};
 pub use error::{PluginError, PluginResult};
+pub use events::{
+    EventLists, InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent,
+    NoteExpressionEvent, OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents,
+    ParamModEvent, TransportEvent, TransportFlags, UnknownEvent,
+};
 pub use extensions::{
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginGuiApiSupportExtension,
     PluginGuiExtension, PluginGuiMainThreadExtension, PluginGuiQueryExtension,
     PluginLatencyExtension, PluginNotePortsExtension, PluginRenderExtension, PluginStateExtension,
     PluginTailExtension, PreparedStateSave, StateSaveCompletion, StateSaveOutcome,
 };
+pub use factory::PluginFactory;
 pub use host::{
     HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState, HostTail,
 };
@@ -62,6 +77,10 @@ pub use process::{
 };
 #[cfg(feature = "raw-clap-forwarding")]
 pub use process::{RawParamFlushContext, RawProcessContext};
+pub use process_buffer::{
+    AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,
+    AudioPortPairs, AudioProcessBuffer,
+};
 pub use types::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType, GuiApi, GuiConfig,
     GuiResizeHints, GuiSize, HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo,

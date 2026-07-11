@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
 use url::{Host, Url};
-use wrac_interface::{GuiSize, PluginError, PluginResult};
+use wrac_clap_adapter::interface::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
 use crate::controller::GuiSizeLimits;

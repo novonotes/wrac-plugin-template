@@ -1,8 +1,7 @@
 //! Adapter crate that connects the CLAP ABI to the plugin core.
 //!
-//! Product crates implement the contracts from `wrac_interface` and use this crate only
-//! to export the CLAP entry. ABI callbacks, registration storage, and host proxy
-//! implementations stay confined to this adapter.
+//! Product crates implement the contracts from [`interface`]. ABI callbacks, registration
+//! storage, raw CLAP construction, and host proxy implementations stay confined to this crate.
 
 mod abi;
 mod descriptor;
@@ -15,13 +14,14 @@ mod host_lifecycle;
 mod host_note_ports;
 mod host_state;
 mod host_tail;
+pub mod interface;
 mod params;
 // Adapter modules share the complete contract vocabulary internally, while none of these names
-// are re-exported from the adapter crate.
+// are re-exported at the crate root.
 #[allow(unused_imports)]
-use wrac_interface::*;
+use interface::*;
 #[cfg(feature = "raw-clap-forwarding")]
-use wrac_interface::{RawParamFlushContext, RawProcessContext};
+use interface::{RawParamFlushContext, RawProcessContext};
 
 /// Macro support items used by [`export_clap_entry!`].
 ///

@@ -1,6 +1,6 @@
 # wrac_clap_adapter
 
-Maps the product contracts defined by `wrac_interface` to the CLAP ABI.
+Maps the product contracts defined by `wrac_clap_adapter::interface` to the CLAP ABI.
 
 Conversion to VST3 / AU / AAX is the responsibility of `clap-wrapper`. This crate focuses solely on implementing CLAP plugins and CLAP extensions on the Rust side.
 
@@ -23,8 +23,8 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 ## Public API
 
 `export_clap_entry!` exports the CLAP entry point. Product implementations use the traits and
-related types from `wrac_interface`; this crate owns the ABI callbacks, registration storage,
-and concrete host proxy implementations.
+related types from `wrac_clap_adapter::interface`; the remaining modules own the ABI callbacks,
+registration storage, and concrete host proxy implementations.
 
 ## Instance lifecycle
 

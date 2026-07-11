@@ -1,7 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
 use crate::factory::PluginRegistrationStorage;
-use wrac_interface::{LogConfig, PluginEntry};
+use crate::interface::{LogConfig, PluginEntry};
 
 /// Static owner for the safe Rust entry and ABI-facing factory storage.
 pub struct EntryRegistration {

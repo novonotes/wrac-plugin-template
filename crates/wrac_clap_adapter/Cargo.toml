@@ -13,12 +13,11 @@ clap-sys = { workspace = true }
 log = "0.4"
 parking_lot = "0.12"
 wrac_host_context = { workspace = true }
-wrac_interface = { workspace = true }
 wrac_log = { workspace = true }
 
 [features]
 default = []
-raw-clap-forwarding = ["wrac_interface/raw-clap-forwarding"]
+raw-clap-forwarding = []
 
 [lints.rust]
 unreachable_pub = "deny"

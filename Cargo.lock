@@ -3107,7 +3107,6 @@ dependencies = [
  "log",
  "parking_lot",
  "wrac_host_context",
- "wrac_interface",
  "wrac_log",
 ]
 
@@ -3125,7 +3124,6 @@ dependencies = [
  "serde_json",
  "wrac_build",
  "wrac_clap_adapter",
- "wrac_interface",
  "wrac_log",
  "wrac_wxp_gui",
  "wxp",
@@ -3136,16 +3134,6 @@ name = "wrac_host_context"
 version = "0.1.0"
 dependencies = [
  "plist",
-]
-
-[[package]]
-name = "wrac_interface"
-version = "0.1.0"
-dependencies = [
- "clap-sys",
- "log",
- "wrac_host_context",
- "wrac_log",
 ]
 
 [[package]]
@@ -3180,8 +3168,8 @@ dependencies = [
  "serde_json",
  "url",
  "windows-sys 0.59.0",
+ "wrac_clap_adapter",
  "wrac_host_context",
- "wrac_interface",
  "wrac_log",
  "wxp",
 ]

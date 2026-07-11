@@ -4,7 +4,6 @@ members = [
     "xtask",
     "crates/wrac_build",
     "crates/wrac_clap_adapter",
-    "crates/wrac_interface",
     "crates/wrac_host_context",
     "crates/wrac_log",
     "crates/wrac_manifest",
@@ -19,7 +18,6 @@ clap-sys = "0.5.0"
 novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "93d7ed412b7206351100e6a1970628d3bedab2cc" }
 run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "93d7ed412b7206351100e6a1970628d3bedab2cc" }
 wrac_clap_adapter = { path = "crates/wrac_clap_adapter" }
-wrac_interface = { path = "crates/wrac_interface" }
 wrac_build_ops = { path = "crates/wrac_build_ops" }
 wrac_manifest = { path = "crates/wrac_manifest" }
 wrac_host_context = { path = "crates/wrac_host_context" }

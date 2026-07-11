@@ -4,7 +4,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-use crate::process_buffer::AudioBufferError;
+use super::process_buffer::AudioBufferError;
 
 #[derive(Debug)]
 pub enum PluginError {

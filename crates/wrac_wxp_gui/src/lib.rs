@@ -1,8 +1,8 @@
 //! Shared building blocks for using wxp WebViews in WRAC plugin GUIs.
 //!
-//! Code that needs to understand the CLAP ABI stays in `wrac_interface`. This crate
-//! owns only the toolkit boundary shared by product GUI runtimes: window-handle conversion,
-//! GUI thread affinity, and WebView DPI/bounds management.
+//! Code that needs to understand the CLAP ABI stays in `wrac_clap_adapter`. This crate owns only
+//! the toolkit boundary shared by product GUI runtimes: window-handle conversion, GUI thread
+//! affinity, and WebView DPI/bounds management.
 
 mod commands;
 mod controller;

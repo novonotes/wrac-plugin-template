@@ -1,10 +1,10 @@
 use std::ffi::{CString, c_char};
 use std::ptr;
 
+pub(crate) use crate::interface::AaxStemConfig;
+use crate::interface::PluginDescriptor;
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::version::CLAP_VERSION;
-pub(crate) use wrac_interface::AaxStemConfig;
-use wrac_interface::PluginDescriptor;
 
 use crate::factory::{ClapPluginInfoAsAax, ClapPluginInfoAsVst3};
 

@@ -78,7 +78,7 @@ pub enum PluginFeature {
 
 impl PluginFeature {
     /// Returns the CLAP feature identifier represented by this product-facing value.
-    pub fn as_cstr(self) -> &'static CStr {
+    pub(crate) fn as_cstr(self) -> &'static CStr {
         match self {
             Self::AudioEffect => CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
             Self::Analyzer => CLAP_PLUGIN_FEATURE_ANALYZER,

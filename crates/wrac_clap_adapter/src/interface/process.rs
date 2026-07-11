@@ -2,9 +2,9 @@ use std::any::Any;
 #[cfg(feature = "raw-clap-forwarding")]
 use std::{marker::PhantomData, rc::Rc};
 
+use super::events::{EventLists, TransportEvent};
+use super::process_buffer::AudioProcessBuffer;
 use crate::PluginResult;
-use crate::events::{EventLists, TransportEvent};
-use crate::process_buffer::AudioProcessBuffer;
 #[cfg(feature = "raw-clap-forwarding")]
 use clap_sys::{
     events::{clap_input_events, clap_output_events},
@@ -98,7 +98,7 @@ impl<'a> RawProcessContext<'a> {
     /// # Safety
     ///
     /// `process` must remain valid for `'a` and must only be forwarded synchronously.
-    pub unsafe fn from_raw(process: *const clap_process) -> Self {
+    pub(crate) unsafe fn from_raw(process: *const clap_process) -> Self {
         Self {
             process,
             _marker: PhantomData,
@@ -127,7 +127,7 @@ impl<'a> RawParamFlushContext<'a> {
     ///
     /// Both pointers must remain valid for `'a`, and `output_events` must be exclusively
     /// writable for the duration of the synchronous forwarding call.
-    pub unsafe fn from_raw(
+    pub(crate) unsafe fn from_raw(
         input_events: *const clap_input_events,
         output_events: *const clap_output_events,
     ) -> Self {
