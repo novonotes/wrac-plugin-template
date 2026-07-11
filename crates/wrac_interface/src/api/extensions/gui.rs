@@ -1,54 +1,42 @@
 use crate::{GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginResult};
 
-/// Thread-safe query surface for CLAP GUI API support.
-///
-/// The AUv2 wrapper reaches CLAP `gui.is_api_supported` while answering
-/// `GetPropertyInfo(kAudioUnitProperty_CocoaUI)`. This query is expected to be a
-/// cheap capability check, so keep implementations independent of GUI runtime
-/// state: do not allocate, lock, or touch thread-affine UI objects here.
+/// Query surface for CLAP GUI API support.
 pub trait PluginGuiApiSupportExtension: Send + Sync + 'static {
     /// Called from CLAP `gui.is_api_supported`.
     ///
-    /// `[thread-safe]`
+    /// `[realtime-safe & thread-safe]`
     fn is_api_supported(&self, api: GuiApi, is_floating: bool) -> bool;
 }
 
 /// CLAP GUI query surface.
-///
-/// These methods must be safe to call from non-audio control threads. They must
-/// not touch thread-affine native UI objects directly.
 pub trait PluginGuiQueryExtension: Send + Sync + 'static {
     /// Called from CLAP `gui.get_preferred_api`.
     ///
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn preferred_api(&self) -> Option<GuiConfig>;
 
     /// Called from CLAP `gui.get_size`.
     ///
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn get_size(&self) -> PluginResult<GuiSize>;
 
     /// Called from CLAP `gui.can_resize`.
     ///
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn can_resize(&self) -> bool;
 
     /// Called from CLAP `gui.get_resize_hints`.
     ///
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn resize_hints(&self) -> Option<GuiResizeHints>;
 
     /// Called from CLAP `gui.adjust_size`.
     ///
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize>;
 }
 
 /// CLAP GUI lifecycle / native UI surface.
-///
-/// Host/wrapper code is responsible for calling these methods from the main thread.
-/// Product code may assume the main-thread contract and may touch thread-affine UI
-/// objects here.
 pub trait PluginGuiMainThreadExtension: 'static {
     /// Called from CLAP `gui.create`.
     ///
@@ -91,9 +79,12 @@ pub trait PluginGuiMainThreadExtension: 'static {
 /// Query methods and main-thread lifecycle methods are split so product code can
 /// implement thread-safe host queries separately from native UI operations.
 pub trait PluginGuiExtension: Send + Sync + 'static {
+    /// `[default]`
     fn api_support(&self) -> &(dyn PluginGuiApiSupportExtension + Send + Sync);
 
+    /// `[default]`
     fn query(&self) -> &(dyn PluginGuiQueryExtension + Send + Sync);
 
+    /// `[default]`
     fn main_thread(&self) -> &dyn PluginGuiMainThreadExtension;
 }

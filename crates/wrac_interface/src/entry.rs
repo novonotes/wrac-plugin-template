@@ -21,7 +21,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// directly. Standalone apps and other binaries that do not enter through
     /// this adapter are responsible for calling `wrac_log::configure_standalone`
     /// and holding the returned runtime themselves.
-    /// `[control-thread]`
+    /// `[default]`
     fn log_config(&'static self) -> Option<&'static LogConfig>;
 
     /// Initializes entry-level state.
@@ -33,7 +33,7 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// not log, open files, write to stderr, start worker threads, initialize COM
     /// or GUI state, launch external processes, or perform expensive computation
     /// here.
-    /// `[control-thread]`
+    /// `[default]`
     fn init(&self, _context: EntryContext<'_>) -> PluginResult<()> {
         Ok(())
     }
@@ -44,27 +44,20 @@ pub trait PluginEntry: Send + Sync + 'static {
     /// perform file I/O, join worker threads, or release thread-affine GUI/COM
     /// state here; per-instance cleanup must happen when the last plugin instance
     /// is destroyed.
-    /// `[control-thread]`
+    /// `[default]`
     fn deinit(&self) {}
 
     /// Begins one host/wrapper-designated plugin-main-thread lifetime.
-    ///
-    /// Plugin objects may be created concurrently on wrapper control threads, so implementations
-    /// must synchronize entry-wide attachment state.
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn attach_main_thread(&self) {}
 
     /// Ends one host/wrapper-designated plugin-main-thread lifetime.
     ///
-    /// Plugin objects may be destroyed concurrently on wrapper control threads, so implementations
-    /// must synchronize entry-wide attachment state and must not infer native CLAP thread affinity.
-    /// `[thread-safe & control-thread]`
+    /// Implementations must not infer native CLAP thread affinity.
+    /// `[thread-safe]`
     fn detach_main_thread(&self) {}
 
     /// Returns the static factory used for descriptor discovery and product instance creation.
-    ///
-    /// The factory is requested during descriptor cache initialization and may later be requested
-    /// concurrently by independent plugin initialization callbacks.
-    /// `[thread-safe & control-thread]`
+    /// `[thread-safe]`
     fn plugin_factory(&self) -> Option<&dyn PluginFactory>;
 }

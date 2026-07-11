@@ -68,28 +68,25 @@ pub trait PluginInstance: Send + 'static {
     ///
     /// The returned processor may receive `params.flush` while the plugin is
     /// inactive, and is later consumed by `activate`.
-    /// `[control-thread]`
+    /// `[default]`
     fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>>;
 
-    /// Called from the plugin activation callback. `[control-thread]`
+    /// Called from the plugin activation callback. `[default]`
     fn activate(
         &mut self,
         context: ActivateContext,
         processor: Box<dyn InactiveProcessor>,
     ) -> PluginResult<ActivateResult>;
 
-    /// Called from the plugin deactivation or destruction callback. `[control-thread]`
+    /// Called from the plugin deactivation or destruction callback. `[default]`
     fn deactivate(
         &mut self,
         processor: Box<dyn ActiveProcessor>,
     ) -> PluginResult<Box<dyn InactiveProcessor>>;
 
-    /// Called from the plugin destruction callback after processor teardown.
-    ///
-    /// Wrapper formats may destroy their plugin object from a background control thread instead of
-    /// preserving native CLAP's main-thread contract, so implementations must not require
-    /// main-thread affinity here.
-    /// `[control-thread & !active]`
+    /// Called from the plugin destruction callback after processor teardown. The plugin is
+    /// inactive when this method is called.
+    /// `[default]`
     fn destroy(&mut self) {}
 
     /// Called from CLAP `plugin.on_main_thread`, usually after `HostLifecycle::request_callback`.
@@ -99,6 +96,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP audio-ports extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn audio_ports(&self) -> Option<Arc<dyn PluginAudioPortsExtension>> {
         None
     }
@@ -106,6 +104,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP configurable-audio-ports extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn configurable_audio_ports(&self) -> Option<Arc<dyn PluginConfigurableAudioPortsExtension>> {
         None
     }
@@ -113,6 +112,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP note-ports extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn note_ports(&self) -> Option<Arc<dyn PluginNotePortsExtension>> {
         None
     }
@@ -121,11 +121,13 @@ pub trait PluginInstance: Send + 'static {
     ///
     /// Called once from `plugin.init` before CLAP callbacks are exposed to the host. Plugins without
     /// parameters return a query object whose count is zero.
+    /// `[default]`
     fn params(&self) -> Arc<dyn PluginParamsQuery>;
 
     /// Returns the CLAP state extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn state(&self) -> Option<Arc<dyn PluginStateExtension>> {
         None
     }
@@ -133,6 +135,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP GUI extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         None
     }
@@ -140,6 +143,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP render extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn render(&self) -> Option<Arc<dyn PluginRenderExtension>> {
         None
     }
@@ -147,6 +151,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP tail extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn tail(&self) -> Option<Arc<dyn PluginTailExtension>> {
         None
     }
@@ -154,6 +159,7 @@ pub trait PluginInstance: Send + 'static {
     /// Returns the CLAP latency extension during plugin initialization.
     ///
     /// Called once from `plugin.init` before CLAP extension callbacks are exposed to the host.
+    /// `[default]`
     fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
         None
     }

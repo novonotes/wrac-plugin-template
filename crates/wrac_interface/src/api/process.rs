@@ -16,27 +16,25 @@ use clap_sys::{
 /// State passed in must be either an immutable snapshot copied at activate time, or
 /// atomic/lock-free shared state the audio thread never waits on.
 pub trait ActiveProcessor: Send {
-    /// Converts to `Any` so `deactivate` can recover owned state. `[control-thread]`
+    /// Converts to `Any` so `deactivate` can recover owned state. `[default]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
-    /// Called from CLAP `plugin.reset`. `[audio-thread]`
+    /// Called from CLAP `plugin.reset`. `[realtime-safe]`
     fn reset(&mut self) {}
 
-    /// Called from CLAP `plugin.process`. `[audio-thread]`
+    /// Called from CLAP `plugin.process`. `[realtime-safe]`
     fn process(&mut self, context: ProcessContext<'_>) -> PluginResult<ProcessStatus>;
 
-    /// Called from CLAP `params.flush` while active. `[audio-thread]`
-    ///
-    /// This has the same realtime constraints as `process`.
+    /// Called from CLAP `params.flush` while active. `[realtime-safe]`
     fn flush_params(&mut self, context: ParamFlushContext<'_>) -> PluginResult<()>;
 }
 
 /// Processing state used while the CLAP plugin is inactive.
 pub trait InactiveProcessor: Send {
-    /// Converts to `Any` so `activate` can recover owned state. `[control-thread]`
+    /// Converts to `Any` so `activate` can recover owned state. `[default]`
     fn into_any(self: Box<Self>) -> Box<dyn Any + Send>;
 
-    /// Called from CLAP `params.flush` while inactive. `[control-thread]`
+    /// Called from CLAP `params.flush` while inactive. `[default]`
     fn flush_params(&mut self, context: ParamFlushContext<'_>) -> PluginResult<()>;
 }
 

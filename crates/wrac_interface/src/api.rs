@@ -10,29 +10,27 @@
 //! The API follows CLAP closely, but may choose pragmatic Rust surfaces over a
 //! strict one-to-one mapping when that keeps the adapter thinner and harder to misuse.
 //!
-//! Method docs use thread annotations for the Rust trait call contract:
-//! - `[main-thread]`: native CLAP/UI main thread. Non-realtime and serialized.
-//! - `[control-thread]`: non-realtime host/adapter control work. This includes the
-//!   main thread, loader threads, and background/control worker threads. Unless marked
-//!   thread-safe, calls are serialized for the relevant object or lifecycle.
-//! - `[audio-thread]`: realtime audio callback work. Serialized per plugin instance,
-//!   but the OS thread id is not stable.
-//! - `[thread-safe & control-thread]`: may be called concurrently from control threads.
-//! - `[thread-safe]`: may be called concurrently from any thread, including the audio
-//!   thread; implementations must satisfy realtime constraints.
-//! - `[control-thread,audio-thread]`: may be called from control or audio threads,
-//!   but not concurrently for the same plugin instance.
+//! Method docs use annotations to state the requirements product authors must satisfy:
+//! - `[main-thread]`: runs on the main thread, so the implementation may use
+//!   main-thread-affine APIs such as GUI operations.
+//! - `[default]`: runs serially on an arbitrary non-realtime thread. The implementation
+//!   must not assume affinity to a particular thread.
+//! - `[realtime-safe]`: runs serially on a realtime path. The implementation must avoid
+//!   heap allocation, blocking locks, I/O, and non-realtime logging.
+//! - `[thread-safe]`: may run concurrently on multiple non-realtime threads. The
+//!   implementation must be thread-safe.
+//! - `[realtime-safe & thread-safe]`: may run concurrently on multiple threads,
+//!   including realtime paths. The implementation must be both realtime-safe and thread-safe.
 //!
-//! Comma means "or", and `&` adds a condition as in the CLAP headers.
-//!
-//! Some WRAC contracts are stricter than native CLAP because VST3/AU/AAX wrappers do
-//! not reliably preserve CLAP `[main-thread]` callbacks or lifecycle ordering. WRAC
-//! uses `[control-thread]` when native CLAP says `[main-thread]` but the exact main
-//! thread is not guaranteed. FFI, raw pointers, and panic barriers are contained
-//! inside the adapter; products only need to implement these safe traits.
+//! On product-implemented callbacks, an annotation states the implementation requirement.
+//! On `Host*` methods supplied by the adapter, it states where product code may call the
+//! method. Calls to the same `Host*` object include calls through cloned `Arc` references
+//! to that object. `[main-thread]` permits calls only from the main thread; `[default]`
+//! and `[realtime-safe]` require serialized calls from non-realtime and realtime paths,
+//! respectively; the thread-safe variants permit concurrent calls in the stated context.
 //!
 //! Host-facing ABI callbacks that require a synchronous return must not wait for a
-//! main-thread or run-loop hop unless the trait method is explicitly `[main-thread]`.
+//! main-thread or run-loop hop from a method not annotated `[main-thread]`.
 //! Some hosts call plugin ABI callbacks from a background thread while blocking the
 //! main thread, so waiting for the main thread can deadlock. Use cached state,
 //! snapshots, or asynchronous follow-up notifications instead.
