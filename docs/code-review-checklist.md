@@ -30,14 +30,3 @@ automated migration tests for older DAW projects and presets.
 compatibility. Current save/load tests can prove the latest schema round-trips,
 but they do not automatically prove that older saved states still recall as
 intended after a schema change.
-
-## Synchronous Plugin ABI Waiting
-
-**Review:** Lightweight parameter and port queries use synchronous snapshots without
-blocking. Lifecycle and state callbacks that bridge asynchronous work choose the wait
-strategy from the caller thread, never wait on an audio thread, and leave no pending
-work after destruction returns.
-
-**Why:** Wrapper formats may invoke control callbacks from either the run-loop thread
-or a background thread. Unconditionally waiting for a run-loop hop can deadlock, while
-returning from destruction before cleanup completes can leave code running after unload.

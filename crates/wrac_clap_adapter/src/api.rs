@@ -31,14 +31,11 @@
 //! thread is not guaranteed. FFI, raw pointers, and panic barriers are contained
 //! inside the adapter; products only need to implement these safe traits.
 //!
-//! Lightweight host-facing queries that require a synchronous return must use cached
-//! state or snapshots instead of blocking or synchronously hopping to the main thread.
-//! Lifecycle and state callbacks may synchronously bridge asynchronous work on a
-//! non-realtime control thread because returning from the ABI callback is their completion
-//! boundary. Such bridges must not unconditionally move the whole Future to the run loop:
-//! drive the current run loop when already on its thread, otherwise wait on the caller and
-//! let individual operations marshal only their thread-affine work. A run-loop-affine
-//! operation is unsupported when a host blocks that run loop for the callback's duration.
+//! Host-facing ABI callbacks that require a synchronous return must not wait for a
+//! main-thread or run-loop hop unless the trait method is explicitly `[main-thread]`.
+//! Some hosts call plugin ABI callbacks from a background thread while blocking the
+//! main thread, so waiting for the main thread can deadlock. Use cached state,
+//! snapshots, or asynchronous follow-up notifications instead.
 
 mod core;
 mod error;
