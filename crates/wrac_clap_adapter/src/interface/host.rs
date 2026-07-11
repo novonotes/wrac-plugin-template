@@ -1,3 +1,16 @@
+//! Host callback proxies available to product code.
+//!
+//! Method annotations describe how product code may call the same `Host*` object.
+//!
+//! - `[main-thread]`: avoid calls from any thread other than the main thread.
+//! - `[non-realtime]`: avoid calls from realtime paths and avoid concurrent calls to the same
+//!   object.
+//! - `[realtime-safe]`: calls from realtime paths are allowed, but avoid concurrent calls to the
+//!   same object.
+//! - `[non-realtime & thread-safe]`: concurrent calls from non-realtime threads are allowed;
+//!   avoid calls from realtime paths.
+//! - `[realtime-safe & thread-safe]`: calls from realtime paths and concurrent calls are allowed.
+
 use crate::interface::{GuiSize, NoteDialects, PluginResult};
 
 /// Requests host-side parameter synchronization and invalidation.
