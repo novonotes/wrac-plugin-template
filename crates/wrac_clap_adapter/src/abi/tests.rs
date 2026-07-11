@@ -19,7 +19,7 @@ use super::{
     plugin_on_main_thread,
 };
 use crate::entry::EntryRegistration;
-use crate::{
+use crate::interface::{
     ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext,
     HostAudioPorts, HostLifecycle, HostNotePorts, InactiveProcessor, LogConfig, NoteDialects,
     ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory, PluginInstance,
@@ -683,20 +683,20 @@ impl PluginParamsQuery for TestParams {
         0
     }
 
-    fn get_info(&self, _index: u32) -> Option<crate::ParamInfo> {
+    fn get_info(&self, _index: u32) -> Option<crate::interface::ParamInfo> {
         None
     }
 
     fn get_value(&self, _param_id: u32) -> PluginResult<f64> {
-        Err(crate::PluginError::InvalidParameter)
+        Err(crate::interface::PluginError::InvalidParameter)
     }
 
     fn value_to_text(&self, _param_id: u32, _value: f64) -> PluginResult<String> {
-        Err(crate::PluginError::InvalidParameter)
+        Err(crate::interface::PluginError::InvalidParameter)
     }
 
     fn text_to_value(&self, _param_id: u32, _text: &str) -> PluginResult<f64> {
-        Err(crate::PluginError::InvalidParameter)
+        Err(crate::interface::PluginError::InvalidParameter)
     }
 }
 

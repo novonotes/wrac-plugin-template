@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{
+use crate::interface::{
     ActiveProcessor, HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState,
     HostTail, InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
     PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,

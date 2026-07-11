@@ -11,7 +11,7 @@ use parking_lot::MutexGuard;
 
 use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_unit};
-use crate::{GuiApi, GuiConfig, GuiSize, HostWindow, PluginGuiExtension};
+use crate::interface::{GuiApi, GuiConfig, GuiSize, HostWindow, PluginGuiExtension};
 
 pub(super) static GUI: clap_plugin_gui = clap_plugin_gui {
     is_api_supported: Some(gui_is_api_supported),

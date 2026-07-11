@@ -1,4 +1,4 @@
-use crate::{GuiSize, NoteDialects, PluginResult};
+use crate::interface::{GuiSize, NoteDialects, PluginResult};
 
 /// Requests host-side parameter synchronization and invalidation.
 ///

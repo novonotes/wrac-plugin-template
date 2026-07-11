@@ -10,7 +10,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstanceState;
 use super::ffi::ffi_bool;
-use crate::{AudioPortConfigRequest, AudioPortType};
+use crate::interface::{AudioPortConfigRequest, AudioPortType};
 
 pub(super) static CONFIGURABLE_AUDIO_PORTS: clap_plugin_configurable_audio_ports =
     clap_plugin_configurable_audio_ports {

@@ -1,4 +1,4 @@
-use crate::{AudioPortConfigRequest, PluginResult};
+use crate::interface::{AudioPortConfigRequest, PluginResult};
 
 /// CLAP configurable-audio-ports extension.
 pub trait PluginConfigurableAudioPortsExtension: Send + Sync + 'static {

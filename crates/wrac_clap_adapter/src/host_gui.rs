@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::{GuiSize, HostGui, PluginError, PluginResult};
+use crate::interface::{GuiSize, HostGui, PluginError, PluginResult};
 
 pub(crate) struct HostGuiProxy {
     host: *const clap_host,

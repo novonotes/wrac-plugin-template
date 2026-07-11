@@ -5,7 +5,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::PluginInstanceState;
 use super::ffi::ffi_bool;
-use crate::PluginRenderMode;
+use crate::interface::PluginRenderMode;
 
 pub(super) static RENDER: clap_plugin_render = clap_plugin_render {
     has_hard_realtime_requirement: Some(render_has_hard_realtime_requirement),

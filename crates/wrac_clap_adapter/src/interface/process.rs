@@ -4,7 +4,7 @@ use std::{marker::PhantomData, rc::Rc};
 
 use super::events::{EventLists, TransportEvent};
 use super::process_buffer::AudioProcessBuffer;
-use crate::PluginResult;
+use crate::interface::PluginResult;
 #[cfg(feature = "raw-clap-forwarding")]
 use clap_sys::{
     events::{clap_input_events, clap_output_events},

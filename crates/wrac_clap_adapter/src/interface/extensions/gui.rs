@@ -1,4 +1,4 @@
-use crate::{GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginResult};
+use crate::interface::{GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginResult};
 
 /// Query surface for CLAP GUI API support.
 pub trait PluginGuiApiSupportExtension: Send + Sync + 'static {

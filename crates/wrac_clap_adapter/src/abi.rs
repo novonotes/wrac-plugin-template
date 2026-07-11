@@ -48,13 +48,13 @@ use crate::host_lifecycle::HostLifecycleProxy;
 use crate::host_note_ports::HostNotePortsProxy;
 use crate::host_state::HostStateProxy;
 use crate::host_tail::HostTailFactory;
-use crate::params::HostParamsProxy;
-use crate::{
+use crate::interface::{
     ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
     PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginInstance,
     PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension,
     PluginStateExtension, PluginTailExtension,
 };
+use crate::params::HostParamsProxy;
 
 // clap-wrapper reads this draft factory when generating AUv2 metadata. Without a
 // separate AU manufacturer/subtype, it can collide with the generic wrapper identity

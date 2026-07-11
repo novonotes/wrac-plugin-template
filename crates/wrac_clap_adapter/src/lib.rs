@@ -16,12 +16,6 @@ mod host_state;
 mod host_tail;
 pub mod interface;
 mod params;
-// Adapter modules share the complete contract vocabulary internally, while none of these names
-// are re-exported at the crate root.
-#[allow(unused_imports)]
-use interface::*;
-#[cfg(feature = "raw-clap-forwarding")]
-use interface::{RawParamFlushContext, RawProcessContext};
 
 /// Macro support items used by [`export_clap_entry!`].
 ///

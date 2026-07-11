@@ -1,4 +1,4 @@
-use crate::{ParamInfo, PluginResult};
+use crate::interface::{ParamInfo, PluginResult};
 
 /// Host-queryable parameter metadata, values, and text conversion.
 ///

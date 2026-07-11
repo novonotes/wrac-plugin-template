@@ -1,4 +1,4 @@
-use crate::NotePortInfo;
+use crate::interface::NotePortInfo;
 
 /// CLAP note-ports extension.
 ///

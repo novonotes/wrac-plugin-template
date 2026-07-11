@@ -1,4 +1,4 @@
-use crate::{PluginFactory, PluginResult};
+use crate::interface::{PluginFactory, PluginResult};
 pub use wrac_log::{LogConfig, LogOutput};
 
 pub struct EntryContext<'a> {

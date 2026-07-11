@@ -1,4 +1,4 @@
-use crate::{PluginResult, State};
+use crate::interface::{PluginResult, State};
 
 /// The result of writing one prepared state payload to the host stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

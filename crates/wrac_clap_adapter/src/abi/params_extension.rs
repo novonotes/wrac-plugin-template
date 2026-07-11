@@ -15,7 +15,7 @@ use clap_sys::plugin::clap_plugin;
 
 use super::ffi::{ffi_bool, ffi_u32, ffi_unit, fill_c_char_array, write_c_str_buffer};
 use super::{PluginInstanceState, RtDepthGuard};
-use crate::ParamFlags;
+use crate::interface::ParamFlags;
 use wrac_host_context::PluginFormat;
 
 const CLAP_INVALID_PARAM_ID: u32 = u32::MAX;
@@ -305,11 +305,11 @@ unsafe extern "C" fn params_flush(
 fn param_flush_context<'a>(
     in_events: *const clap_input_events,
     out_events: *const clap_output_events,
-) -> crate::ParamFlushContext<'a> {
-    crate::ParamFlushContext {
-        events: unsafe { crate::EventLists::from_raw(in_events, out_events) },
+) -> crate::interface::ParamFlushContext<'a> {
+    crate::interface::ParamFlushContext {
+        events: unsafe { crate::interface::EventLists::from_raw(in_events, out_events) },
         #[cfg(feature = "raw-clap-forwarding")]
-        raw: unsafe { crate::RawParamFlushContext::from_raw(in_events, out_events) },
+        raw: unsafe { crate::interface::RawParamFlushContext::from_raw(in_events, out_events) },
     }
 }
 

@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::{HostNotePorts, NoteDialects};
+use crate::interface::{HostNotePorts, NoteDialects};
 
 pub(crate) struct HostNotePortsProxy {
     host: *const clap_host,

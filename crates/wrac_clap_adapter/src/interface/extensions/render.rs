@@ -1,4 +1,4 @@
-use crate::{PluginRenderMode, PluginResult};
+use crate::interface::{PluginRenderMode, PluginResult};
 
 /// CLAP render extension.
 pub trait PluginRenderExtension: Send + Sync + 'static {

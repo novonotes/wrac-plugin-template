@@ -1,4 +1,4 @@
-use crate::{PluginDescriptor, PluginInstance, PluginInstanceContext};
+use crate::interface::{PluginDescriptor, PluginInstance, PluginInstanceContext};
 
 /// Product factory behind the adapter's immutable ABI descriptor cache.
 ///

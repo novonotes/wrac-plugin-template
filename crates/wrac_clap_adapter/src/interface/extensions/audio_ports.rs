@@ -1,4 +1,4 @@
-use crate::AudioPortInfo;
+use crate::interface::AudioPortInfo;
 
 /// CLAP audio-ports extension.
 ///
