@@ -84,8 +84,16 @@ pub trait PluginInstance: Send + 'static {
         processor: Box<dyn ActiveProcessor>,
     ) -> PluginResult<Box<dyn InactiveProcessor>>;
 
-    /// Called from the plugin destruction callback after processor teardown. The plugin is
-    /// inactive when this method is called.
+    /// Called only from the host-requested plugin destruction callback, after processor teardown.
+    /// The plugin is inactive when this method is called, and the adapter drops the instance
+    /// immediately after this method returns.
+    ///
+    /// This hook and [`Drop`] are intentionally not interchangeable. `Drop` may also run while
+    /// plugin initialization is being rolled back or unwinding after a panic, on whichever thread
+    /// releases the owner. Use this hook for ordered lifecycle work that must run only after a
+    /// successfully initialized instance reaches its normal host-requested teardown boundary,
+    /// especially work that waits for another thread or closes thread-affine resources. Use
+    /// [`Drop`] only as an unconditional, failure-path-safe fallback for releasing owned resources.
     /// `[non-realtime]`
     fn destroy(&mut self) {}
 
