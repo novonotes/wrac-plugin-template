@@ -1,5 +1,7 @@
 # @novonotes/wrac-frontend-runtime
 
+[日本語](README_JA.md)
+
 The complete WRAC-facing facade for WRAC/WXP plugin frontends. Plugin
 frontends and higher-level frontend packages communicate with the host through
 this package instead of importing `@novonotes/webview-bridge` directly.
