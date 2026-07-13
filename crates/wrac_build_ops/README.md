@@ -21,7 +21,7 @@ The standard `wrac-plugin.toml` schema is documented in
 
 ## Validation operations
 
-The crate exposes typed operations for running WRAC production-readiness checks
-and external format validators such as clap-validator, VST3 validator, auval, or
-AAX Validator. The repository-local xtask decides how those operations are
+The crate exposes typed adapters for external format validators such as
+clap-validator, VST3 validator, auval, or AAX Validator. The repository-local
+xtask supplies validator configuration and decides how those operations are
 ordered in its own workflow.

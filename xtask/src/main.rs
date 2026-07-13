@@ -9,14 +9,15 @@ use std::{collections::HashMap, path::Path};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use wrac_build_ops::{
-    BuildProfile, InstallScope, RustPluginBuild, UninstallScope, WracContext, WrapperBuild,
+    AaxValidatorConfig, BuildProfile, ClapValidatorConfig, ExternalValidatorConfig, InstallScope,
+    RustPluginBuild, SkippedValidatorTest, UninstallScope, WracContext, WrapperBuild,
     WrapperTarget, XtaskConfig, XtaskOutputLanguage, build_gui, build_rust_plugin,
     build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
     launch, load_workspace_dotenv, package_clap, package_task_id, print_build_outputs,
     resolve_build_targets_from_metadata, resolve_plugin_targets_from_metadata,
     resolve_validate_targets_from_metadata, select_packages, select_single_package,
     targets::{PluginTarget, Target, ValidateTarget},
-    uninstall_plugin_target, validate_plugin_target, validate_wrac_rules_for_targets,
+    uninstall_plugin_target, validate_plugin_target,
 };
 use xtask_workflow::{
     FailurePolicy, TaskGraph, TaskNode, TaskOutcome, WorkflowMessages, execute_plan, failure_policy,
@@ -63,13 +64,12 @@ enum Command {
     Install(InstallArgs),
     Uninstall(UninstallArgs),
     #[command(after_help = "\
-When --checks is omitted, validate builds artifacts, runs WRAC production-readiness checks,
-and runs external format validators.
+When --checks is omitted, validate builds artifacts and runs external format validators.
 
 Examples:
   xtask validate --target=clap,vst3
   xtask validate --target=clap,vst3 --checks build-artifacts
-  xtask validate --target=clap,vst3 --checks build-artifacts,external-validators,production-readiness")]
+  xtask validate --target=clap,vst3 --checks build-artifacts,external-validators")]
     Validate(ValidateArgs),
     Launch(LaunchArgs),
     Clean(CleanArgs),
@@ -159,7 +159,6 @@ struct ValidateArgs {
 enum ValidateCheckArg {
     BuildArtifacts,
     ExternalValidators,
-    ProductionReadiness,
 }
 
 #[derive(Debug, Args)]
@@ -249,9 +248,6 @@ enum TaskKind {
         scope: UninstallScope,
         dry_run: bool,
     },
-    ValidateWracRules {
-        targets: Vec<ValidateTarget>,
-    },
     ValidateBundle {
         target: ValidateTarget,
     },
@@ -302,14 +298,6 @@ impl TaskKind {
                 } else {
                     format!("uninstall {}", target.display())
                 }
-            }
-            Self::ValidateWracRules { targets } => {
-                let targets = targets
-                    .iter()
-                    .map(|target| target.display())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("run WRAC production-readiness checks ({targets})")
             }
             Self::ValidateBundle { target } => format!("validate {}", target.display()),
         }
@@ -412,12 +400,12 @@ fn run_task(ctx: &WracContext, profile: BuildProfile, kind: &TaskKind) -> Result
             }
             Ok(TaskOutcome::Completed)
         }
-        TaskKind::ValidateWracRules { targets } => {
-            completed(validate_wrac_rules_for_targets(ctx, profile, targets))
-        }
-        TaskKind::ValidateBundle { target } => {
-            completed(validate_plugin_target(ctx, profile, *target))
-        }
+        TaskKind::ValidateBundle { target } => completed(validate_plugin_target(
+            ctx,
+            profile,
+            *target,
+            &external_validator_config(),
+        )),
     }
 }
 
@@ -511,38 +499,17 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
         let ctx = WracContext::new(config, &package)?;
         let profile = BuildProfile::from_release(args.release);
         let validate_targets = resolve_validate_targets_from_metadata(&ctx, &args.target)?;
-        let mut build_targets = validate_targets
+        let build_targets = validate_targets
             .iter()
             .map(|target| target.target())
             .collect::<Vec<_>>();
-        let run_readiness = validate_checks(&args).run_production_readiness;
-        if run_readiness && !build_targets.contains(&Target::Clap) {
-            build_targets.push(Target::Clap);
-        }
         let mut artifact_plan = build_artifact_plan(&ctx, &build_targets, false, None, None);
-        let rules = if run_readiness {
-            let rules = artifact_plan.graph.task(
-                package_task_id(&ctx, "validate-wrac-rules"),
-                TaskKind::ValidateWracRules {
-                    targets: validate_targets.clone(),
-                },
-            );
-            artifact_plan
-                .graph
-                .depends_on(rules, artifact_plan.build_by_target[&Target::Clap]);
-            Some(rules)
-        } else {
-            None
-        };
         if validate_checks(&args).run_external_validators {
             for target in validate_targets {
                 let validate = artifact_plan.graph.task(
                     package_task_id(&ctx, &format!("validate-{target:?}")),
                     TaskKind::ValidateBundle { target },
                 );
-                if let Some(rules) = rules {
-                    artifact_plan.graph.depends_on(validate, rules);
-                }
                 if target == ValidateTarget::Au {
                     let install = artifact_plan.graph.task(
                         package_task_id(&ctx, "install-Au-for-validation"),
@@ -576,19 +543,57 @@ fn execute_validate(config: &XtaskConfig, args: ValidateArgs) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 struct ValidateChecks {
     run_external_validators: bool,
-    run_production_readiness: bool,
 }
 
 fn validate_checks(args: &ValidateArgs) -> ValidateChecks {
     if args.checks.is_empty() {
         return ValidateChecks {
             run_external_validators: true,
-            run_production_readiness: true,
         };
     }
     ValidateChecks {
         run_external_validators: args.checks.contains(&ValidateCheckArg::ExternalValidators),
-        run_production_readiness: args.checks.contains(&ValidateCheckArg::ProductionReadiness),
+    }
+}
+
+fn external_validator_config() -> ExternalValidatorConfig {
+    // Why: this repository's xtask owns its self-validation choices; shared build
+    // operations must not silently impose a release policy on downstream products.
+    ExternalValidatorConfig {
+        clap: ClapValidatorConfig {
+            version: "0.3.2".to_string(),
+            skip_test_filter: None,
+            skip_reason: None,
+        },
+        aax: AaxValidatorConfig {
+            required_tests: [
+                "info.productids",
+                "info.support.audiosuite",
+                "info.support.general",
+                "info.support.s6_feature",
+                "test.data_model",
+                "test.describe_validation",
+                "test.load_unload",
+                "test.page_table.automation_list",
+                "test.parameter_traversal.linear",
+                "test.parameter_traversal.random",
+                "test.parameter_traversal.random.fast",
+                "test.parameters",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+            skipped_tests: vec![
+                SkippedValidatorTest {
+                    id: "test.cycle_counts".to_string(),
+                    reason: "targets DSP/HDX cycle-count validation, which is outside this native local build target".to_string(),
+                },
+                SkippedValidatorTest {
+                    id: "test.page_table.load".to_string(),
+                    reason: "requires page-table XML resources, which this template does not generate".to_string(),
+                },
+            ],
+            timeout_secs: 15 * 60,
+        },
     }
 }
 

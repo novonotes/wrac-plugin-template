@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+use super::{ensure_vst3_sdk_input, env_path};
 use crate::Result;
 use crate::context::Context;
 use crate::profile::BuildProfile;
@@ -15,78 +16,57 @@ use crate::util::{
     copy_path, ensure_exists, print_detail, print_section, remove_if_exists,
     run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
 };
-use crate::validation::validate_wrac_rules;
 
-use super::{ensure_vst3_sdk_input, env_path};
+/// Caller-owned choices for external format validator adapters.
+#[derive(Debug, Clone)]
+pub struct ExternalValidatorConfig {
+    pub clap: ClapValidatorConfig,
+    pub aax: AaxValidatorConfig,
+}
 
-const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
-// Keep the local AAX contract explicit instead of delegating to the validator's
-// broad `runtests` collection. `runtests` includes hardware/DSP and page-table
-// XML coverage that this source-built native template does not generate, so CI
-// should fail only on the concrete native tests that the generated bundle is
-// expected to pass. The skipped IDs are still logged at runtime to make that
-// boundary visible in CI without turning docs/aax.md into a validation manual.
-const AAX_VALIDATOR_REQUIRED_TESTS: &[&str] = &[
-    "info.productids",
-    "info.support.audiosuite",
-    "info.support.general",
-    "info.support.s6_feature",
-    "test.data_model",
-    "test.describe_validation",
-    "test.load_unload",
-    "test.page_table.automation_list",
-    "test.parameter_traversal.linear",
-    "test.parameter_traversal.random",
-    "test.parameter_traversal.random.fast",
-    "test.parameters",
-];
-const AAX_VALIDATOR_SKIPPED_TESTS: &[(&str, &str)] = &[
-    (
-        "test.cycle_counts",
-        "targets DSP/HDX cycle-count validation, which is outside this native local build target",
-    ),
-    (
-        "test.page_table.load",
-        "requires page-table XML resources, which this template does not generate",
-    ),
-];
-const AAX_VALIDATOR_TIMEOUT_SECS: u64 = 15 * 60;
+/// clap-validator version and an optional caller-approved test exclusion.
+#[derive(Debug, Clone)]
+pub struct ClapValidatorConfig {
+    pub version: String,
+    pub skip_test_filter: Option<String>,
+    pub skip_reason: Option<String>,
+}
 
-pub fn validate_wrac_rules_for_targets(
-    ctx: &Context,
-    profile: BuildProfile,
-    targets: &[ValidateTarget],
-) -> Result<()> {
-    validate_wrac_rules(ctx, profile, targets)
+/// Explicit AAX Validator test selection and process timeout.
+#[derive(Debug, Clone)]
+pub struct AaxValidatorConfig {
+    pub required_tests: Vec<String>,
+    pub skipped_tests: Vec<SkippedValidatorTest>,
+    pub timeout_secs: u64,
+}
+
+/// A test omitted by the caller, together with its reviewable reason.
+#[derive(Debug, Clone)]
+pub struct SkippedValidatorTest {
+    pub id: String,
+    pub reason: String,
 }
 
 pub fn validate_plugin_target(
     ctx: &Context,
     profile: BuildProfile,
     target: ValidateTarget,
+    config: &ExternalValidatorConfig,
 ) -> Result<()> {
     match target {
         ValidateTarget::Clap => {
             let clap = ctx.clap_bundle(profile);
             ensure_exists(&clap, "CLAP artifact")?;
-            let validator = ensure_clap_validator(ctx)?;
+            let validator = ensure_clap_validator(ctx, &config.clap.version)?;
             let mut command = Command::new(validator);
             command
                 .env("WRAC_PLUGIN_VALIDATOR", "1")
                 .arg("validate")
                 .arg(&clap)
                 .arg("--only-failed");
-            if let Some(filter) = ctx
-                .metadata
-                .validation
-                .clap_validator
-                .skip_test_filter
-                .as_deref()
-            {
-                let reason = ctx
-                    .metadata
-                    .validation
-                    .clap_validator
+            if let Some(filter) = config.clap.skip_test_filter.as_deref() {
+                let reason = config
+                    .clap
                     .skip_reason
                     .as_deref()
                     .unwrap_or("no reason provided");
@@ -152,7 +132,7 @@ pub fn validate_plugin_target(
         ValidateTarget::Aax => {
             let aax = ctx.aax_bundle(profile);
             ensure_exists(&aax, "AAX artifact")?;
-            run_aax_validator(ctx, &aax)?;
+            run_aax_validator(ctx, &aax, &config.aax)?;
         }
     }
     Ok(())
@@ -207,7 +187,7 @@ fn normalize_vst3_cid(value: &str) -> String {
         .collect()
 }
 
-fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
+fn run_aax_validator(ctx: &Context, aax: &Path, config: &AaxValidatorConfig) -> Result<()> {
     let results_dir = ctx.wrac_dir().join("validation").join("aax");
     // A fresh directory prevents a previous pass result from masking a missing
     // validator output if DTT exits early or changes a result reference.
@@ -230,29 +210,34 @@ fn run_aax_validator(ctx: &Context, aax: &Path) -> Result<()> {
             crate::XtaskOutputLanguage::English => "Selected tests",
             crate::XtaskOutputLanguage::Japanese => "実行 test",
         },
-        AAX_VALIDATOR_REQUIRED_TESTS.len()
+        config.required_tests.len()
     );
-    for (test_id, reason) in AAX_VALIDATOR_SKIPPED_TESTS {
+    for skipped in &config.skipped_tests {
         print_detail(
             ctx.output_language,
-            &format!("Skipping {test_id}: {reason}."),
-            &format!("{test_id}: {reason}"),
+            &format!("Skipping {}: {}.", skipped.id, skipped.reason),
+            &format!("{}: {}", skipped.id, skipped.reason),
         );
     }
 
-    run_aax_validator_dtt(ctx, &aax, &results_dir)?;
+    run_aax_validator_dtt(ctx, &aax, &results_dir, config)?;
 
-    assert_aax_validator_results(ctx, &results_dir)
+    assert_aax_validator_results(ctx, &results_dir, &config.required_tests)
 }
 
-fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Result<()> {
+fn run_aax_validator_dtt(
+    ctx: &Context,
+    aax: &Path,
+    results_dir: &Path,
+    config: &AaxValidatorConfig,
+) -> Result<()> {
     let dtt = ensure_aax_validator_dtt(ctx)?;
     let aax_search_dir = aax
         .parent()
         .ok_or_else(|| format!("AAX bundle path has no parent directory: {}", aax.display()))?;
     println!("  $ {}", dtt.display());
 
-    for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
+    for (index, test_id) in config.required_tests.iter().enumerate() {
         let test_dir =
             results_dir
                 .join("dtt")
@@ -287,7 +272,8 @@ fn run_aax_validator_dtt(ctx: &Context, aax: &Path, results_dir: &Path) -> Resul
             .stderr(Stdio::piped())
             .current_dir(dtt.parent().unwrap_or(&ctx.root))
             .spawn()?;
-        let output = wait_for_aax_validator_process(child, aax_validator_timeout()?)?;
+        let output =
+            wait_for_aax_validator_process(child, aax_validator_timeout(config.timeout_secs)?)?;
         let stdout_path = test_dir.join("dtt-stdout.log");
         let stderr_path = test_dir.join("dtt-stderr.log");
         fs::write(&stdout_path, &output.stdout)?;
@@ -357,9 +343,13 @@ fn find_aax_validator_dtt_result(test_dir: &Path, test_id: &str) -> Result<PathB
     }
 }
 
-fn assert_aax_validator_results(ctx: &Context, results_dir: &Path) -> Result<()> {
+fn assert_aax_validator_results(
+    ctx: &Context,
+    results_dir: &Path,
+    required_tests: &[String],
+) -> Result<()> {
     let mut failed = Vec::new();
-    for (index, test_id) in AAX_VALIDATOR_REQUIRED_TESTS.iter().enumerate() {
+    for (index, test_id) in required_tests.iter().enumerate() {
         let result_path = aax_validator_result_path(results_dir, index, test_id);
         // DTT's process exit is not enough for reviewable validation: the official
         // JSON result records the test ID and validator result_status that CI logs
@@ -421,12 +411,12 @@ fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result
     }
 }
 
-fn aax_validator_timeout() -> Result<Duration> {
+fn aax_validator_timeout(default_seconds: u64) -> Result<Duration> {
     let seconds = match env::var("AAX_VALIDATOR_TIMEOUT_SECS") {
         Ok(value) => value
             .parse::<u64>()
             .map_err(|err| format!("failed to parse AAX_VALIDATOR_TIMEOUT_SECS={value}: {err}"))?,
-        Err(env::VarError::NotPresent) => AAX_VALIDATOR_TIMEOUT_SECS,
+        Err(env::VarError::NotPresent) => default_seconds,
         Err(err) => {
             return Err(format!("failed to read AAX_VALIDATOR_TIMEOUT_SECS: {err}").into());
         }
@@ -730,23 +720,23 @@ fn aax_validator_dtt_runner(root: &Path, platform: Platform) -> Result<PathBuf> 
     .into())
 }
 
-fn ensure_clap_validator(ctx: &Context) -> Result<PathBuf> {
+fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
     let validator_dir = ctx
         .target_dir
         .join("tools")
         .join("clap-validator")
-        .join(CLAP_VALIDATOR_VERSION);
+        .join(version);
     let validator = clap_validator_executable(ctx.platform, &validator_dir);
     if validator.exists() {
         return Ok(validator);
     }
 
     fs::create_dir_all(&validator_dir)?;
-    let archive_name = clap_validator_archive_name(ctx.platform);
-    let archive = validator_dir.join(archive_name);
+    let archive_name = clap_validator_archive_name(ctx.platform, version);
+    let archive = validator_dir.join(&archive_name);
     if !archive.exists() {
         let url = format!(
-            "https://github.com/free-audio/clap-validator/releases/download/{CLAP_VALIDATOR_VERSION}/{archive_name}"
+            "https://github.com/free-audio/clap-validator/releases/download/{version}/{archive_name}"
         );
         run_with_language(
             Command::new("curl")
@@ -795,11 +785,11 @@ fn ensure_clap_validator(ctx: &Context) -> Result<PathBuf> {
     Ok(validator)
 }
 
-fn clap_validator_archive_name(platform: Platform) -> &'static str {
+fn clap_validator_archive_name(platform: Platform, version: &str) -> String {
     match platform {
-        Platform::Macos => "clap-validator-0.3.2-macos-universal.tar.gz",
-        Platform::Windows => "clap-validator-0.3.2-windows.zip",
-        Platform::Linux => "clap-validator-0.3.2-ubuntu-18.04.tar.gz",
+        Platform::Macos => format!("clap-validator-{version}-macos-universal.tar.gz"),
+        Platform::Windows => format!("clap-validator-{version}-windows.zip"),
+        Platform::Linux => format!("clap-validator-{version}-ubuntu-18.04.tar.gz"),
     }
 }
 
