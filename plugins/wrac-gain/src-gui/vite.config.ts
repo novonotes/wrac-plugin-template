@@ -2,7 +2,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   resolve: {
-    preserveSymlinks: true,
+    // Following pnpm's real package path lets the runtime resolve its private transport
+    // dependency without leaking that dependency into plugin frontend manifests.
+    preserveSymlinks: false,
   },
   server: {
     // Debug plugins load the WebView from 127.0.0.1. Vite's default `localhost`

@@ -10,15 +10,13 @@
     }
   },
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
   },
   "dependencies": {
     "@novonotes/webview-bridge": "https://files.novonotes.download/libs/novonotes-webview-bridge-0.1.0-alpha.1.tgz"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
-  },
-  "peerDependencies": {
-    "@novonotes/webview-bridge": "0.1.0-alpha.1"
   }
 }

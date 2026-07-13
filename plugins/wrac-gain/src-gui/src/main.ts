@@ -2,19 +2,12 @@
  * WRAC Gain Plugin — Frontend (JavaScript side)
  *
  * The GUI of a wxp plugin is implemented as a regular web application.
- * Communication with the Rust side uses invoke() and Channel
- * provided by @novonotes/webview-bridge.
+ * Communication with the Rust side uses the WRAC frontend runtime facade.
  *
- * invoke(command, args):
- *   Calls a command registered in the Rust-side WxpCommandHandler (RPC).
- *   The return value is a Promise.
- *
- * Channel:
- *   A bidirectional channel for receiving push notifications from Rust → JS.
- *   Pass a callback to the constructor; it is called each time
- *   the Rust side calls Channel::send().
+ * Product command names and payloads remain owned by this plugin and are forwarded
+ * unchanged through runtime.invoke(). Channels are opaque transport handles: create them
+ * from this runtime and pass the same object back in the subscription command.
  */
-import { Channel, invoke } from "@novonotes/webview-bridge";
 import {
   createHostFocusRestorer,
   createWracFrontendRuntime,
@@ -25,6 +18,8 @@ import {
 import "./style.css";
 
 const runtime = createWracFrontendRuntime();
+// One runtime must own both channels and commands because transport handles are not
+// interchangeable across runtime instances with different transport implementations.
 installConsoleLogPipe(runtime.writeToLog);
 
 type PluginMetadata = {
@@ -159,13 +154,13 @@ if (import.meta.env.PROD) {
 // -----------------------------------------------------------------------
 // Create a Channel and register it with the Rust side as the target for parameter change
 // notifications. When the host changes the gain via automation, this callback updates the UI.
-const channel = new Channel<ParameterState>((message) => {
+const channel = runtime.createChannel<ParameterState>((message) => {
   if (message && message.type === "parameter-value") {
     render(message);
   }
 });
 
-const editorPageChannel = new Channel<EditorPageState>((message) => {
+const editorPageChannel = runtime.createChannel<EditorPageState>((message) => {
   if (message && message.type === "editor-page") {
     renderEditorPage(message.page);
   }
@@ -173,19 +168,21 @@ const editorPageChannel = new Channel<EditorPageState>((message) => {
 
 // Initialization: fetch the current gain state, render the UI, and subscribe to changes.
 void (async () => {
-  pluginMetadata = await invoke<PluginMetadata>("get_plugin_metadata");
+  pluginMetadata = await runtime.invoke<PluginMetadata>("get_plugin_metadata");
   renderPluginMetadata(pluginMetadata);
 
   gain = clamp(GAIN_PARAMETER.defaultValue);
-  // Call the Rust "get_parameter_state" command via invoke().
-  const initialState = await invoke<ParameterState>("get_parameter_state", {
-    parameterId: GAIN_PARAMETER.id,
-  });
+  const initialState = await runtime.invoke<ParameterState>(
+    "get_parameter_state",
+    {
+      parameterId: GAIN_PARAMETER.id,
+    },
+  );
   render(initialState);
   // Register the Channel on the Rust side and remember the returned subscriptionId.
   // Passing that id back on unsubscribe guarantees we tear down only our own
   // subscription, even if a remount created another one in the meantime.
-  const subscription = await invoke<SubscribeParametersResponse>(
+  const subscription = await runtime.invoke<SubscribeParametersResponse>(
     "subscribe_parameters",
     {
       channel,
@@ -193,14 +190,12 @@ void (async () => {
   );
   parameterSubscriptionId = subscription.subscriptionId;
 
-  const initialPage = await invoke<EditorPageState>("get_editor_page");
+  const initialPage = await runtime.invoke<EditorPageState>("get_editor_page");
   renderEditorPage(initialPage.page);
-  const editorPageSubscription = await invoke<SubscribeParametersResponse>(
-    "subscribe_editor_page",
-    {
+  const editorPageSubscription =
+    await runtime.invoke<SubscribeParametersResponse>("subscribe_editor_page", {
       channel: editorPageChannel,
-    },
-  );
+    });
   editorPageSubscriptionId = editorPageSubscription.subscriptionId;
   console.info("GUI initialization completed");
   const runtimeContext = await runtime
@@ -277,7 +272,8 @@ function renderEditorPage(page: EditorPage): void {
 
 function setEditorPage(page: EditorPage): void {
   renderEditorPage(page);
-  void invoke<EditorPageState>("set_editor_page", { page })
+  void runtime
+    .invoke<EditorPageState>("set_editor_page", { page })
     .then((state) => renderEditorPage(state.page))
     .catch(() => undefined);
 }
@@ -294,9 +290,9 @@ function beginGesture(): void {
     return;
   }
   gestureActive = true;
-  // Call the Rust begin_parameter_gesture command via invoke().
-  // void = fire-and-forget (do not await the result).
-  void invoke("begin_parameter_gesture", {
+  // Parameter edits must not delay pointer handling while the host records the gesture;
+  // the native command queue preserves ordering with the following value updates.
+  void runtime.invoke("begin_parameter_gesture", {
     parameterId: GAIN_PARAMETER.id,
   });
 }
@@ -306,7 +302,7 @@ function endGesture(): void {
     return;
   }
   gestureActive = false;
-  void invoke("end_parameter_gesture", {
+  void runtime.invoke("end_parameter_gesture", {
     parameterId: GAIN_PARAMETER.id,
   });
 }
@@ -321,8 +317,7 @@ function applyGain(nextGain: number): void {
     value,
     text: value <= 0 ? "-inf dB" : `${(20 * Math.log10(value)).toFixed(1)} dB`,
   });
-  // Update the parameter via the Rust "set_parameter_value" command.
-  void invoke("set_parameter_value", {
+  void runtime.invoke("set_parameter_value", {
     parameterId: GAIN_PARAMETER.id,
     value,
   });
@@ -348,7 +343,7 @@ function commitTextInput(): void {
   gainInput.hidden = true;
   dbLabel.hidden = false;
   renderResponse(
-    invoke<ParameterState>("set_parameter_text", {
+    runtime.invoke<ParameterState>("set_parameter_text", {
       parameterId: GAIN_PARAMETER.id,
       text,
     }),
@@ -405,7 +400,7 @@ knob.addEventListener("pointercancel", finishDrag);
 knob.addEventListener("dblclick", (event) => {
   event.preventDefault();
   renderResponse(
-    invoke<ParameterState>("reset_parameter_to_default", {
+    runtime.invoke<ParameterState>("reset_parameter_to_default", {
       parameterId: GAIN_PARAMETER.id,
     }),
   );
@@ -486,12 +481,12 @@ installResizeBridge({
 window.addEventListener("beforeunload", () => {
   endGesture();
   if (parameterSubscriptionId !== undefined) {
-    void invoke("unsubscribe_gui_subscription", {
+    void runtime.invoke("unsubscribe_gui_subscription", {
       subscriptionId: parameterSubscriptionId,
     });
   }
   if (editorPageSubscriptionId !== undefined) {
-    void invoke("unsubscribe_gui_subscription", {
+    void runtime.invoke("unsubscribe_gui_subscription", {
       subscriptionId: editorPageSubscriptionId,
     });
   }

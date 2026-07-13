@@ -10,7 +10,9 @@ export {
   type NativeLogLevel,
   type ResizeRequest,
   type ResizeResponse,
+  type RuntimeChannel,
   type RuntimeOkResponse,
+  type WracFrontendTransport,
   type WracFrontendRuntime,
 } from "./runtime";
 export {
