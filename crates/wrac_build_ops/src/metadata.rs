@@ -43,8 +43,8 @@ pub(crate) struct PluginProductMetadata {
 }
 
 impl PluginMetadata {
-    pub(crate) fn read_discovered(manifest_path: &Path, plugin_root: &Path) -> Result<Self> {
-        let source = wrac_manifest::discover_manifest(manifest_path, plugin_root)?;
+    pub(crate) fn read_discovered(manifest_path: &Path) -> Result<Self> {
+        let source = wrac_manifest::discover_manifest(manifest_path)?;
         let mut manifest = wrac_manifest::read_manifest(&source)?;
         let cargo_package = wrac_manifest::read_cargo_package_info(manifest_path)?;
         if manifest.package.package_name.is_none() {

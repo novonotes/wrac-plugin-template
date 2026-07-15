@@ -18,6 +18,9 @@ use crate::Result;
 const MAX_FILE_LINES: usize = 1000;
 
 pub(crate) fn quality(root: &Path) -> Result<()> {
+    // CI runs quality before plugin builds, so layout violations must be validated here
+    // instead of depending on a later format-specific command to discover them.
+    super::context::available_packages_at_root(root)?;
     let package_roots = workspace_package_roots(root)?;
     let mut errors = Vec::new();
     for package_root in package_roots {

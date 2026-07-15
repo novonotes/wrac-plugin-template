@@ -14,6 +14,17 @@
 WRAC は未知のフィールドやテーブルを無視します。利用者は、名前空間付きの
 拡張テーブルを追加できます。
 
+## 配置契約
+
+Cargo マニフェストが `<plugin-root>/src-plugin/Cargo.toml` にあるワークスペースメンバー
+だけを WRAC プラグインとして扱います。プラグインルートは `src-plugin` の親として導出し、
+設定ファイルには宣言しません。WRAC マニフェストの正規配置は
+`<plugin-root>/src-plugin/wrac-plugin.toml` だけです。
+
+プラグインルート直下やその他のソースディレクトリにある `wrac-plugin.toml`、および
+`src-plugin` ワークスペースメンバーでのマニフェスト欠落はエラーです。`src-plugin` 外の
+通常の Cargo ワークスペースメンバーは WRAC プラグインとして扱いません。
+
 ```toml
 [acme.ci]
 validation_profile = "prototype"

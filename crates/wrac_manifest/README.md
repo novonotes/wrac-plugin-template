@@ -14,6 +14,17 @@ default build targets, and WRAC validation exceptions.
 WRAC ignores unknown fields and tables. Users may add their own namespaced
 extension tables.
 
+## Location Contract
+
+A workspace member is a WRAC plugin exactly when its Cargo manifest is located
+at `<plugin-root>/src-plugin/Cargo.toml`. The plugin root is derived as the
+parent of `src-plugin`; it is not declared in configuration. Its WRAC manifest
+must be located only at `<plugin-root>/src-plugin/wrac-plugin.toml`.
+
+`wrac-plugin.toml` at the plugin root or in any other source directory is an
+error, as is a missing manifest for a `src-plugin` workspace member. Ordinary
+Cargo workspace members outside `src-plugin` are not treated as WRAC plugins.
+
 ```toml
 [acme.ci]
 validation_profile = "prototype"

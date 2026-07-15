@@ -109,10 +109,7 @@ pub enum ManifestSource {
     Dedicated(PathBuf),
 }
 
-pub fn discover_manifest(
-    package_manifest_path: &Path,
-    plugin_root: &Path,
-) -> Result<ManifestSource> {
+pub fn discover_manifest(package_manifest_path: &Path) -> Result<ManifestSource> {
     let package_dir = package_manifest_path.parent().ok_or_else(|| {
         format!(
             "failed to derive package dir from {}",
@@ -123,13 +120,9 @@ pub fn discover_manifest(
     if package_manifest.exists() {
         return Ok(ManifestSource::Dedicated(package_manifest));
     }
-    let plugin_root_manifest = plugin_root.join("wrac-plugin.toml");
-    if plugin_root_manifest.exists() {
-        return Ok(ManifestSource::Dedicated(plugin_root_manifest));
-    }
     Err(format!(
-        "missing wrac-plugin.toml for package manifest {}",
-        package_manifest_path.display()
+        "WRAC plugin manifest must exist at {}, but no manifest was found there",
+        package_manifest.display()
     )
     .into())
 }

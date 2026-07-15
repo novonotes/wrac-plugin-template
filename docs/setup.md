@@ -55,6 +55,12 @@ AAX builds additionally require the private AAX SDK. Put local AAX paths in `.en
 Plugin identity is centralized in `plugins/wrac-gain/src-plugin/wrac-plugin.toml`.
 Edit that manifest instead of duplicating host-visible IDs in Rust code or Cargo metadata.
 
+WRAC identifies a plugin from the workspace member at
+`<plugin-root>/src-plugin/Cargo.toml` and derives `plugin-root` as the parent of
+`src-plugin`. Keep `wrac-plugin.toml` in that same `src-plugin` directory. A
+manifest at the plugin root, in another directory, or missing from `src-plugin`
+is a layout error reported by xtask and CI.
+
 > **Important:** The plugin ID must be globally unique. It cannot be changed once published.
 > AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
 > `clap_features` must match the plugin's real audio/MIDI behavior because CLAP hosts read it directly.

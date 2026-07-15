@@ -55,6 +55,11 @@ AAX ビルドには、加えて private な AAX SDK が必要です。ローカ�
 プラグインの識別情報は `plugins/wrac-gain/src-plugin/wrac-plugin.toml` に集約しています。
 host-visible ID を Rust code や Cargo metadata に重複して書かず、この manifest を編集してください。
 
+WRAC は `<plugin-root>/src-plugin/Cargo.toml` にあるワークスペースメンバーをプラグイン
+として識別し、`src-plugin` の親をプラグインルートとして導出します。`wrac-plugin.toml`
+は同じ `src-plugin` ディレクトリに置いてください。プラグインルート直下、その他の
+ディレクトリへの配置、および `src-plugin` での欠落は、xtask と CI がレイアウトエラーとして報告します。
+
 > **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
 > AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
 > `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
