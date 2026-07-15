@@ -9,7 +9,7 @@
 ## 対象範囲
 
 `wrac-plugin.toml` には、ホストから見えるプラグイン識別情報、ラッパー用メタデータ、
-既定のビルド対象、WRAC の検証例外を記述します。
+既定のビルド対象を記述します。
 
 WRAC は未知のフィールドやテーブルを無視します。利用者は、名前空間付きの
 拡張テーブルを追加できます。
@@ -25,7 +25,7 @@ validation_profile = "prototype"
 
 | フィールド | 型 | 必須 | 受け付ける値 | 意味 |
 | --- | --- | --- | --- | --- |
-| `schema_version` | integer | 推奨 | `1` | WRAC マニフェストスキーマのバージョンです。現在のマニフェストでは `1` を書いてください。現行のパーサーは、古いマニフェストとの互換性のために省略も受け付けます。 |
+| `schema_version` | integer | はい | `1` | WRACマニフェストスキーマのバージョンです。未知の値や省略は拒否します。 |
 
 ### `[package]`
 
@@ -36,7 +36,7 @@ validation_profile = "prototype"
 | --- | --- | --- | --- | --- |
 | `name` | string | いいえ | 指定する場合は空文字不可 | WRAC の成果物メタデータで使う Cargo パッケージ名を上書きします。通常は省略し、`Cargo.toml` を使います。 |
 | `version` | string | いいえ | 指定する場合は空文字不可 | 生成されるプラグインディスクリプターやバンドルに使うバージョンを上書きします。通常は省略し、`Cargo.toml` を使います。 |
-| `repository` | string | いいえ | 指定する場合は空文字不可 | readiness check が参照する Cargo パッケージの repository 情報を上書きします。 |
+| `repository` | string | いいえ | 指定する場合は空文字不可 | Cargo パッケージの repository 情報を上書きします。 |
 | `version_source` | string | いいえ | 慣例として `cargo` | 互換性と意図表示のために受け付けているフィールドです。WRAC は現在、省略された `version` を Cargo メタデータから補完しますが、他のバージョン取得元は扱いません。 |
 
 ### `[bundle]`
@@ -55,7 +55,7 @@ validation_profile = "prototype"
 | `manual_url` | string | はい | 空文字不可の URL 文字列 | CLAP ディスクリプターの `manual_url` に生成されます。ホストやスキャナーがユーザーに表示する可能性があります。 |
 | `support_url` | string | はい | 空文字不可の URL 文字列 | CLAP ディスクリプターの `support_url` に生成されます。ホストやスキャナーがユーザーに表示する可能性があります。 |
 | `description` | string | はい | 空文字不可 | CLAP ディスクリプターの `description` に生成されます。ホストやスキャナーの UI に表示され得る、ユーザー向けの短い製品説明です。 |
-| `copyright` | string | はい | 空文字不可 | macOS バンドルの著作権メタデータに生成され、readiness check でも参照されます。 |
+| `copyright` | string | はい | 空文字不可 | macOS バンドルの著作権メタデータに生成されます。 |
 | `supported_formats` | array of `PluginFormat` | はい | `clap`、`vst3`、`au`、`aax`。空配列と重複は不可 | 既定の `cargo xtask build`、`install`、`validate` のプラグイン対象を決める製品方針です。`--target` で明示したプラグイン形式も、この配列に含まれている必要があります。 |
 
 ### `[[plugins]]`
@@ -85,29 +85,6 @@ validation_profile = "prototype"
 | `input` | `AaxStemFormat` | はい | `mono`、`stereo` | AAX の入力ステム形式です。 |
 | `output` | `AaxStemFormat` | はい | `mono`、`stereo` | AAX の出力ステム形式です。 |
 | `plugin_id` | string | はい | 4 バイトの ASCII。親プラグインのステム構成内で一意 | AAX ステムごとの plugin ID です。リリース後は安定させてください。 |
-
-### `[validation]`
-
-`[validation]` は任意です。ここで定義するのは WRAC の検証例外であり、製品カテゴリやリリース方針では
-ありません。
-
-| フィールド | 型 | 必須 | 受け付ける値 | 意味 |
-| --- | --- | --- | --- | --- |
-| `disabled_rules` | table | いいえ | キーは WRAC readiness rule ID | 指定した WRAC production-readiness rule を無効化します。各 rule には理由が必要です。 |
-| `clap_validator` | table | いいえ | 下記参照 | 外部 `clap-validator` のテストスキップを設定します。 |
-
-#### `[validation.disabled_rules.<rule_id>]`
-
-| フィールド | 型 | 必須 | 受け付ける値 | 意味 |
-| --- | --- | --- | --- | --- |
-| `reason` | string | はい | 空文字不可 | この WRAC readiness rule を無効化する理由です。 |
-
-#### `[validation.clap_validator]`
-
-| フィールド | 型 | 必須 | 受け付ける値 | 意味 |
-| --- | --- | --- | --- | --- |
-| `skip_test_filter` | string | いいえ | 空文字不可の正規表現または filter 文字列 | 外部 CLAP validator のスキップ機構に渡します。指定する場合は `skip_reason` も必須です。 |
-| `skip_reason` | string | 条件付き | 空文字不可 | `skip_test_filter` を指定する場合は必須です。外部 validator のテストをスキップする理由を書きます。 |
 
 ## 事前定義値
 
