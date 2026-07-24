@@ -65,6 +65,8 @@ class ProcessAdapter
 #endif
   virtual ~ProcessAdapter();
 
+  // Indexed by CLAP output port; -1 means that VST3 omitted the port because its
+  // dialect cannot be represented by a VST3 event bus.
   void setupProcessing(const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                        Steinberg::Vst::BusList &audioinputs, Steinberg::Vst::BusList &audiooutputs,
                        uint32_t numSamples, size_t numEventInputs,

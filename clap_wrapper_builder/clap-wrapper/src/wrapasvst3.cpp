@@ -49,6 +49,11 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 static Vst::SpeakerArrangement speakerArrFromPortInfo(const clap_audio_port_info_t &info);
 static bool portInfoMatchesSpeakerArr(const clap_audio_port_info_t &info, Vst::SpeakerArrangement arr);
 static const char *clapPortTypeFromSpeakerArr(Vst::SpeakerArrangement arr);
+static bool supportsVst3EventBus(const clap_note_port_info_t &info)
+{
+  return (info.supported_dialects & CLAP_NOTE_DIALECT_MIDI) ||
+         (info.supported_dialects & CLAP_NOTE_DIALECT_CLAP);
+}
 
 DEF_CLASS_IID(ARA::IPlugInEntryPoint)
 DEF_CLASS_IID(ARA::IPlugInEntryPoint2)
@@ -829,31 +834,29 @@ void ClapAsVst3::addAudioBusFrom(const clap_audio_port_info_t *info, bool is_inp
   }
 }
 
-bool ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input)
+void ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input)
 {
-  if (!(info->supported_dialects & CLAP_NOTE_DIALECT_MIDI) &&
-      !(info->supported_dialects & CLAP_NOTE_DIALECT_CLAP))
-    return false;
+  if (supportsVst3EventBus(*info))
+  {
+    auto numchannels = 16;
+    if (_vst3specifics)
+    {
+      numchannels = _vst3specifics->getNumMIDIChannels(_plugin->_plugin, index);
+    }
 
-  auto numchannels = 16;
-  if (_vst3specifics)
-  {
-    numchannels = _vst3specifics->getNumMIDIChannels(_plugin->_plugin, index);
+    Steinberg::char16 name16[256];
+    // str8tostr16 writes to position n to terminate, so don't overflow
+    // Steinberg::str8ToStr16(&name16[0], info->name, 255);
+    utf8_to_utf16l(info->name, (uint16_t *)name16, 255);
+    if (is_input)
+    {
+      addEventInput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
+    }
+    else
+    {
+      addEventOutput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
+    }
   }
-
-  Steinberg::char16 name16[256];
-  // str8tostr16 writes to position n to terminate, so don't overflow
-  // Steinberg::str8ToStr16(&name16[0], info->name, 255);
-  utf8_to_utf16l(info->name, (uint16_t *)name16, 255);
-  if (is_input)
-  {
-    addEventInput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
-  }
-  else
-  {
-    addEventOutput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
-  }
-  return true;
 }
 
 void ClapAsVst3::updateAudioBusses()
@@ -1007,6 +1010,7 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
   auto numMIDIOutPorts = noteports->count(plugin, false);
 
   // fprintf(stderr, "\tMIDI in: %d, out: %d\n", (int)numMIDIInPorts, (int)numMIDIOutPorts);
+  // Unsupported CLAP dialects create gaps because VST3 does not expose a bus for those ports.
   _outputEventBusByPort.assign(numMIDIOutPorts, -1);
 
   for (decltype(numMIDIInPorts) i = 0; i < numMIDIInPorts; ++i)
@@ -1022,8 +1026,11 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
     clap_note_port_info_t info;
     if (noteports->get(plugin, i, false, &info))
     {
-      const auto busIndex = static_cast<int32_t>(eventOutputs.size());
-      if (addMIDIBusFrom(&info, i, false)) _outputEventBusByPort[i] = busIndex;
+      if (supportsVst3EventBus(info))
+      {
+        _outputEventBusByPort[i] = static_cast<int32_t>(eventOutputs.size());
+        addMIDIBusFrom(&info, i, false);
+      }
     }
   }
 }
