@@ -79,7 +79,8 @@ ProcessAdapter::~ProcessAdapter()
 void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                                      Vst::BusList &audioinputs, Vst::BusList &audiooutputs,
                                      uint32_t numSamples, size_t /*numEventInputs*/,
-                                     size_t numEventOutputs, Steinberg::Vst::ParameterContainer &params,
+                                     const std::vector<int32_t> &outputEventBusByPort,
+                                     Steinberg::Vst::ParameterContainer &params,
                                      Steinberg::Vst::IComponentHandler *componenthandler,
                                      IAutomation *automation, std::vector<clap_id> &gesturedParameters,
                                      bool enablePolyPressure, bool supportsTuningNoteExpression)
@@ -88,7 +89,7 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
   _ext_params = ext_params;
   _audioinputs = &audioinputs;
   _audiooutputs = &audiooutputs;
-  _numEventOutputs = numEventOutputs;
+  _outputEventBusByPort = outputEventBusByPort;
 
   parameters = &params;
   _componentHandler = componenthandler;
@@ -172,7 +173,9 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
   _events.reserve(8192);
   _eventindices.clear();
   _eventindices.reserve(_events.capacity());
-  if (_numEventOutputs > 0) _sysexOutputBuffer = std::make_unique<uint8_t[]>(sysexOutputCapacity);
+  if (std::any_of(_outputEventBusByPort.begin(), _outputEventBusByPort.end(),
+                  [](int32_t busIndex) { return busIndex >= 0; }))
+    _sysexOutputBuffer = std::make_unique<uint8_t[]>(sysexOutputCapacity);
 
   _out_events.ctx = this;
 
@@ -758,22 +761,22 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
     case CLAP_EVENT_NOTE_ON:
     {
       auto nevt = reinterpret_cast<const clap_event_note *>(event);
-      if (!isValidOutputPort(nevt->port_index) || nevt->channel < 0 || nevt->channel > 15 ||
-          nevt->key < 0 || nevt->key > 127)
+      const auto busIndex = outputBusIndex(nevt->port_index);
+      if (busIndex < 0 || nevt->channel < 0 || nevt->channel > 15 || nevt->key < 0 || nevt->key > 127)
         return false;
 
-      auto oe = createNoteOnOutputEvent(nevt->header, nevt->port_index, nevt->channel, nevt->key,
+      auto oe = createNoteOnOutputEvent(nevt->header, busIndex, nevt->channel, nevt->key,
                                         static_cast<float>(nevt->velocity), nevt->note_id);
       return pushVstOutputEvent(oe);
     }
     case CLAP_EVENT_NOTE_OFF:
     {
       auto nevt = reinterpret_cast<const clap_event_note *>(event);
-      if (!isValidOutputPort(nevt->port_index) || nevt->channel < 0 || nevt->channel > 15 ||
-          nevt->key < 0 || nevt->key > 127)
+      const auto busIndex = outputBusIndex(nevt->port_index);
+      if (busIndex < 0 || nevt->channel < 0 || nevt->channel > 15 || nevt->key < 0 || nevt->key > 127)
         return false;
 
-      auto oe = createNoteOffOutputEvent(nevt->header, nevt->port_index, nevt->channel, nevt->key,
+      auto oe = createNoteOffOutputEvent(nevt->header, busIndex, nevt->channel, nevt->key,
                                          static_cast<float>(nevt->velocity), nevt->note_id);
       return pushVstOutputEvent(oe);
     }
@@ -869,7 +872,8 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
 
 bool ProcessAdapter::enqueueMidi1OutputEvent(const clap_event_midi_t &event)
 {
-  if (!isValidOutputPort(event.port_index)) return false;
+  const auto busIndex = outputBusIndex(event.port_index);
+  if (busIndex < 0) return false;
 
   const auto status = event.data[0];
   const auto message = status & 0xf0;
@@ -890,41 +894,41 @@ bool ProcessAdapter::enqueueMidi1OutputEvent(const clap_event_midi_t &event)
       case 0x90:
       {
         const bool isNoteOff = message == 0x80 || data2 == 0;
-        auto output = isNoteOff ? createNoteOffOutputEvent(event.header, event.port_index, channel,
-                                                           data1, static_cast<float>(data2) / 127.0f, -1)
-                                : createNoteOnOutputEvent(event.header, event.port_index, channel, data1,
+        auto output = isNoteOff ? createNoteOffOutputEvent(event.header, busIndex, channel, data1,
+                                                           static_cast<float>(data2) / 127.0f, -1)
+                                : createNoteOnOutputEvent(event.header, busIndex, channel, data1,
                                                           static_cast<float>(data2) / 127.0f, -1);
         return pushVstOutputEvent(output);
       }
       case 0xa0:
       {
         auto output =
-            createLegacyMidiOutputEvent(event.header, event.port_index, channel, Vst::kCtrlPolyPressure,
+            createLegacyMidiOutputEvent(event.header, busIndex, channel, Vst::kCtrlPolyPressure,
                                         static_cast<int8_t>(data1), static_cast<int8_t>(data2));
         return pushVstOutputEvent(output);
       }
       case 0xb0:
       {
-        auto output = createLegacyMidiOutputEvent(event.header, event.port_index, channel, data1,
+        auto output = createLegacyMidiOutputEvent(event.header, busIndex, channel, data1,
                                                   static_cast<int8_t>(data2));
         return pushVstOutputEvent(output);
       }
       case 0xc0:
       {
-        auto output = createLegacyMidiOutputEvent(event.header, event.port_index, channel,
+        auto output = createLegacyMidiOutputEvent(event.header, busIndex, channel,
                                                   Vst::kCtrlProgramChange, static_cast<int8_t>(data1));
         return pushVstOutputEvent(output);
       }
       case 0xd0:
       {
-        auto output = createLegacyMidiOutputEvent(event.header, event.port_index, channel,
-                                                  Vst::kAfterTouch, static_cast<int8_t>(data1));
+        auto output = createLegacyMidiOutputEvent(event.header, busIndex, channel, Vst::kAfterTouch,
+                                                  static_cast<int8_t>(data1));
         return pushVstOutputEvent(output);
       }
       case 0xe0:
       {
         auto output =
-            createLegacyMidiOutputEvent(event.header, event.port_index, channel, Vst::kPitchBend,
+            createLegacyMidiOutputEvent(event.header, busIndex, channel, Vst::kPitchBend,
                                         static_cast<int8_t>(data1), static_cast<int8_t>(data2));
         return pushVstOutputEvent(output);
       }
@@ -935,8 +939,7 @@ bool ProcessAdapter::enqueueMidi1OutputEvent(const clap_event_midi_t &event)
 
   auto pushSystemEvent = [&](uint8_t controlNumber, int8_t value = 0, int8_t value2 = 0)
   {
-    auto output =
-        createLegacyMidiOutputEvent(event.header, event.port_index, 0, controlNumber, value, value2);
+    auto output = createLegacyMidiOutputEvent(event.header, busIndex, 0, controlNumber, value, value2);
     return pushVstOutputEvent(output);
   };
 
@@ -969,9 +972,9 @@ bool ProcessAdapter::enqueueMidi1OutputEvent(const clap_event_midi_t &event)
 
 bool ProcessAdapter::enqueueSysexOutputEvent(const clap_event_midi_sysex_t &event)
 {
-  if (!isValidOutputPort(event.port_index) || event.buffer == nullptr || event.size < 2 ||
-      event.buffer[0] != 0xf0 || event.buffer[event.size - 1] != 0xf7 ||
-      event.size > sysexOutputCapacity - _sysexOutputSize)
+  const auto busIndex = outputBusIndex(event.port_index);
+  if (busIndex < 0 || event.buffer == nullptr || event.size < 2 || event.buffer[0] != 0xf0 ||
+      event.buffer[event.size - 1] != 0xf7 || event.size > sysexOutputCapacity - _sysexOutputSize)
     return false;
 
   // CLAP only keeps the source bytes alive for try_push(), while VST3 may retain the
@@ -980,7 +983,7 @@ bool ProcessAdapter::enqueueSysexOutputEvent(const clap_event_midi_sysex_t &even
   auto *bytes = _sysexOutputBuffer.get() + _sysexOutputSize;
   std::memcpy(bytes, event.buffer, event.size);
 
-  auto output = createOutputEvent(event.header, event.port_index);
+  auto output = createOutputEvent(event.header, busIndex);
   output.type = Vst::Event::kDataEvent;
   output.data.type = Vst::DataEvent::kMidiSysEx;
   output.data.size = event.size;
@@ -999,9 +1002,12 @@ bool ProcessAdapter::pushVstOutputEvent(Vst::Event &event)
          _vstdata->outputEvents->addEvent(event) == kResultOk;
 }
 
-bool ProcessAdapter::isValidOutputPort(int32_t portIndex) const
+int32_t ProcessAdapter::outputBusIndex(int32_t portIndex) const
 {
-  return portIndex >= 0 && static_cast<size_t>(portIndex) < _numEventOutputs;
+  // CLAP ports with unsupported dialects are not exposed as VST3 event buses, so their
+  // indices cannot be used as bus indices directly.
+  if (portIndex < 0 || static_cast<size_t>(portIndex) >= _outputEventBusByPort.size()) return -1;
+  return _outputEventBusByPort[portIndex];
 }
 
 void ProcessAdapter::addToActiveNotes(const clap_event_note *note)

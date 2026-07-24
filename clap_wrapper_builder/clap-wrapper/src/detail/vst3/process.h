@@ -67,7 +67,8 @@ class ProcessAdapter
 
   void setupProcessing(const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                        Steinberg::Vst::BusList &audioinputs, Steinberg::Vst::BusList &audiooutputs,
-                       uint32_t numSamples, size_t numEventInputs, size_t numEventOutputs,
+                       uint32_t numSamples, size_t numEventInputs,
+                       const std::vector<int32_t> &outputEventBusByPort,
                        Steinberg::Vst::ParameterContainer &params,
                        Steinberg::Vst::IComponentHandler *componenthandler, IAutomation *automation,
                        std::vector<clap_id> &gesturedParameters, bool enablePolyPressure,
@@ -94,7 +95,7 @@ class ProcessAdapter
   bool enqueueMidi1OutputEvent(const clap_event_midi_t &event);
   bool enqueueSysexOutputEvent(const clap_event_midi_sysex_t &event);
   bool pushVstOutputEvent(Steinberg::Vst::Event &event);
-  bool isValidOutputPort(int32_t portIndex) const;
+  int32_t outputBusIndex(int32_t portIndex) const;
   void addToActiveNotes(const clap_event_note *note);
   void removeFromActiveNotes(const clap_event_note *note);
 
@@ -107,7 +108,7 @@ class ProcessAdapter
   IAutomation *_automation = nullptr;
   Steinberg::Vst::BusList *_audioinputs = nullptr;
   Steinberg::Vst::BusList *_audiooutputs = nullptr;
-  size_t _numEventOutputs = 0;
+  std::vector<int32_t> _outputEventBusByPort;
 
   // for automation gestures
   std::vector<clap_id> *_gesturedParameters;

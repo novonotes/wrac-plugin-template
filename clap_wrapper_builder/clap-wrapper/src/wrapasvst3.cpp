@@ -198,7 +198,7 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
     // the processAdapter needs to know a few things to intercommunicate between VST3 host and CLAP plugin.
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->_ext._params, this->audioInputs, this->audioOutputs,
-        this->_largestBlocksize, this->eventInputs.size(), this->eventOutputs.size(), parameters,
+        this->_largestBlocksize, this->eventInputs.size(), _outputEventBusByPort, parameters,
         componentHandler, this, _gesturedparameters, supportsnoteexpression,
         _expressionmap & clap_supported_note_expressions::AS_VST3_NOTE_EXPRESSION_TUNING);
     updateAudioBusses();
@@ -829,30 +829,31 @@ void ClapAsVst3::addAudioBusFrom(const clap_audio_port_info_t *info, bool is_inp
   }
 }
 
-void ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input)
+bool ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input)
 {
-  if ((info->supported_dialects & CLAP_NOTE_DIALECT_MIDI) ||
-      (info->supported_dialects & CLAP_NOTE_DIALECT_CLAP))
-  {
-    auto numchannels = 16;
-    if (_vst3specifics)
-    {
-      numchannels = _vst3specifics->getNumMIDIChannels(_plugin->_plugin, index);
-    }
+  if (!(info->supported_dialects & CLAP_NOTE_DIALECT_MIDI) &&
+      !(info->supported_dialects & CLAP_NOTE_DIALECT_CLAP))
+    return false;
 
-    Steinberg::char16 name16[256];
-    // str8tostr16 writes to position n to terminate, so don't overflow
-    // Steinberg::str8ToStr16(&name16[0], info->name, 255);
-    utf8_to_utf16l(info->name, (uint16_t *)name16, 255);
-    if (is_input)
-    {
-      addEventInput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
-    }
-    else
-    {
-      addEventOutput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
-    }
+  auto numchannels = 16;
+  if (_vst3specifics)
+  {
+    numchannels = _vst3specifics->getNumMIDIChannels(_plugin->_plugin, index);
   }
+
+  Steinberg::char16 name16[256];
+  // str8tostr16 writes to position n to terminate, so don't overflow
+  // Steinberg::str8ToStr16(&name16[0], info->name, 255);
+  utf8_to_utf16l(info->name, (uint16_t *)name16, 255);
+  if (is_input)
+  {
+    addEventInput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
+  }
+  else
+  {
+    addEventOutput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
+  }
+  return true;
 }
 
 void ClapAsVst3::updateAudioBusses()
@@ -1006,12 +1007,7 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
   auto numMIDIOutPorts = noteports->count(plugin, false);
 
   // fprintf(stderr, "\tMIDI in: %d, out: %d\n", (int)numMIDIInPorts, (int)numMIDIOutPorts);
-
-  std::vector<clap_note_port_info_t> inputs;
-  std::vector<clap_note_port_info_t> outputs;
-
-  inputs.resize(numMIDIInPorts);
-  outputs.resize(numMIDIOutPorts);
+  _outputEventBusByPort.assign(numMIDIOutPorts, -1);
 
   for (decltype(numMIDIInPorts) i = 0; i < numMIDIInPorts; ++i)
   {
@@ -1026,7 +1022,8 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
     clap_note_port_info_t info;
     if (noteports->get(plugin, i, false, &info))
     {
-      addMIDIBusFrom(&info, i, false);
+      const auto busIndex = static_cast<int32_t>(eventOutputs.size());
+      if (addMIDIBusFrom(&info, i, false)) _outputEventBusByPort[i] = busIndex;
     }
   }
 }
@@ -1456,7 +1453,7 @@ void ClapAsVst3::onIdle()
     {
       // setup a ProcessAdapter just for flush with no audio
       Clap::ProcessAdapter pa;
-      pa.setupProcessing(_plugin->_plugin, _plugin->_ext._params, audioInputs, audioOutputs, 0, 0, 0,
+      pa.setupProcessing(_plugin->_plugin, _plugin->_ext._params, audioInputs, audioOutputs, 0, 0, {},
                          this->parameters, componentHandler, this, _gesturedparameters, false, false);
       auto thisFn = _plugin->AlwaysAudioThread();  // just to pacify the clap-helper
 
