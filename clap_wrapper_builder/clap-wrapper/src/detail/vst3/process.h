@@ -65,9 +65,12 @@ class ProcessAdapter
 #endif
   virtual ~ProcessAdapter();
 
+  // Indexed by CLAP output port; -1 means that VST3 omitted the port because its
+  // dialect cannot be represented by a VST3 event bus.
   void setupProcessing(const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                        Steinberg::Vst::BusList &audioinputs, Steinberg::Vst::BusList &audiooutputs,
-                       uint32_t numSamples, size_t numEventInputs, size_t numEventOutputs,
+                       uint32_t numSamples, size_t numEventInputs,
+                       const std::vector<int32_t> &outputEventBusByPort,
                        Steinberg::Vst::ParameterContainer &params,
                        Steinberg::Vst::IComponentHandler *componenthandler, IAutomation *automation,
                        std::vector<clap_id> &gesturedParameters, bool enablePolyPressure,
@@ -91,6 +94,10 @@ class ProcessAdapter
   void processInputEvents(Steinberg::Vst::IEventList *eventlist);
 
   bool enqueueOutputEvent(const clap_event_header_t *event);
+  bool enqueueMidi1OutputEvent(const clap_event_midi_t &event);
+  bool enqueueSysexOutputEvent(const clap_event_midi_sysex_t &event);
+  bool pushVstOutputEvent(Steinberg::Vst::Event &event);
+  int32_t outputBusIndex(int32_t portIndex) const;
   void addToActiveNotes(const clap_event_note *note);
   void removeFromActiveNotes(const clap_event_note *note);
 
@@ -103,6 +110,7 @@ class ProcessAdapter
   IAutomation *_automation = nullptr;
   Steinberg::Vst::BusList *_audioinputs = nullptr;
   Steinberg::Vst::BusList *_audiooutputs = nullptr;
+  std::vector<int32_t> _outputEventBusByPort;
 
   // for automation gestures
   std::vector<clap_id> *_gesturedParameters;
@@ -126,6 +134,12 @@ class ProcessAdapter
 
   std::unique_ptr<float[]> _silent_input;
   std::unique_ptr<float[]> _silent_output;
+
+  // A bounded block-local buffer keeps SysEx forwarding realtime-safe; try_push() reports
+  // backpressure instead of allocating if a block exceeds this capacity.
+  static constexpr size_t sysexOutputCapacity = 64 * 1024;
+  std::unique_ptr<uint8_t[]> _sysexOutputBuffer;
+  size_t _sysexOutputSize = 0;
 
   clap_process_t _processData = {-1, 0, &_transport, nullptr, nullptr, 0, 0, &_in_events, &_out_events};
 
