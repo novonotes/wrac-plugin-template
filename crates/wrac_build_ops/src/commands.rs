@@ -544,7 +544,7 @@ mod tests {
         cmake_help_lists_generator, cmake_visual_studio_generators, command_exists_in_paths,
         select_latest_visual_studio_generator,
     };
-    use super::validation::parse_vst3_validator_cids;
+    use super::validation::{parse_vst3_validator_cids, vst3_64_bit_audio_validation_error};
     use super::*;
 
     #[test]
@@ -589,6 +589,40 @@ mod tests {
                 "FFFF664CB96353E687CC2A7CEB29674B".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_vst3_validator_skip_of_64_bit_audio_processing() {
+        let output = r#"
+TestSuite : Double Precision (64 bit) Tests
+[Process Test]
+Info:  64bit Audio Processing not supported.
+[Succeeded]
+"#;
+
+        assert_eq!(
+            vst3_64_bit_audio_validation_error(output, ""),
+            Some("the plugin reports that 64-bit audio processing is unsupported")
+        );
+    }
+
+    #[test]
+    fn requires_vst3_validator_double_precision_suite() {
+        assert_eq!(
+            vst3_64_bit_audio_validation_error("Result: 47 tests passed", ""),
+            Some("Steinberg validator did not run its double-precision test suite")
+        );
+    }
+
+    #[test]
+    fn accepts_executed_vst3_64_bit_audio_processing() {
+        let output = r#"
+TestSuite : Double Precision (64 bit) Tests
+[Process Test]
+[Succeeded]
+"#;
+
+        assert_eq!(vst3_64_bit_audio_validation_error(output, ""), None);
     }
 
     #[test]

@@ -20,6 +20,8 @@ use crate::validation::validate_wrac_rules;
 use super::{ensure_vst3_sdk_input, env_path};
 
 const CLAP_VALIDATOR_VERSION: &str = "0.3.2";
+const VST3_64_BIT_TEST_SUITE: &str = "TestSuite : Double Precision (64 bit) Tests";
+const VST3_64_BIT_UNSUPPORTED: &str = "64bit Audio Processing not supported.";
 // Keep the local AAX contract explicit instead of delegating to the validator's
 // broad `runtests` collection. `runtests` includes hardware/DSP and page-table
 // XML coverage that this source-built native template does not generate, so CI
@@ -122,6 +124,7 @@ pub fn validate_plugin_target(
             // byte-order check without running Steinberg's moduleinfotool, which can keep WRAC
             // Windows GUI/runtime dependencies alive after validation and hang CI.
             validate_vst3_component_ids(ctx, &vst3, &stdout, &stderr)?;
+            validate_vst3_64_bit_audio(ctx, &vst3, &stdout, &stderr)?;
         }
         ValidateTarget::Au => {
             ensure_no_system_au_conflict(ctx)?;
@@ -156,6 +159,46 @@ pub fn validate_plugin_target(
         }
     }
     Ok(())
+}
+
+fn validate_vst3_64_bit_audio(
+    ctx: &Context,
+    vst3: &Path,
+    stdout: &str,
+    stderr: &str,
+) -> Result<()> {
+    // Steinberg's validator treats unsupported double-precision processing as a skipped success.
+    // WRAC promises to preserve the host's sample precision, so process exit status alone cannot
+    // enforce this contract. Requiring both the suite marker and the absence of the skip message
+    // also prevents a changed validator invocation from silently dropping 64-bit coverage.
+    if let Some(reason) = vst3_64_bit_audio_validation_error(stdout, stderr) {
+        return Err(format!(
+            "VST3 64-bit audio processing validation failed for {}: {reason}",
+            vst3.display()
+        )
+        .into());
+    }
+
+    print_detail(
+        ctx.output_language,
+        "VST3 64-bit audio processing is supported",
+        "VST3 64-bit音声処理に対応",
+    );
+    Ok(())
+}
+
+pub(super) fn vst3_64_bit_audio_validation_error(
+    stdout: &str,
+    stderr: &str,
+) -> Option<&'static str> {
+    let contains = |needle| stdout.contains(needle) || stderr.contains(needle);
+    if !contains(VST3_64_BIT_TEST_SUITE) {
+        return Some("Steinberg validator did not run its double-precision test suite");
+    }
+    if contains(VST3_64_BIT_UNSUPPORTED) {
+        return Some("the plugin reports that 64-bit audio processing is unsupported");
+    }
+    None
 }
 
 fn validate_vst3_component_ids(
