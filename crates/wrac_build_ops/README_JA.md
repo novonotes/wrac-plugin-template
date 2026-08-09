@@ -15,6 +15,6 @@ helper と、package ごとの task ID helper もこの crate から提供しま
 
 ## 検証操作
 
-この crate は WRAC production-readiness check、clap-validator / VST3 validator / auval /
-AAX Validator などの外部フォーマット検証を typed operation として公開します。これらの操作を
-どの順序で workflow に含めるかは repository-local な xtask が決定します。
+このcrateはclap-validator / VST3 validator / auval / AAX Validatorなどの外部
+フォーマット検証adapterをtyped operationとして公開します。validator設定とworkflow上の
+実行順はrepository-localなxtaskが決定します。

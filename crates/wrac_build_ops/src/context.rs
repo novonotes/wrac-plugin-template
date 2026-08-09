@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use cargo_metadata::MetadataCommand;
 
@@ -40,8 +40,7 @@ impl WracContext {
             .unwrap_or_else(|| config.wrapper_dir.clone());
         // Plugin identity is sourced from wrac-plugin.toml so product metadata
         // stays out of Cargo package metadata.
-        let metadata =
-            PluginMetadata::read_discovered(&package.manifest_path, &package.plugin_root)?;
+        let metadata = PluginMetadata::read_discovered(&package.manifest_path)?;
 
         Ok(Self {
             root: config.root.clone(),
@@ -145,31 +144,20 @@ impl WracContext {
 pub(crate) type Context = WracContext;
 
 pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
+    available_packages_at_root(&config.root)
+}
+
+pub(crate) fn available_packages_at_root(root: &std::path::Path) -> Result<Vec<WracPluginPackage>> {
     let metadata = MetadataCommand::new()
-        .manifest_path(config.root.join("Cargo.toml"))
+        .manifest_path(root.join("Cargo.toml"))
         .exec()?;
 
     let mut packages = Vec::new();
     for package in metadata.workspace_packages() {
         let manifest_path = package.manifest_path.clone().into_std_path_buf();
-        let package_dir = manifest_path
-            .parent()
-            .ok_or_else(|| {
-                format!(
-                    "failed to derive package dir from manifest path: {}",
-                    manifest_path.display()
-                )
-            })?
-            .to_path_buf();
-        let plugin_root = package_dir
-            .parent()
-            .ok_or_else(|| {
-                format!(
-                    "failed to derive plugin root from manifest path: {}",
-                    manifest_path.display()
-                )
-            })?
-            .to_path_buf();
+        let Some((package_dir, plugin_root)) = plugin_layout_from_manifest(&manifest_path)? else {
+            continue;
+        };
         let artifact_namespace = plugin_root
             .file_name()
             .ok_or_else(|| {
@@ -180,14 +168,6 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginP
             })?
             .to_string_lossy()
             .into_owned();
-        let has_manifest = wrac_manifest::discover_manifest(&manifest_path, &plugin_root)
-            .map(|source| match source {
-                wrac_manifest::ManifestSource::Dedicated(path) => path.exists(),
-            })
-            .unwrap_or(false);
-        if !has_manifest {
-            continue;
-        }
         validate_plugin_layout(&package_dir, &plugin_root)?;
         packages.push(WracPluginPackage {
             package_name: package.name.clone(),
@@ -198,6 +178,35 @@ pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginP
     }
     packages.sort_by(|a, b| a.package_name.cmp(&b.package_name));
     Ok(packages)
+}
+
+fn plugin_layout_from_manifest(
+    manifest_path: &std::path::Path,
+) -> Result<Option<(PathBuf, PathBuf)>> {
+    let package_dir = manifest_path
+        .parent()
+        .ok_or_else(|| {
+            format!(
+                "failed to derive package dir from manifest path: {}",
+                manifest_path.display()
+            )
+        })?
+        .to_path_buf();
+    // The directory name is the workspace-level plugin marker. Manifest presence
+    // cannot be the marker because missing and misplaced manifests must fail loudly.
+    if package_dir.file_name().and_then(|name| name.to_str()) != Some("src-plugin") {
+        return Ok(None);
+    }
+    let plugin_root = package_dir
+        .parent()
+        .ok_or_else(|| {
+            format!(
+                "failed to derive plugin root from manifest path: {}",
+                manifest_path.display()
+            )
+        })?
+        .to_path_buf();
+    Ok(Some((package_dir, plugin_root)))
 }
 
 fn find_package(config: &XtaskConfig, package_name: &str) -> Result<WracPluginPackage> {
@@ -223,10 +232,30 @@ fn validate_plugin_layout(
     package_dir: &std::path::Path,
     plugin_root: &std::path::Path,
 ) -> Result<()> {
-    if package_dir.file_name().and_then(|name| name.to_str()) != Some("src-plugin") {
+    let expected_manifest = package_dir.join("wrac-plugin.toml");
+    let mut detected_manifests = Vec::new();
+    collect_plugin_manifests(plugin_root, &mut detected_manifests)?;
+    detected_manifests.sort();
+    let misplaced_manifests = detected_manifests
+        .iter()
+        .filter(|path| *path != &expected_manifest)
+        .collect::<Vec<_>>();
+    if !misplaced_manifests.is_empty() {
+        let detected = misplaced_manifests
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(format!(
-            "WRAC plugin package must live at <plugin-root>/src-plugin, but found {}",
-            package_dir.display()
+            "WRAC plugin manifest must exist only at {}; found manifest at {detected}",
+            expected_manifest.display()
+        )
+        .into());
+    }
+    if !expected_manifest.is_file() {
+        return Err(format!(
+            "WRAC plugin manifest must exist at {}, but no manifest was found there",
+            expected_manifest.display()
         )
         .into());
     }
@@ -252,13 +281,40 @@ fn validate_plugin_layout(
     Ok(())
 }
 
+fn collect_plugin_manifests(
+    directory: &std::path::Path,
+    manifests: &mut Vec<PathBuf>,
+) -> Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            // Generated dependency and build trees are not plugin source layout and can
+            // contain unrelated fixtures; avoiding them also keeps discovery bounded.
+            let generated = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| matches!(name, ".git" | "target" | "node_modules" | ".build"));
+            if !generated {
+                collect_plugin_manifests(&path, manifests)?;
+            }
+        } else if file_type.is_file()
+            && path.file_name().and_then(|name| name.to_str()) == Some("wrac-plugin.toml")
+        {
+            manifests.push(path);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::validate_plugin_layout;
+    use super::{plugin_layout_from_manifest, validate_plugin_layout};
 
     #[test]
     fn accepts_conventional_plugin_layout() {
@@ -266,22 +322,74 @@ mod tests {
         let plugin_root = root.join("plugins").join("wrac-gain");
         let package_dir = plugin_root.join("src-plugin");
         fs::create_dir_all(&package_dir).unwrap();
+        fs::write(package_dir.join("wrac-plugin.toml"), "").unwrap();
 
         validate_plugin_layout(&package_dir, &plugin_root).unwrap();
     }
 
     #[test]
-    fn rejects_plugin_crate_outside_src_plugin() {
-        let root = temp_dir("plugin-crate-outside-src-plugin");
+    fn rejects_missing_plugin_manifest() {
+        let root = temp_dir("missing-plugin-manifest");
         let plugin_root = root.join("plugins").join("wrac-gain");
-        let package_dir = plugin_root.clone();
+        let package_dir = plugin_root.join("src-plugin");
         fs::create_dir_all(&package_dir).unwrap();
 
         let error = validate_plugin_layout(&package_dir, &plugin_root)
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("<plugin-root>/src-plugin"));
+        assert!(error.contains(&package_dir.join("wrac-plugin.toml").display().to_string()));
+        assert!(error.contains("no manifest was found"));
+    }
+
+    #[test]
+    fn rejects_plugin_manifest_at_plugin_root() {
+        let root = temp_dir("manifest-at-plugin-root");
+        let plugin_root = root.join("plugins").join("wrac-gain");
+        let package_dir = plugin_root.join("src-plugin");
+        fs::create_dir_all(&package_dir).unwrap();
+        fs::write(package_dir.join("wrac-plugin.toml"), "").unwrap();
+        let detected_manifest = plugin_root.join("wrac-plugin.toml");
+        fs::write(&detected_manifest, "").unwrap();
+
+        let error = validate_plugin_layout(&package_dir, &plugin_root)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(&package_dir.join("wrac-plugin.toml").display().to_string()));
+        assert!(error.contains(&detected_manifest.display().to_string()));
+    }
+
+    #[test]
+    fn rejects_plugin_manifest_in_other_directory() {
+        let root = temp_dir("manifest-in-other-directory");
+        let plugin_root = root.join("plugins").join("wrac-gain");
+        let package_dir = plugin_root.join("src-plugin");
+        let other_dir = plugin_root.join("other-directory");
+        fs::create_dir_all(&package_dir).unwrap();
+        fs::create_dir_all(&other_dir).unwrap();
+        let detected_manifest = other_dir.join("wrac-plugin.toml");
+        fs::write(&detected_manifest, "").unwrap();
+
+        let error = validate_plugin_layout(&package_dir, &plugin_root)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(&package_dir.join("wrac-plugin.toml").display().to_string()));
+        assert!(error.contains(&detected_manifest.display().to_string()));
+    }
+
+    #[test]
+    fn ignores_ordinary_cargo_package() {
+        let root = temp_dir("ordinary-cargo-package");
+        let manifest_path = root.join("crates").join("ordinary").join("Cargo.toml");
+        fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
+
+        assert!(
+            plugin_layout_from_manifest(&manifest_path)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -290,6 +398,7 @@ mod tests {
         let plugin_root = root.join("plugins").join("wrac-gain");
         let package_dir = plugin_root.join("src-plugin");
         fs::create_dir_all(&package_dir).unwrap();
+        fs::write(package_dir.join("wrac-plugin.toml"), "").unwrap();
         fs::write(plugin_root.join("package.json"), "{}").unwrap();
 
         let error = validate_plugin_layout(&package_dir, &plugin_root)

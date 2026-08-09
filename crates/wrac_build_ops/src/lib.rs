@@ -16,13 +16,12 @@ mod quality;
 pub mod target_resolution;
 pub mod targets;
 mod util;
-mod validation;
 
 pub use commands::{
-    RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
+    AaxValidatorConfig, ClapValidatorConfig, ExternalValidatorConfig, RustPluginBuild,
+    SkippedValidatorTest, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
     build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
     launch, package_clap, print_build_outputs, uninstall_plugin_target, validate_plugin_target,
-    validate_wrac_rules_for_targets,
 };
 pub use context::WracContext;
 pub use profile::BuildProfile;

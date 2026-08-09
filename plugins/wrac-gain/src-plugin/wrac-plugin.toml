@@ -23,9 +23,6 @@ description = "Simple gain plugin"
 copyright = "Copyright 2026 Your Company"
 supported_formats = ["clap", "vst3", "au", "aax"]
 
-[validation.disabled_rules.fender-studio-pro-generic-editor-single-knob]
-reason = "WRAC Gain is a minimal one-knob starter example. Products that support Fender Studio Pro should add a second real visible control instead of shipping this exception."
-
 [[plugins]]
 plugin_id = "com.your-company.wrac-gain"
 plugin_name = "WRAC Gain"

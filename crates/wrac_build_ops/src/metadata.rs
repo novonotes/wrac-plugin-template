@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::Result;
 use crate::targets::PluginFormat;
 
-pub(crate) use wrac_manifest::{AaxStemConfig as AaxStemConfigMetadata, ValidationMetadata};
+pub(crate) use wrac_manifest::AaxStemConfig as AaxStemConfigMetadata;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -23,7 +23,6 @@ pub(crate) struct PluginMetadata {
     pub(crate) copyright: String,
     pub(crate) supported_formats: Vec<PluginFormat>,
     pub(crate) plugins: Vec<PluginProductMetadata>,
-    pub(crate) validation: ValidationMetadata,
 }
 
 #[derive(Debug, Clone)]
@@ -43,8 +42,8 @@ pub(crate) struct PluginProductMetadata {
 }
 
 impl PluginMetadata {
-    pub(crate) fn read_discovered(manifest_path: &Path, plugin_root: &Path) -> Result<Self> {
-        let source = wrac_manifest::discover_manifest(manifest_path, plugin_root)?;
+    pub(crate) fn read_discovered(manifest_path: &Path) -> Result<Self> {
+        let source = wrac_manifest::discover_manifest(manifest_path)?;
         let mut manifest = wrac_manifest::read_manifest(&source)?;
         let cargo_package = wrac_manifest::read_cargo_package_info(manifest_path)?;
         if manifest.package.package_name.is_none() {
@@ -73,12 +72,6 @@ impl PluginMetadata {
 
     pub(crate) fn au_bundle_name(&self) -> String {
         format!("{}.component", self.bundle_name)
-    }
-
-    pub(crate) fn bundle_identity_plugin(&self) -> &PluginProductMetadata {
-        self.plugins
-            .first()
-            .expect("validated metadata must contain at least one plugin")
     }
 
     fn from_manifest(manifest: wrac_manifest::PluginManifest) -> Result<Self> {
@@ -126,7 +119,6 @@ impl PluginMetadata {
                     aax_stem_configs: plugin.aax_stem_configs,
                 })
                 .collect(),
-            validation: manifest.validation,
         })
     }
 }
@@ -142,10 +134,7 @@ fn convert_plugin_format(format: wrac_manifest::PluginFormat) -> PluginFormat {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
-    use wrac_manifest::ClapValidatorMetadata;
 
     fn metadata() -> PluginMetadata {
         PluginMetadata {
@@ -176,10 +165,6 @@ mod tests {
                 aax_product_id: None,
                 aax_stem_configs: Vec::new(),
             }],
-            validation: ValidationMetadata {
-                disabled_rules: HashMap::new(),
-                clap_validator: ClapValidatorMetadata::default(),
-            },
         }
     }
 

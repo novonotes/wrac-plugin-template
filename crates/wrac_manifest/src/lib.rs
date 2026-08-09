@@ -2,11 +2,11 @@
 //!
 //! `wrac-plugin.toml` is the product-owned manifest for host-visible metadata:
 //! bundle identifiers, plugin IDs, wrapper descriptors, supported formats, and
-//! validation exceptions. This crate reads that file into typed Rust structures
+//! artifact metadata. This crate reads that file into typed Rust structures
 //! for build scripts and xtask code; it does not perform plugin builds itself.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     error::Error,
     fs,
     path::{Path, PathBuf},
@@ -38,7 +38,6 @@ pub struct PluginManifest {
     pub copyright: String,
     pub supported_formats: Vec<PluginFormat>,
     pub plugins: Vec<PluginProduct>,
-    pub validation: ValidationMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
@@ -59,25 +58,6 @@ impl PluginFormat {
             Self::Aax => "AAX",
         }
     }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ValidationMetadata {
-    #[serde(default)]
-    pub disabled_rules: HashMap<String, DisabledValidationRule>,
-    #[serde(default)]
-    pub clap_validator: ClapValidatorMetadata,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct DisabledValidationRule {
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct ClapValidatorMetadata {
-    pub skip_test_filter: Option<String>,
-    pub skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,10 +89,7 @@ pub enum ManifestSource {
     Dedicated(PathBuf),
 }
 
-pub fn discover_manifest(
-    package_manifest_path: &Path,
-    plugin_root: &Path,
-) -> Result<ManifestSource> {
+pub fn discover_manifest(package_manifest_path: &Path) -> Result<ManifestSource> {
     let package_dir = package_manifest_path.parent().ok_or_else(|| {
         format!(
             "failed to derive package dir from {}",
@@ -123,13 +100,9 @@ pub fn discover_manifest(
     if package_manifest.exists() {
         return Ok(ManifestSource::Dedicated(package_manifest));
     }
-    let plugin_root_manifest = plugin_root.join("wrac-plugin.toml");
-    if plugin_root_manifest.exists() {
-        return Ok(ManifestSource::Dedicated(plugin_root_manifest));
-    }
     Err(format!(
-        "missing wrac-plugin.toml for package manifest {}",
-        package_manifest_path.display()
+        "WRAC plugin manifest must exist at {}, but no manifest was found there",
+        package_manifest.display()
     )
     .into())
 }
@@ -143,6 +116,13 @@ pub fn read_manifest(source: &ManifestSource) -> Result<PluginManifest> {
 pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
     let manifest = fs::read_to_string(path)?;
     let dedicated: DedicatedManifest = toml::from_str(&manifest)?;
+    if dedicated.schema_version != 1 {
+        return Err(format!(
+            "wrac-plugin.toml.schema_version must be 1, got {}",
+            dedicated.schema_version
+        )
+        .into());
+    }
     let metadata = PluginManifest {
         package: dedicated.package.unwrap_or_default(),
         company_name: dedicated.bundle.company_name,
@@ -157,7 +137,6 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
         copyright: dedicated.bundle.copyright,
         supported_formats: dedicated.bundle.supported_formats,
         plugins: dedicated.plugins,
-        validation: dedicated.validation.unwrap_or_default(),
     };
     metadata.validate("wrac-plugin.toml")?;
     Ok(metadata)
@@ -304,27 +283,6 @@ impl PluginManifest {
                 .into());
             }
         }
-        for (rule_id, disabled) in &self.validation.disabled_rules {
-            validate_required(
-                &format!("{label}.validation.disabled_rules.{rule_id}.reason"),
-                disabled.reason.trim(),
-            )?;
-        }
-        if let Some(filter) = self.validation.clap_validator.skip_test_filter.as_deref() {
-            validate_required(
-                &format!("{label}.validation.clap_validator.skip_test_filter"),
-                filter.trim(),
-            )?;
-            validate_required(
-                &format!("{label}.validation.clap_validator.skip_reason"),
-                self.validation
-                    .clap_validator
-                    .skip_reason
-                    .as_deref()
-                    .unwrap_or_default()
-                    .trim(),
-            )?;
-        }
         Ok(())
     }
 }
@@ -459,14 +417,12 @@ fn validate_four_ascii(key: &str, value: &str) -> Result<()> {
 
 #[derive(Debug, Deserialize)]
 struct DedicatedManifest {
-    #[allow(dead_code)]
-    schema_version: Option<u32>,
+    schema_version: u32,
     #[serde(default)]
     package: Option<ManifestPackageInfo>,
     bundle: DedicatedBundle,
     #[serde(default)]
     plugins: Vec<PluginProduct>,
-    validation: Option<ValidationMetadata>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -546,6 +502,8 @@ mod tests {
 
         let _: DedicatedManifest = toml::from_str(
             r#"
+schema_version = 1
+
 [package]
 version_source = "cargo"
 
@@ -561,7 +519,7 @@ description = "Test plugin"
 copyright = "Copyright Example"
 supported_formats = ["clap"]
 
-[novonotes.ci]
+[acme.ci]
 release_track = "prototype"
 
 [[plugins]]

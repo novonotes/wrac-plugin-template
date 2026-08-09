@@ -9,7 +9,7 @@ manifest fields.
 ## Scope
 
 `wrac-plugin.toml` describes host-visible plugin identity, wrapper metadata,
-default build targets, and WRAC validation exceptions.
+and default build targets.
 
 WRAC ignores unknown fields and tables. Users may add their own namespaced
 extension tables.
@@ -25,7 +25,7 @@ validation_profile = "prototype"
 
 | Field | Type | Required | Accepted values | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | integer | Recommended | `1` | WRAC manifest schema version. Current manifests should write `1`. The parser currently accepts an omitted value for older manifests. |
+| `schema_version` | integer | Yes | `1` | WRAC manifest schema version. Unknown or omitted versions are rejected. |
 
 ### `[package]`
 
@@ -37,7 +37,7 @@ package `Cargo.toml`.
 | --- | --- | --- | --- | --- |
 | `name` | string | No | Non-empty package name when supplied | Overrides the Cargo package name used by WRAC artifact metadata. Usually omit this and use `Cargo.toml`. |
 | `version` | string | No | Non-empty version when supplied | Overrides the Cargo package version used in generated plugin descriptors and bundles. Usually omit this and use `Cargo.toml`. |
-| `repository` | string | No | Any non-empty repository URL when supplied | Overrides the Cargo package repository metadata used by readiness checks. |
+| `repository` | string | No | Any non-empty repository URL when supplied | Overrides the Cargo package repository metadata. |
 | `version_source` | string | No | `cargo` by convention | Compatibility/documentation field. WRAC currently fills missing `version` from Cargo metadata and does not support another version source. |
 
 ### `[bundle]`
@@ -56,7 +56,7 @@ from the same binary bundle.
 | `manual_url` | string | Yes | Non-empty URL string | Generated into CLAP descriptor `manual_url`. Hosts or scanners may expose it to users. |
 | `support_url` | string | Yes | Non-empty URL string | Generated into CLAP descriptor `support_url`. Hosts or scanners may expose it to users. |
 | `description` | string | Yes | Non-empty | Generated into CLAP descriptor `description`. This is a short user-facing product description that may appear in host or scanner UI. |
-| `copyright` | string | Yes | Non-empty | Generated into macOS bundle copyright metadata and used by readiness checks. |
+| `copyright` | string | Yes | Non-empty | Generated into macOS bundle copyright metadata. |
 | `supported_formats` | array of `PluginFormat` | Yes | `clap`, `vst3`, `au`, `aax`; non-empty; no duplicates | Product policy for default `cargo xtask build`, `install`, and `validate` plugin targets. Explicit `--target` plugin formats must also be listed here. |
 
 ### `[[plugins]]`
@@ -87,29 +87,6 @@ products.
 | `input` | `AaxStemFormat` | Yes | `mono`, `stereo` | AAX input stem format. |
 | `output` | `AaxStemFormat` | Yes | `mono`, `stereo` | AAX output stem format. |
 | `plugin_id` | string | Yes | Exactly 4 ASCII bytes; unique within the parent plugin's stem configs | AAX stem-specific plugin ID. Keep it stable after release. |
-
-### `[validation]`
-
-`[validation]` is optional. It defines WRAC validation exceptions, not product
-category or release policy.
-
-| Field | Type | Required | Accepted values | Meaning |
-| --- | --- | --- | --- | --- |
-| `disabled_rules` | table | No | Keys are WRAC readiness rule IDs | Disables specific WRAC production-readiness rules. Each disabled rule must include a reason. |
-| `clap_validator` | table | No | See below | Configures skips for external `clap-validator` tests. |
-
-#### `[validation.disabled_rules.<rule_id>]`
-
-| Field | Type | Required | Accepted values | Meaning |
-| --- | --- | --- | --- | --- |
-| `reason` | string | Yes | Non-empty | Explanation for disabling this WRAC readiness rule. |
-
-#### `[validation.clap_validator]`
-
-| Field | Type | Required | Accepted values | Meaning |
-| --- | --- | --- | --- | --- |
-| `skip_test_filter` | string | No | Non-empty regular-expression/filter string | Passed to the external CLAP validator skip mechanism. If present, `skip_reason` is required. |
-| `skip_reason` | string | Conditional | Non-empty | Required when `skip_test_filter` is present. Explains why the external validator tests are skipped. |
 
 ## Predefined Values
 

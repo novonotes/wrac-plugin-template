@@ -21,7 +21,10 @@ pub use self::build::{
     RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
     build_wrapper_target, configure_wrapper, package_clap, standalone_products,
 };
-pub use self::validation::{validate_plugin_target, validate_wrac_rules_for_targets};
+pub use self::validation::{
+    AaxValidatorConfig, ClapValidatorConfig, ExternalValidatorConfig, SkippedValidatorTest,
+    validate_plugin_target,
+};
 
 pub fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> Result<()> {
     let plugin = standalone_plugin_to_launch(ctx, plugin_id)?;
