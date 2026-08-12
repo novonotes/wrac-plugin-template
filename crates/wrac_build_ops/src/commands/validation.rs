@@ -732,11 +732,12 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
     }
 
     fs::create_dir_all(&validator_dir)?;
-    let archive_name = clap_validator_archive_name(ctx.platform, version);
-    let archive = validator_dir.join(&archive_name);
+    let archives = clap_validator_archives(ctx.platform, version)?;
+    let archive = validator_dir.join(archives.download);
     if !archive.exists() {
         let url = format!(
-            "https://github.com/free-audio/clap-validator/releases/download/{version}/{archive_name}"
+            "https://github.com/free-audio/clap-validator/releases/download/{version}/{}",
+            archives.download
         );
         run_with_language(
             Command::new("curl")
@@ -748,9 +749,20 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
         )?;
     }
 
-    if archive_name.ends_with(".zip") {
-        // Windows runners provide bsdtar as `tar`, and it can extract zip files.
-        // Using it here keeps argument passing identical to the tar.gz path.
+    if ctx.platform == Platform::Linux {
+        // GNU tar does not extract zip archives, while unzip is available on the
+        // supported Ubuntu development and CI environments.
+        run_with_language(
+            Command::new("unzip")
+                .arg("-o")
+                .arg(&archive)
+                .arg("-d")
+                .arg(&validator_dir)
+                .current_dir(&ctx.root),
+            ctx.output_language,
+        )?;
+    } else {
+        // macOS and Windows provide bsdtar as `tar`, including zip support.
         run_with_language(
             Command::new("tar")
                 .arg("-xf")
@@ -760,11 +772,14 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
                 .current_dir(&ctx.root),
             ctx.output_language,
         )?;
-    } else {
+    }
+    if let Some(nested) = archives.nested {
+        let nested = validator_dir.join(nested);
+        ensure_exists(&nested, "nested CLAP validator archive")?;
         run_with_language(
             Command::new("tar")
                 .args(["-xzf"])
-                .arg(&archive)
+                .arg(nested)
                 .arg("-C")
                 .arg(&validator_dir)
                 .current_dir(&ctx.root),
@@ -785,12 +800,32 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
     Ok(validator)
 }
 
-fn clap_validator_archive_name(platform: Platform, version: &str) -> String {
-    match platform {
-        Platform::Macos => format!("clap-validator-{version}-macos-universal.tar.gz"),
-        Platform::Windows => format!("clap-validator-{version}-windows.zip"),
-        Platform::Linux => format!("clap-validator-{version}-ubuntu-18.04.tar.gz"),
+#[derive(Clone, Copy)]
+struct ClapValidatorArchives {
+    download: &'static str,
+    nested: Option<&'static str>,
+}
+
+fn clap_validator_archives(platform: Platform, version: &str) -> Result<ClapValidatorArchives> {
+    // clap-validator release asset names and archive nesting are not stable across tags.
+    // Pinning the exact published layout avoids silently downloading a different build.
+    if version != "0.4.1" {
+        return Err(format!("unsupported clap-validator release: {version}").into());
     }
+    Ok(match platform {
+        Platform::Macos => ClapValidatorArchives {
+            download: "clap-validator-0.4.1-127-g152b982-macos-universal.zip",
+            nested: Some("clap-validator-0.3.2-127-g152b982-macos-universal.tar.gz"),
+        },
+        Platform::Windows => ClapValidatorArchives {
+            download: "clap-validator-0.4.1-127-g152b982-windows.zip",
+            nested: None,
+        },
+        Platform::Linux => ClapValidatorArchives {
+            download: "clap-validator-0.4.1-127-g152b982-ubuntu-22.04.zip",
+            nested: Some("clap-validator-0.3.2-127-g152b982-ubuntu-22.04.tar.gz"),
+        },
+    })
 }
 
 fn clap_validator_executable(platform: Platform, validator_dir: &Path) -> PathBuf {

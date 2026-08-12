@@ -561,7 +561,7 @@ fn external_validator_config() -> ExternalValidatorConfig {
     // operations must not silently impose a release policy on downstream products.
     ExternalValidatorConfig {
         clap: ClapValidatorConfig {
-            version: "0.3.2".to_string(),
+            version: "0.4.1".to_string(),
             skip_test_filter: None,
             skip_reason: None,
         },
