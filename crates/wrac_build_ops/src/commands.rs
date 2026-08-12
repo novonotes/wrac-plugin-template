@@ -22,8 +22,8 @@ pub use self::build::{
     build_wrapper_target, configure_wrapper, package_clap, standalone_products,
 };
 pub use self::validation::{
-    AaxValidatorConfig, ClapValidatorConfig, ExternalValidatorConfig, SkippedValidatorTest,
-    validate_plugin_target,
+    AaxValidatorConfig, ClapValidatorConfig, ClapValidatorTestExclusion, ExternalValidatorConfig,
+    SkippedValidatorTest, validate_plugin_target,
 };
 
 pub fn launch(ctx: &Context, profile: BuildProfile, plugin_id: Option<&str>) -> Result<()> {

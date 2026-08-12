@@ -562,8 +562,7 @@ fn external_validator_config() -> ExternalValidatorConfig {
     ExternalValidatorConfig {
         clap: ClapValidatorConfig {
             version: "0.4.1".to_string(),
-            skip_test_filter: None,
-            skip_reason: None,
+            test_exclusions: Vec::new(),
         },
         aax: AaxValidatorConfig {
             required_tests: [

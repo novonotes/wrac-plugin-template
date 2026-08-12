@@ -24,12 +24,18 @@ pub struct ExternalValidatorConfig {
     pub aax: AaxValidatorConfig,
 }
 
-/// clap-validator version and an optional caller-approved test exclusion.
+/// clap-validator version and caller-approved test exclusions.
 #[derive(Debug, Clone)]
 pub struct ClapValidatorConfig {
     pub version: String,
-    pub skip_test_filter: Option<String>,
-    pub skip_reason: Option<String>,
+    pub test_exclusions: Vec<ClapValidatorTestExclusion>,
+}
+
+/// A clap-validator test filter omitted by the caller, together with its reviewable reason.
+#[derive(Debug, Clone)]
+pub struct ClapValidatorTestExclusion {
+    pub filter: String,
+    pub reason: String,
 }
 
 /// Explicit AAX Validator test selection and process timeout.
@@ -58,28 +64,20 @@ pub fn validate_plugin_target(
             let clap = ctx.clap_bundle(profile);
             ensure_exists(&clap, "CLAP artifact")?;
             let validator = ensure_clap_validator(ctx, &config.clap.version)?;
-            let mut command = Command::new(validator);
-            command
-                .env("WRAC_PLUGIN_VALIDATOR", "1")
-                .arg("validate")
-                .arg(&clap)
-                .arg("--only-failed");
-            if let Some(filter) = config.clap.skip_test_filter.as_deref() {
-                let reason = config
-                    .clap
-                    .skip_reason
-                    .as_deref()
-                    .unwrap_or("no reason provided");
+            for exclusion in &config.clap.test_exclusions {
                 print_detail(
                     ctx.output_language,
-                    &format!("CLAP validator skip filter: {filter} ({reason})"),
-                    &format!("CLAP validator skip filter: {filter} ({reason})"),
+                    &format!(
+                        "CLAP validator test exclusion: {} ({})",
+                        exclusion.filter, exclusion.reason
+                    ),
+                    &format!(
+                        "CLAP validator test exclusion: {} ({})",
+                        exclusion.filter, exclusion.reason
+                    ),
                 );
-                command
-                    .arg("--test-filter")
-                    .arg(filter)
-                    .arg("--invert-filter");
             }
+            let mut command = clap_validator_command(&validator, &clap, &config.clap);
             run_with_language(command.current_dir(&ctx.root), ctx.output_language)?;
         }
         ValidateTarget::Vst3 => {
@@ -136,6 +134,20 @@ pub fn validate_plugin_target(
         }
     }
     Ok(())
+}
+
+fn clap_validator_command(validator: &Path, clap: &Path, config: &ClapValidatorConfig) -> Command {
+    let mut command = Command::new(validator);
+    command
+        .env("WRAC_PLUGIN_VALIDATOR", "1")
+        .arg("validate")
+        .arg(clap)
+        .arg("--only-failed");
+    for exclusion in &config.test_exclusions {
+        // clap-validator 0.4.1 accepts repeatable regular expressions through --exclude.
+        command.arg("--exclude").arg(&exclusion.filter);
+    }
+    command
 }
 
 fn validate_vst3_component_ids(
@@ -919,5 +931,42 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
     } else {
         ensure_exists(&validator_without_config, "VST3 validator")?;
         Ok(validator_without_config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clap_validator_command_uses_supported_exclusion_arguments() {
+        let config = ClapValidatorConfig {
+            version: "0.4.1".to_string(),
+            test_exclusions: vec![ClapValidatorTestExclusion {
+                filter: "^param-conversions$".to_string(),
+                reason: "upstream validator defect".to_string(),
+            }],
+        };
+
+        let command = clap_validator_command(
+            Path::new("clap-validator"),
+            Path::new("Example.clap"),
+            &config,
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            args,
+            [
+                "validate",
+                "Example.clap",
+                "--only-failed",
+                "--exclude",
+                "^param-conversions$",
+            ]
+        );
     }
 }
