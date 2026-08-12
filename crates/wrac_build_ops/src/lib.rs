@@ -18,10 +18,11 @@ pub mod targets;
 mod util;
 
 pub use commands::{
-    AaxValidatorConfig, ClapValidatorConfig, ExternalValidatorConfig, RustPluginBuild,
-    SkippedValidatorTest, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
-    build_wrapper_target, check_install_dir, clean, configure_wrapper, install_plugin_target,
-    launch, package_clap, print_build_outputs, uninstall_plugin_target, validate_plugin_target,
+    AaxValidatorConfig, ClapValidatorConfig, ClapValidatorTestExclusion, ExternalValidatorConfig,
+    RustPluginBuild, SkippedValidatorTest, WrapperBuild, WrapperTarget, build_gui,
+    build_rust_plugin, build_wrapper_target, check_install_dir, clean, configure_wrapper,
+    install_plugin_target, launch, package_clap, print_build_outputs, uninstall_plugin_target,
+    validate_plugin_target,
 };
 pub use context::WracContext;
 pub use profile::BuildProfile;
