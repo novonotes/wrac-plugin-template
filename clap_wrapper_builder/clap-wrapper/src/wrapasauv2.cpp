@@ -1485,8 +1485,11 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, true, &inf);
-      inSets.insert(inf.channel_count);
-      hasInMain |= (inf.flags & CLAP_AUDIO_PORT_IS_MAIN);
+      if (inf.flags & CLAP_AUDIO_PORT_IS_MAIN)
+      {
+        inSets.insert(inf.channel_count);
+        hasInMain = true;
+      }
     }
     if (!hasInMain) inSets.insert(0);
 
@@ -1495,8 +1498,11 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, false, &inf);
-      outSets.insert(inf.channel_count);
-      hasOutMain |= (inf.flags & CLAP_AUDIO_PORT_IS_MAIN);
+      if (inf.flags & CLAP_AUDIO_PORT_IS_MAIN)
+      {
+        outSets.insert(inf.channel_count);
+        hasOutMain = true;
+      }
     }
     if (!hasOutMain) outSets.insert(0);
 
