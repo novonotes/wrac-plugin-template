@@ -1480,6 +1480,8 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
 
     std::set<int> inSets, outSets;
 
+    // AUChannelInfo describes the main input/output pair. Including auxiliary bus channel counts
+    // advertises main-bus configurations that ValidFormat correctly rejects for element zero.
     bool hasInMain{false};
     for (int i = 0; i < numAudioInputs; ++i)
     {
