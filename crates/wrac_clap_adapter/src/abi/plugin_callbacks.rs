@@ -29,7 +29,8 @@ use super::{
 };
 use crate::entry::release_entry_instance;
 use crate::interface::{
-    ActivateContext, PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
+    ActivateContext, AudioBufferError, AudioPortChannels, AudioProcessBuffer,
+    PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
 };
 
 pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
@@ -278,6 +279,12 @@ pub(super) unsafe extern "C" fn plugin_activate(
             }
         };
 
+        instance
+            .oversized_process_reported
+            .store(false, Ordering::Release);
+        instance
+            .active_max_frames_count
+            .store(max_frames_count, Ordering::Release);
         instance.put_processor_blocking(processor);
         true
     })
@@ -294,6 +301,7 @@ pub(super) unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         // concurrently, wait here to avoid missing the teardown.
         let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
+            instance.active_max_frames_count.store(0, Ordering::Release);
             let mut core = instance.core.lock();
             let Some(core) = core.as_mut() else {
                 log::warn!("plugin.deactivate: plugin core is not initialized");
@@ -367,6 +375,29 @@ pub(super) unsafe extern "C" fn plugin_process(
         }
         let _process_depth_guard = RtDepthGuard::enter(&instance.rt_process_depth);
         let process = unsafe { &*process };
+        let max_frames_count = instance.active_max_frames_count.load(Ordering::Acquire);
+        if max_frames_count > 0 && process.frames_count > max_frames_count {
+            let first_report = !instance
+                .oversized_process_reported
+                .swap(true, Ordering::AcqRel);
+            if first_report {
+                wrac_log::rtwarn!(
+                    "plugin.process: frames count exceeds activated maximum frames_count={} max_frames_count={}",
+                    process.frames_count,
+                    max_frames_count,
+                );
+            }
+            match unsafe { audio_buffers(process) }.and_then(bypass_or_silence) {
+                Ok(()) => {}
+                Err(error) if first_report => {
+                    wrac_log::rterror!(
+                        "plugin.process: failed to make oversized block safe: {error}"
+                    );
+                }
+                Err(_) => {}
+            }
+            return CLAP_PROCESS_ERROR;
+        }
         let events = unsafe {
             crate::interface::EventLists::from_raw(process.in_events, process.out_events)
         };
@@ -413,6 +444,24 @@ pub(super) unsafe extern "C" fn plugin_process(
         };
         result
     })
+}
+
+fn bypass_or_silence(mut audio: AudioProcessBuffer<'_>) -> Result<(), AudioBufferError> {
+    for mut port in &mut audio {
+        match port.channels()? {
+            AudioPortChannels::F32(channels) => {
+                for mut channel in channels {
+                    channel.map_samples(|sample| sample);
+                }
+            }
+            AudioPortChannels::F64(channels) => {
+                for mut channel in channels {
+                    channel.map_samples(|sample| sample);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) unsafe extern "C" fn plugin_get_extension(

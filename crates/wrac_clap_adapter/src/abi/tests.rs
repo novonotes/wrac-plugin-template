@@ -3,6 +3,7 @@ use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::ext::audio_ports::{
     CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports,
 };
@@ -12,11 +13,12 @@ use clap_sys::ext::note_ports::{
 };
 use clap_sys::host::clap_host;
 use clap_sys::plugin::clap_plugin;
+use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_ERROR, clap_process};
 use clap_sys::version::CLAP_VERSION;
 
 use super::{
-    PluginInstanceState, plugin_activate, plugin_destroy, plugin_get_extension, plugin_init,
-    plugin_on_main_thread,
+    PluginInstanceState, plugin_activate, plugin_deactivate, plugin_destroy, plugin_get_extension,
+    plugin_init, plugin_on_main_thread, plugin_process,
 };
 use crate::entry::EntryRegistration;
 use crate::interface::{
@@ -108,6 +110,7 @@ static REQUEST_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
 static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
 static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
+static PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[test]
 fn zero_latency_exposes_latency_extension() {
@@ -161,6 +164,66 @@ fn activate_forwards_host_lifecycle_requests() {
     assert_eq!(REQUEST_RESTART_COUNT.load(Ordering::Relaxed), 1);
     assert_eq!(REQUEST_PROCESS_COUNT.load(Ordering::Relaxed), 1);
     assert_eq!(REQUEST_CALLBACK_COUNT.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn oversized_process_is_bypassed_without_calling_product_processor() {
+    PROCESS_COUNT.store(0, Ordering::Relaxed);
+    let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
+    let plugin = &instance.plugin as *const clap_plugin;
+    assert!(unsafe { plugin_init(plugin) });
+    assert!(unsafe { plugin_activate(plugin, 48_000.0, 1, 2) });
+
+    let mut input = [1.0_f32, 2.0, 3.0, 4.0];
+    let mut output = [9.0_f32; 4];
+    let mut input_channels = [input.as_mut_ptr()];
+    let mut output_channels = [output.as_mut_ptr()];
+    let input_buffer = clap_audio_buffer {
+        data32: input_channels.as_mut_ptr(),
+        data64: ptr::null_mut(),
+        channel_count: 1,
+        latency: 0,
+        constant_mask: 0,
+    };
+    let mut output_buffer = clap_audio_buffer {
+        data32: output_channels.as_mut_ptr(),
+        data64: ptr::null_mut(),
+        channel_count: 1,
+        latency: 0,
+        constant_mask: 0,
+    };
+    let process = clap_process {
+        steady_time: 0,
+        frames_count: 4,
+        transport: ptr::null(),
+        audio_inputs: &input_buffer,
+        audio_outputs: &mut output_buffer,
+        audio_inputs_count: 1,
+        audio_outputs_count: 1,
+        in_events: ptr::null(),
+        out_events: ptr::null(),
+    };
+
+    assert_eq!(
+        unsafe { plugin_process(plugin, &process) },
+        CLAP_PROCESS_ERROR
+    );
+    assert_eq!(
+        unsafe { plugin_process(plugin, &process) },
+        CLAP_PROCESS_ERROR
+    );
+    assert_eq!(output, input);
+    assert_eq!(PROCESS_COUNT.load(Ordering::Relaxed), 0);
+    assert!(instance.oversized_process_reported.load(Ordering::Acquire));
+
+    unsafe { plugin_deactivate(plugin) };
+    assert!(unsafe { plugin_activate(plugin, 48_000.0, 1, 4) });
+    assert!(!instance.oversized_process_reported.load(Ordering::Acquire));
+    assert_eq!(
+        unsafe { plugin_process(plugin, &process) },
+        CLAP_PROCESS_CONTINUE
+    );
+    assert_eq!(PROCESS_COUNT.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -720,6 +783,7 @@ impl ActiveProcessor for TestActiveProcessor {
     }
 
     fn process(&mut self, _context: ProcessContext<'_>) -> PluginResult<ProcessStatus> {
+        PROCESS_COUNT.fetch_add(1, Ordering::Relaxed);
         Ok(ProcessStatus::Continue)
     }
 
