@@ -29,8 +29,7 @@ use super::{
 };
 use crate::entry::release_entry_instance;
 use crate::interface::{
-    ActivateContext, AudioBufferError, AudioPortChannels, AudioProcessBuffer,
-    PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
+    ActivateContext, PluginInstanceContext, ProcessContext, ProcessStatus, TransportEvent,
 };
 
 pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool {
@@ -387,15 +386,6 @@ pub(super) unsafe extern "C" fn plugin_process(
                     max_frames_count,
                 );
             }
-            match unsafe { audio_buffers(process) }.and_then(bypass_or_silence) {
-                Ok(()) => {}
-                Err(error) if first_report => {
-                    wrac_log::rterror!(
-                        "plugin.process: failed to make oversized block safe: {error}"
-                    );
-                }
-                Err(_) => {}
-            }
             return CLAP_PROCESS_ERROR;
         }
         let events = unsafe {
@@ -444,24 +434,6 @@ pub(super) unsafe extern "C" fn plugin_process(
         };
         result
     })
-}
-
-fn bypass_or_silence(mut audio: AudioProcessBuffer<'_>) -> Result<(), AudioBufferError> {
-    for mut port in &mut audio {
-        match port.channels()? {
-            AudioPortChannels::F32(channels) => {
-                for mut channel in channels {
-                    channel.map_samples(|sample| sample);
-                }
-            }
-            AudioPortChannels::F64(channels) => {
-                for mut channel in channels {
-                    channel.map_samples(|sample| sample);
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(super) unsafe extern "C" fn plugin_get_extension(
