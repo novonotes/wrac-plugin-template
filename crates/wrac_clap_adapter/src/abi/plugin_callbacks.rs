@@ -278,6 +278,9 @@ pub(super) unsafe extern "C" fn plugin_activate(
             }
         };
 
+        instance
+            .active_max_frames_count
+            .store(max_frames_count, Ordering::Release);
         instance.put_processor_blocking(processor);
         true
     })
@@ -367,6 +370,10 @@ pub(super) unsafe extern "C" fn plugin_process(
         }
         let _process_depth_guard = RtDepthGuard::enter(&instance.rt_process_depth);
         let process = unsafe { &*process };
+        let max_frames_count = instance.active_max_frames_count.load(Ordering::Acquire);
+        if max_frames_count > 0 && process.frames_count > max_frames_count {
+            return CLAP_PROCESS_ERROR;
+        }
         let events = unsafe {
             crate::interface::EventLists::from_raw(process.in_events, process.out_events)
         };
