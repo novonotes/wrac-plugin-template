@@ -279,9 +279,6 @@ pub(super) unsafe extern "C" fn plugin_activate(
         };
 
         instance
-            .oversized_process_reported
-            .store(false, Ordering::Release);
-        instance
             .active_max_frames_count
             .store(max_frames_count, Ordering::Release);
         instance.put_processor_blocking(processor);
@@ -300,7 +297,6 @@ pub(super) unsafe extern "C" fn plugin_deactivate(plugin: *const clap_plugin) {
         // concurrently, wait here to avoid missing the teardown.
         let _guard = instance.enter_lifecycle_blocking();
         if let Some(processor) = instance.take_processor_blocking() {
-            instance.active_max_frames_count.store(0, Ordering::Release);
             let mut core = instance.core.lock();
             let Some(core) = core.as_mut() else {
                 log::warn!("plugin.deactivate: plugin core is not initialized");
@@ -376,16 +372,6 @@ pub(super) unsafe extern "C" fn plugin_process(
         let process = unsafe { &*process };
         let max_frames_count = instance.active_max_frames_count.load(Ordering::Acquire);
         if max_frames_count > 0 && process.frames_count > max_frames_count {
-            let first_report = !instance
-                .oversized_process_reported
-                .swap(true, Ordering::AcqRel);
-            if first_report {
-                wrac_log::rtwarn!(
-                    "plugin.process: frames count exceeds activated maximum frames_count={} max_frames_count={}",
-                    process.frames_count,
-                    max_frames_count,
-                );
-            }
             return CLAP_PROCESS_ERROR;
         }
         let events = unsafe {

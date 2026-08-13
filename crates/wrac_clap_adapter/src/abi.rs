@@ -136,7 +136,6 @@ pub(crate) struct PluginInstanceState {
     // CLAP guarantees that every process block stays within the range accepted by activate.
     // Keep the upper bound at the ABI boundary so malformed wrapper input never reaches product code.
     active_max_frames_count: AtomicU32,
-    oversized_process_reported: AtomicBool,
     lifecycle_busy: AtomicBool,
     lifecycle_thread: Mutex<Option<ThreadId>>,
     rt_process_depth: AtomicU32,
@@ -245,7 +244,6 @@ impl PluginInstanceState {
             processor_busy: AtomicBool::new(false),
             processor_active: AtomicBool::new(false),
             active_max_frames_count: AtomicU32::new(0),
-            oversized_process_reported: AtomicBool::new(false),
             lifecycle_busy: AtomicBool::new(false),
             lifecycle_thread: Mutex::new(None),
             rt_process_depth: AtomicU32::new(0),
