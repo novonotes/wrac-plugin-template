@@ -41,7 +41,13 @@
         <string>${AUV2_INSTRUMENT_TYPE}</string>
         <key>version</key>
         <integer>1</integer>
-        <!-- Generic wrappers may use resources that AudioComponent resourceUsage cannot express. -->
+        <key>resourceUsage</key>
+        <dict>
+          <key>network.client</key>
+          <true/>
+          <key>temporary-exception.files.all.read-write</key>
+          <true/>
+        </dict>
       </dict>
     </array>
   </dict>
