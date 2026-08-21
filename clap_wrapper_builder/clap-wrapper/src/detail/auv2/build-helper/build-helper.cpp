@@ -68,16 +68,10 @@ struct auInfo
        << "        <key>type</key>\n"
        << "        <string>" << type << "</string>\n"
        << "        <key>version</key>\n"
-       << "        <integer>" << bundleversToVersion() << "</integer>\n"
-       << "        <key>sandboxSafe</key>\n"
-       << "        <true/>\n"
-       << "        <key>resourceUsage</key>\n"
-       << "        <dict>\n"
-       << "           <key>network.client</key>\n"
-       << "           <true/>\n"
-       << "           <key>temporary-exception.files.all.read-write</key>\n"
-       << "           <true/>\n"
-       << "        </dict>\n";
+       << "        <integer>" << bundleversToVersion() << "</integer>\n";
+
+    // A generic wrapper cannot prove that a plugin only uses sandbox-declarable resources.
+    // Omitting both keys avoids incorrectly restricting plugins that use local IPC or listeners.
 
     if (!tags.empty())
     {
