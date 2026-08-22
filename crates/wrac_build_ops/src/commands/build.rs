@@ -839,6 +839,13 @@ fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: Wrap
                         plugin.standalone_name
                     ),
                 );
+                push_cmake_arg(
+                    args,
+                    format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_STANDALONE_AUDIO_INPUT={}",
+                        on_off(plugin.standalone_audio_input)
+                    ),
+                );
             }
             WrapperBuild::Plugins { au: false, .. } | WrapperBuild::Aax => {}
         }

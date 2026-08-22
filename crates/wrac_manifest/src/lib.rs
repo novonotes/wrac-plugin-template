@@ -68,12 +68,20 @@ pub struct PluginProduct {
     pub vst3_subcategories: String,
     pub vst3_component_id: String,
     pub standalone_name: String,
+    /// Controls physical audio capture in the development standalone app independently of the
+    /// plugin buses that remain visible to DAW hosts.
+    #[serde(default = "default_true")]
+    pub standalone_audio_input: bool,
     pub auv2_type: String,
     pub auv2_subtype: String,
     pub aax_categories: Option<Vec<String>>,
     pub aax_product_id: Option<String>,
     #[serde(default)]
     pub aax_stem_configs: Vec<AaxStemConfig>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -500,7 +508,7 @@ mod tests {
 
         assert_eq!(info.package_name, None);
 
-        let _: DedicatedManifest = toml::from_str(
+        let manifest: DedicatedManifest = toml::from_str(
             r#"
 schema_version = 1
 
@@ -534,5 +542,6 @@ auv2_subtype = "TstP"
 "#,
         )
         .unwrap();
+        assert!(manifest.plugins[0].standalone_audio_input);
     }
 }
