@@ -71,6 +71,7 @@ validation_profile = "prototype"
 | `vst3_subcategories` | string | はい | 空文字不可。例: `Fx&#124;Dynamics` のように、Steinberg 形式の縦棒区切り文字列 | VST3 ラッパーディスクリプターに生成されます。WRAC は空文字でないことだけを検証します。VST3 ホストが受け付ける値を指定してください。 |
 | `vst3_component_id` | string | はい | UUID 文字列 | VST3 のコンポーネント識別子です。WRAC は clap-wrapper が期待するバイト順に変換します。リリース前に一度生成し、同じ製品では安定させてください。 |
 | `standalone_name` | string | はい | 空文字不可。マニフェスト内で一意 | スタンドアロンアプリの成果物名です。`.app`、`.exe`、Linux のスタンドアロンファイル名に使われます。 |
+| `standalone_audio_input` | boolean | いいえ | `true`または`false`。既定値は`true` | 開発用スタンドアロンアプリが物理音声入力デバイスを開けるかを指定します。DAWホストへ公開するプラグインのバス構成には影響しません。 |
 | `auv2_type` | string | はい | 4 バイトの ASCII | AUv2 component type です。例として `aufx` や `aumu` を指定します。AUv2 ラッパーディスクリプターに生成されます。 |
 | `auv2_subtype` | string | はい | 4 バイトの ASCII。`(auv2_type, auv2_subtype)` の組はマニフェスト内で一意 | AUv2 component subtype です。ホストが識別子として使うため、リリース後は安定させてください。 |
 | `aax_categories` | array of `AaxCategory` | 条件付き | 事前定義された AAX category 文字列を 1 個以上。[AAX category の値](#aax-category-の値) を参照 | `supported_formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX ラッパーディスクリプターに生成されます。 |

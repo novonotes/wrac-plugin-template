@@ -73,6 +73,7 @@ products.
 | `vst3_subcategories` | string | Yes | Non-empty Steinberg-style subcategory string separated by vertical bars, for example `Fx&#124;Dynamics` | Generated into the VST3 wrapper descriptor. WRAC only validates that this is non-empty; choose values accepted by VST3 hosts. |
 | `vst3_component_id` | string | Yes | UUID string | VST3 component identity. WRAC converts the UUID to the byte order expected by clap-wrapper. Generate once before release and keep it stable for the same product. |
 | `standalone_name` | string | Yes | Non-empty; unique in the manifest | Standalone app artifact name. Used for `.app`, `.exe`, or Linux standalone file names. |
+| `standalone_audio_input` | boolean | No | `true` or `false`; default `true` | Whether the development standalone app may open a physical audio input device. This does not change plugin buses exposed to DAW hosts. |
 | `auv2_type` | string | Yes | Exactly 4 ASCII bytes | AUv2 component type, such as `aufx` or `aumu`. Generated into the AUv2 wrapper descriptor. |
 | `auv2_subtype` | string | Yes | Exactly 4 ASCII bytes; the `(auv2_type, auv2_subtype)` pair must be unique in the manifest | AUv2 component subtype. Keep it stable after release because hosts use it for identity. |
 | `aax_categories` | array of `AaxCategory` | Conditional | One or more predefined AAX category strings; see [AAX category values](#aax-category-values) | Required when `supported_formats` contains `aax`; ignored otherwise. Generated into the AAX wrapper descriptor. |
