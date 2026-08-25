@@ -23,6 +23,10 @@ use super::{
     macos_clap_info_plist,
 };
 
+mod macos_universal;
+
+pub use macos_universal::build_macos_universal_wrappers;
+
 pub fn build_gui(ctx: &Context) -> Result<TaskOutcome> {
     let package_json = ctx.gui_dir().join("package.json");
     if !package_json.exists() {
@@ -316,6 +320,38 @@ pub fn configure_wrapper(
     profile: BuildProfile,
     build: WrapperBuild,
 ) -> Result<TaskOutcome> {
+    configure_wrapper_with_options(ctx, profile, build, WrapperBuildOptions::native())
+}
+
+#[derive(Clone, Copy)]
+/// Inputs that must vary together when a wrapper is configured from a non-native Rust library.
+///
+/// Keeping this private prevents callers from independently overriding the library and CMake
+/// architectures. The universal build entry point is responsible for supplying a matching pair.
+struct WrapperBuildOptions<'a> {
+    // Native and universal builds need separate CMake caches because CMake retains both the input
+    // library path and architecture list across subsequent configure calls.
+    purpose_suffix: &'a str,
+    static_library: Option<&'a Path>,
+    macos_architectures: Option<&'a str>,
+}
+
+impl WrapperBuildOptions<'_> {
+    fn native() -> Self {
+        Self {
+            purpose_suffix: "",
+            static_library: None,
+            macos_architectures: None,
+        }
+    }
+}
+
+fn configure_wrapper_with_options(
+    ctx: &Context,
+    profile: BuildProfile,
+    build: WrapperBuild,
+    options: WrapperBuildOptions<'_>,
+) -> Result<TaskOutcome> {
     // Keep SDK/submodule diagnostics close to the configure task even when the
     // DAG was created by install, validate, or launch. Checking before the CMake
     // stamp shortcut avoids silently relying on a stale cache after an SDK
@@ -335,10 +371,14 @@ pub fn configure_wrapper(
     }
 
     let rust_build = build.rust_build();
-    let static_library = rust_build.static_library(ctx, profile);
+    let static_library = options
+        .static_library
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| rust_build.static_library(ctx, profile));
     ensure_exists(&static_library, "static plugin library")?;
 
-    let build_dir = ctx.cmake_dir(build.purpose(), profile);
+    let purpose = format!("{}{}", build.purpose(), options.purpose_suffix);
+    let build_dir = ctx.cmake_dir(&purpose, profile);
     let stage_dir = match build {
         WrapperBuild::Plugins { .. } | WrapperBuild::Aax => ctx.plugins_dir(profile),
         WrapperBuild::Standalone => ctx.standalone_dir(profile),
@@ -438,6 +478,12 @@ pub fn configure_wrapper(
             &mut args,
             format!("-DCMAKE_OSX_DEPLOYMENT_TARGET={macos_deployment_target}"),
         );
+        if let Some(architectures) = options.macos_architectures {
+            push_cmake_arg(
+                &mut args,
+                format!("-DCMAKE_OSX_ARCHITECTURES={architectures}"),
+            );
+        }
         // AUv2 uses 4-character type/manufacturer/subtype codes as the host discovery key.
         // Drive them from the template's constants rather than inferring from the Rust descriptor.
         push_cmake_arg(
@@ -503,7 +549,25 @@ pub fn build_wrapper_target(
     target: WrapperTarget,
     standalone_plugin_id: Option<&str>,
 ) -> Result<()> {
-    let build_dir = ctx.cmake_dir(build.purpose(), profile);
+    build_wrapper_target_in_dir(
+        ctx,
+        profile,
+        build,
+        target,
+        standalone_plugin_id,
+        build.purpose(),
+    )
+}
+
+fn build_wrapper_target_in_dir(
+    ctx: &Context,
+    profile: BuildProfile,
+    build: WrapperBuild,
+    target: WrapperTarget,
+    standalone_plugin_id: Option<&str>,
+    purpose: &str,
+) -> Result<()> {
+    let build_dir = ctx.cmake_dir(purpose, profile);
     for cmake_target in cmake_wrapper_targets(ctx, build, target, standalone_plugin_id)? {
         // Build the concrete CMake target for this DAG node instead of ALL_BUILD.
         // That keeps dry-run output aligned with the actual work and lets
@@ -573,7 +637,7 @@ pub fn build_wrapper_target(
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WrapperTarget {
     Vst3,
     Au,

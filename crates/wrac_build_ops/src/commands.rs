@@ -18,8 +18,8 @@ mod build;
 mod validation;
 
 pub use self::build::{
-    RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_rust_plugin,
-    build_wrapper_target, configure_wrapper, package_clap, standalone_products,
+    RustPluginBuild, WrapperBuild, WrapperTarget, build_gui, build_macos_universal_wrappers,
+    build_rust_plugin, build_wrapper_target, configure_wrapper, package_clap, standalone_products,
 };
 pub use self::validation::{
     AaxValidatorConfig, ClapValidatorConfig, ClapValidatorTestExclusion, ExternalValidatorConfig,
