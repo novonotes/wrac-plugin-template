@@ -49,7 +49,7 @@ from the same binary bundle.
 | --- | --- | --- | --- | --- |
 | `company_name` | string | Yes | Non-empty | Host-facing vendor/manufacturer name. Generated into CLAP descriptors and wrapper metadata. It may be visible in host browsers and scanners. |
 | `auv2_manufacturer_code` | string | Yes | Exactly 4 ASCII bytes | AUv2 manufacturer code. Generated into the AUv2 wrapper descriptor. Keep it stable after release. |
-| `aax_manufacturer_id` | string | Conditional | Exactly 4 ASCII bytes | AAX manufacturer ID. Required when `supported_formats` contains `aax`; ignored otherwise. Keep it stable after release. |
+| `aax_manufacturer_id` | string | Conditional | Exactly 4 ASCII bytes | AAX manufacturer ID. Required when `formats` contains `aax`; ignored otherwise. Keep it stable after release. |
 | `bundle_name` | string | Yes | Non-empty | Product bundle name. Used for artifact names such as `.clap`, `.vst3`, `.component`, and `.aaxplugin`, and for macOS bundle display names. |
 | `bundle_identifier` | string | Yes | Non-empty reverse-DNS style identifier recommended | macOS CLAP `CFBundleIdentifier`. This is bundle identity, not a per-plugin ID. Keep it stable after release. |
 | `homepage_url` | string | Yes | Non-empty URL string | Generated into CLAP descriptor `url`. Hosts or scanners may expose it to users. |
@@ -57,7 +57,7 @@ from the same binary bundle.
 | `support_url` | string | Yes | Non-empty URL string | Generated into CLAP descriptor `support_url`. Hosts or scanners may expose it to users. |
 | `description` | string | Yes | Non-empty | Generated into CLAP descriptor `description`. This is a short user-facing product description that may appear in host or scanner UI. |
 | `copyright` | string | Yes | Non-empty | Generated into macOS bundle copyright metadata. |
-| `supported_formats` | array of `PluginFormat` | Yes | `clap`, `vst3`, `au`, `aax`; non-empty; no duplicates | Product policy for default `cargo xtask build`, `install`, and `validate` plugin targets. Explicit `--target` plugin formats must also be listed here. |
+| `formats` | array of `PluginFormatDefinition` | Yes | `type` is `clap`, `vst3`, `au`, or `aax`; `distribution` is `development-only` or `public`; non-empty; no duplicate types | Product policy for supported plugin formats and whether each format may be included in a public distribution. Default and explicit plugin targets may use either distribution value. |
 
 ### `[[plugins]]`
 
@@ -76,9 +76,9 @@ products.
 | `standalone_audio_input` | boolean | No | `true` or `false`; default `true` | Whether the development standalone app may open a physical audio input device. This does not change plugin buses exposed to DAW hosts. |
 | `auv2_type` | string | Yes | Exactly 4 ASCII bytes | AUv2 component type, such as `aufx` or `aumu`. Generated into the AUv2 wrapper descriptor. |
 | `auv2_subtype` | string | Yes | Exactly 4 ASCII bytes; the `(auv2_type, auv2_subtype)` pair must be unique in the manifest | AUv2 component subtype. Keep it stable after release because hosts use it for identity. |
-| `aax_categories` | array of `AaxCategory` | Conditional | One or more predefined AAX category strings; see [AAX category values](#aax-category-values) | Required when `supported_formats` contains `aax`; ignored otherwise. Generated into the AAX wrapper descriptor. |
-| `aax_product_id` | string | Conditional | Exactly 4 ASCII bytes | Required when `supported_formats` contains `aax`; ignored otherwise. AAX product identity. Keep it stable after release. |
-| `aax_stem_configs` | array of tables | Conditional | Non-empty when `supported_formats` contains `aax` | Required when `supported_formats` contains `aax`; ignored otherwise. Defines AAX input/output stem layouts. |
+| `aax_categories` | array of `AaxCategory` | Conditional | One or more predefined AAX category strings; see [AAX category values](#aax-category-values) | Required when `formats` contains `aax`; ignored otherwise. Generated into the AAX wrapper descriptor. |
+| `aax_product_id` | string | Conditional | Exactly 4 ASCII bytes | Required when `formats` contains `aax`; ignored otherwise. AAX product identity. Keep it stable after release. |
+| `aax_stem_configs` | array of tables | Conditional | Non-empty when `formats` contains `aax` | Required when `formats` contains `aax`; ignored otherwise. Defines AAX input/output stem layouts. |
 
 ### `[[plugins.aax_stem_configs]]`
 

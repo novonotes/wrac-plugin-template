@@ -59,7 +59,8 @@ host-visible ID を Rust code や Cargo metadata に重複して書かず、こ�
 > **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
 > AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
 > `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
-> `supported_formats` は、既定の `xtask` build/install/validate が使う製品方針です。
+> `formats` は、既定の `xtask` build/install/validate が使う製品方針です。各形式の
+> `distribution` は公開配布物へ含めてよいかを宣言します。
 > `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
 > `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
 > `aax_manufacturer_id`、`aax_product_id`、各 AAX stem config の `plugin_id` は、安定した 4 byte ASCII ID にしてください。

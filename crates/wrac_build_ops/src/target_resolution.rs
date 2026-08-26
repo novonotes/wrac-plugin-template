@@ -9,7 +9,7 @@ pub fn resolve_build_targets_from_metadata(
     requested: &[Target],
 ) -> Result<Vec<Target>> {
     let mut targets = if requested.is_empty() {
-        // supported_formats is the product policy. The development standalone
+        // formats is the product policy. The development standalone
         // remains outside that list because it is not a plugin format. Default
         // selection is platform-aware so a product can support AU without making
         // Windows/Linux builds fail unless AU was explicitly requested.
@@ -172,7 +172,7 @@ fn validate_plugin_format_support(
         // supported subset.
         if explicit && !supported.contains(format) {
             return Err(format!(
-                "{} is not listed in bundle.supported_formats for {}",
+                "{} is not listed in bundle.formats for {}",
                 format.display(),
                 ctx.package_name
             )

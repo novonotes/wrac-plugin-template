@@ -5,6 +5,7 @@ use cargo_metadata::MetadataCommand;
 use crate::BuildProfile;
 use crate::metadata::{PluginMetadata, PluginProductMetadata};
 use crate::targets::Platform;
+use crate::targets::PluginFormat;
 use crate::{Result, WracPluginPackage, XtaskConfig, XtaskOutputLanguage};
 
 pub struct WracContext {
@@ -58,6 +59,18 @@ impl WracContext {
 
     pub fn gui_dir(&self) -> PathBuf {
         self.plugin_root.join("src-gui")
+    }
+
+    pub fn supports_plugin_format(&self, format: PluginFormat) -> bool {
+        self.metadata.supported_formats.contains(&format)
+    }
+
+    pub fn publicly_distributes_plugin_format(&self, format: PluginFormat) -> bool {
+        self.metadata.public_formats.contains(&format)
+    }
+
+    pub fn public_plugin_formats(&self) -> &[PluginFormat] {
+        &self.metadata.public_formats
     }
 
     pub fn plugin_manifest(&self) -> PathBuf {

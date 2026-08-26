@@ -48,7 +48,7 @@ validation_profile = "prototype"
 | --- | --- | --- | --- | --- |
 | `company_name` | string | はい | 空文字不可 | ホスト向けのベンダー/メーカー名です。CLAP ディスクリプターとラッパー用メタデータに生成されます。ホストのブラウザーやスキャナーでユーザーに見える可能性があります。 |
 | `auv2_manufacturer_code` | string | はい | 4 バイトの ASCII | AUv2 manufacturer code です。AUv2 ラッパーディスクリプターに生成されます。リリース後は安定させてください。 |
-| `aax_manufacturer_id` | string | 条件付き | 4 バイトの ASCII | `supported_formats` に `aax` を含める場合は必須です。それ以外では使われません。リリース後は安定させてください。 |
+| `aax_manufacturer_id` | string | 条件付き | 4 バイトの ASCII | `formats` に `aax` を含める場合は必須です。それ以外では使われません。リリース後は安定させてください。 |
 | `bundle_name` | string | はい | 空文字不可 | 製品バンドル名です。`.clap`、`.vst3`、`.component`、`.aaxplugin` などの成果物名と、macOS バンドルの表示名に使われます。 |
 | `bundle_identifier` | string | はい | 空文字不可。reverse-DNS 形式を推奨 | macOS CLAP バンドルの `CFBundleIdentifier` です。個別プラグイン ID ではなく、バンドルの識別子です。リリース後は安定させてください。 |
 | `homepage_url` | string | はい | 空文字不可の URL 文字列 | CLAP ディスクリプターの `url` に生成されます。ホストやスキャナーがユーザーに表示する可能性があります。 |
@@ -56,7 +56,7 @@ validation_profile = "prototype"
 | `support_url` | string | はい | 空文字不可の URL 文字列 | CLAP ディスクリプターの `support_url` に生成されます。ホストやスキャナーがユーザーに表示する可能性があります。 |
 | `description` | string | はい | 空文字不可 | CLAP ディスクリプターの `description` に生成されます。ホストやスキャナーの UI に表示され得る、ユーザー向けの短い製品説明です。 |
 | `copyright` | string | はい | 空文字不可 | macOS バンドルの著作権メタデータに生成されます。 |
-| `supported_formats` | array of `PluginFormat` | はい | `clap`、`vst3`、`au`、`aax`。空配列と重複は不可 | 既定の `cargo xtask build`、`install`、`validate` のプラグイン対象を決める製品方針です。`--target` で明示したプラグイン形式も、この配列に含まれている必要があります。 |
+| `formats` | array of `PluginFormatDefinition` | はい | `type` は `clap`、`vst3`、`au`、`aax`。`distribution` は `development-only` または `public`。空配列と形式の重複は不可 | 対応するプラグイン形式と、各形式を公開配布へ含めてよいかを決める製品方針です。既定・明示指定のビルド対象にはどちらの配布区分も使用できます。 |
 
 ### `[[plugins]]`
 
@@ -74,9 +74,9 @@ validation_profile = "prototype"
 | `standalone_audio_input` | boolean | いいえ | `true`または`false`。既定値は`true` | 開発用スタンドアロンアプリが物理音声入力デバイスを開けるかを指定します。DAWホストへ公開するプラグインのバス構成には影響しません。 |
 | `auv2_type` | string | はい | 4 バイトの ASCII | AUv2 component type です。例として `aufx` や `aumu` を指定します。AUv2 ラッパーディスクリプターに生成されます。 |
 | `auv2_subtype` | string | はい | 4 バイトの ASCII。`(auv2_type, auv2_subtype)` の組はマニフェスト内で一意 | AUv2 component subtype です。ホストが識別子として使うため、リリース後は安定させてください。 |
-| `aax_categories` | array of `AaxCategory` | 条件付き | 事前定義された AAX category 文字列を 1 個以上。[AAX category の値](#aax-category-の値) を参照 | `supported_formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX ラッパーディスクリプターに生成されます。 |
-| `aax_product_id` | string | 条件付き | 4 バイトの ASCII | `supported_formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX の製品識別子なので、リリース後は安定させてください。 |
-| `aax_stem_configs` | array of tables | 条件付き | `supported_formats` に `aax` を含める場合は空配列不可 | `supported_formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX の入出力 stem 構成を定義します。 |
+| `aax_categories` | array of `AaxCategory` | 条件付き | 事前定義された AAX category 文字列を 1 個以上。[AAX category の値](#aax-category-の値) を参照 | `formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX ラッパーディスクリプターに生成されます。 |
+| `aax_product_id` | string | 条件付き | 4 バイトの ASCII | `formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX の製品識別子なので、リリース後は安定させてください。 |
+| `aax_stem_configs` | array of tables | 条件付き | `formats` に `aax` を含める場合は空配列不可 | `formats` に `aax` を含める場合は必須です。それ以外では使われません。AAX の入出力 stem 構成を定義します。 |
 
 ### `[[plugins.aax_stem_configs]]`
 

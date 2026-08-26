@@ -1,7 +1,7 @@
 //! Parser and validator for WRAC plugin manifests.
 //!
 //! `wrac-plugin.toml` is the product-owned manifest for host-visible metadata:
-//! bundle identifiers, plugin IDs, wrapper descriptors, supported formats, and
+//! bundle identifiers, plugin IDs, wrapper descriptors, format policies, and
 //! artifact metadata. This crate reads that file into typed Rust structures
 //! for build scripts and xtask code; it does not perform plugin builds itself.
 
@@ -36,7 +36,7 @@ pub struct PluginManifest {
     pub support_url: String,
     pub description: String,
     pub copyright: String,
-    pub supported_formats: Vec<PluginFormat>,
+    pub formats: Vec<PluginFormatDefinition>,
     pub plugins: Vec<PluginProduct>,
 }
 
@@ -47,6 +47,20 @@ pub enum PluginFormat {
     Vst3,
     Au,
     Aax,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FormatDistribution {
+    DevelopmentOnly,
+    Public,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct PluginFormatDefinition {
+    #[serde(rename = "type")]
+    pub format: PluginFormat,
+    pub distribution: FormatDistribution,
 }
 
 impl PluginFormat {
@@ -143,7 +157,7 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
         support_url: dedicated.bundle.support_url,
         description: dedicated.bundle.description,
         copyright: dedicated.bundle.copyright,
-        supported_formats: dedicated.bundle.supported_formats,
+        formats: dedicated.bundle.formats,
         plugins: dedicated.plugins,
     };
     metadata.validate("wrac-plugin.toml")?;
@@ -161,6 +175,18 @@ pub fn read_cargo_package_info(path: &Path) -> Result<ManifestPackageInfo> {
 }
 
 impl PluginManifest {
+    pub fn supports_format(&self, format: PluginFormat) -> bool {
+        self.formats
+            .iter()
+            .any(|definition| definition.format == format)
+    }
+
+    pub fn public_formats(&self) -> impl Iterator<Item = PluginFormat> + '_ {
+        self.formats.iter().filter_map(|definition| {
+            (definition.distribution == FormatDistribution::Public).then_some(definition.format)
+        })
+    }
+
     pub fn validate(&self, label: &str) -> Result<()> {
         validate_required(&format!("{label}.company_name"), &self.company_name)?;
         validate_four_ascii(
@@ -177,24 +203,24 @@ impl PluginManifest {
         validate_required(&format!("{label}.support_url"), &self.support_url)?;
         validate_required(&format!("{label}.description"), &self.description)?;
         validate_required(&format!("{label}.copyright"), &self.copyright)?;
-        if self.supported_formats.is_empty() {
-            return Err(format!("{label}.supported_formats must not be empty").into());
+        if self.formats.is_empty() {
+            return Err(format!("{label}.formats must not be empty").into());
         }
-        let mut supported_formats = HashSet::new();
-        for format in &self.supported_formats {
-            if !supported_formats.insert(*format) {
+        let mut formats = HashSet::new();
+        for definition in &self.formats {
+            if !formats.insert(definition.format) {
                 return Err(format!(
-                    "duplicate {label}.supported_formats entry: {}",
-                    format.display()
+                    "duplicate {label}.formats entry: {}",
+                    definition.format.display()
                 )
                 .into());
             }
         }
-        let supports_aax = supported_formats.contains(&PluginFormat::Aax);
+        let supports_aax = formats.contains(&PluginFormat::Aax);
         if supports_aax {
             let Some(aax_manufacturer_id) = self.aax_manufacturer_id.as_ref() else {
                 return Err(format!(
-                    "{label}.aax_manufacturer_id is required when supported_formats contains aax"
+                    "{label}.aax_manufacturer_id is required when formats contains aax"
                 )
                 .into());
             };
@@ -233,7 +259,10 @@ impl PluginManifest {
             )?;
             if supports_aax {
                 let Some(aax_categories) = plugin.aax_categories.as_ref() else {
-                    return Err(format!("{label}.plugins.aax_categories is required when supported_formats contains aax").into());
+                    return Err(format!(
+                        "{label}.plugins.aax_categories is required when formats contains aax"
+                    )
+                    .into());
                 };
                 if aax_categories.is_empty() {
                     return Err(format!("{label}.plugins.aax_categories must not be empty").into());
@@ -242,7 +271,10 @@ impl PluginManifest {
                     aax_category_bits(category)?;
                 }
                 let Some(aax_product_id) = plugin.aax_product_id.as_ref() else {
-                    return Err(format!("{label}.plugins.aax_product_id is required when supported_formats contains aax").into());
+                    return Err(format!(
+                        "{label}.plugins.aax_product_id is required when formats contains aax"
+                    )
+                    .into());
                 };
                 validate_four_ascii(&format!("{label}.plugins.aax_product_id"), aax_product_id)?;
                 if plugin.aax_stem_configs.is_empty() {
@@ -445,7 +477,7 @@ struct DedicatedBundle {
     support_url: String,
     description: String,
     copyright: String,
-    supported_formats: Vec<PluginFormat>,
+    formats: Vec<PluginFormatDefinition>,
 }
 
 impl<'de> Deserialize<'de> for ManifestPackageInfo {
@@ -525,7 +557,10 @@ manual_url = "https://example.com/manual"
 support_url = "https://example.com/support"
 description = "Test plugin"
 copyright = "Copyright Example"
-supported_formats = ["clap"]
+formats = [
+    { type = "clap", distribution = "development-only" },
+    { type = "vst3", distribution = "public" },
+]
 
 [acme.ci]
 release_track = "prototype"
@@ -543,5 +578,18 @@ auv2_subtype = "TstP"
         )
         .unwrap();
         assert!(manifest.plugins[0].standalone_audio_input);
+        assert_eq!(
+            manifest.bundle.formats,
+            vec![
+                PluginFormatDefinition {
+                    format: PluginFormat::Clap,
+                    distribution: FormatDistribution::DevelopmentOnly,
+                },
+                PluginFormatDefinition {
+                    format: PluginFormat::Vst3,
+                    distribution: FormatDistribution::Public,
+                },
+            ]
+        );
     }
 }

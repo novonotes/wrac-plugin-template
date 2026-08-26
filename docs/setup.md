@@ -59,7 +59,8 @@ Keep each plugin's manifests at `<plugin-root>/src-plugin/Cargo.toml` and `<plug
 > **Important:** The plugin ID must be globally unique. It cannot be changed once published.
 > AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
 > `clap_features` must match the plugin's real audio/MIDI behavior because CLAP hosts read it directly.
-> `supported_formats` is the product policy used by default `xtask` build/install/validate commands.
+> `formats` is the product policy used by default `xtask` build/install/validate commands. Its
+> `distribution` value declares whether each format may be included in public artifacts.
 > `vst3_subcategories` controls VST3 host browser categories; use Steinberg-style `|`-separated values such as `Fx|Dynamics`.
 > `vst3_component_id` must be a stable UUID. Generate it once before release and never change it for the same product.
 > `aax_manufacturer_id`, `aax_product_id`, and each AAX stem config `plugin_id` must be stable 4-byte ASCII IDs.

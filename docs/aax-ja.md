@@ -2,7 +2,7 @@
 
 > English version: [aax.md](aax.md)
 
-AAX サポートは、`wrac-plugin.toml` の `supported_formats` に
+AAX サポートは、`wrac-plugin.toml` の `formats` に
 `aax` を追加することで有効にできます。
 
 ## 前提条件

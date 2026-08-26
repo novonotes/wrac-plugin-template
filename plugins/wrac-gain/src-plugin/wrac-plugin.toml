@@ -21,7 +21,12 @@ manual_url = "https://example.com/wrac-gain/manual"
 support_url = "https://example.com/support"
 description = "Simple gain plugin"
 copyright = "Copyright 2026 Your Company"
-supported_formats = ["clap", "vst3", "au", "aax"]
+formats = [
+  { type = "clap", distribution = "public" },
+  { type = "vst3", distribution = "public" },
+  { type = "au", distribution = "public" },
+  { type = "aax", distribution = "public" },
+]
 
 [[plugins]]
 plugin_id = "com.your-company.wrac-gain"
