@@ -15,8 +15,7 @@ pub fn resolve_build_targets_from_metadata(
         // Windows/Linux builds fail unless AU was explicitly requested.
         let mut targets = ctx
             .metadata
-            .supported_formats
-            .iter()
+            .supported_formats()
             .map(|format| format.target())
             .collect::<Vec<_>>();
         targets.push(Target::Standalone);
@@ -37,8 +36,7 @@ pub fn resolve_plugin_targets_from_metadata(
         filter_platform_targets(
             ctx,
             ctx.metadata
-                .supported_formats
-                .iter()
+                .supported_formats()
                 .map(|format| format.target())
                 .collect::<Vec<_>>(),
         )
@@ -71,8 +69,7 @@ pub fn resolve_validate_targets_from_metadata(
         filter_platform_targets(
             ctx,
             ctx.metadata
-                .supported_formats
-                .iter()
+                .supported_formats()
                 .map(|format| format.target())
                 .collect::<Vec<_>>(),
         )
@@ -160,17 +157,11 @@ fn validate_plugin_format_support(
     formats: &[PluginFormat],
     explicit: bool,
 ) -> Result<()> {
-    let supported = ctx
-        .metadata
-        .supported_formats
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
     for format in formats {
         // An explicit --target is a request, not a hint. If a package does not
         // advertise that format, fail instead of silently falling back to the
         // supported subset.
-        if explicit && !supported.contains(format) {
+        if explicit && !ctx.metadata.supports_format(*format) {
             return Err(format!(
                 "{} is not listed in bundle.formats for {}",
                 format.display(),

@@ -21,9 +21,14 @@ pub(crate) struct PluginMetadata {
     pub(crate) support_url: String,
     pub(crate) description: String,
     pub(crate) copyright: String,
-    pub(crate) supported_formats: Vec<PluginFormat>,
-    pub(crate) public_formats: Vec<PluginFormat>,
+    pub(crate) formats: Vec<PluginFormatPolicy>,
     pub(crate) plugins: Vec<PluginProductMetadata>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PluginFormatPolicy {
+    pub(crate) format: PluginFormat,
+    pub(crate) distribution: wrac_manifest::FormatDistribution,
 }
 
 #[derive(Debug, Clone)]
@@ -76,11 +81,29 @@ impl PluginMetadata {
         format!("{}.component", self.bundle_name)
     }
 
+    pub(crate) fn supports_format(&self, format: PluginFormat) -> bool {
+        self.formats.iter().any(|policy| policy.format == format)
+    }
+
+    pub(crate) fn publicly_distributes_format(&self, format: PluginFormat) -> bool {
+        self.formats.iter().any(|policy| {
+            policy.format == format
+                && policy.distribution == wrac_manifest::FormatDistribution::Public
+        })
+    }
+
+    pub(crate) fn supported_formats(&self) -> impl Iterator<Item = PluginFormat> + '_ {
+        self.formats.iter().map(|policy| policy.format)
+    }
+
+    pub(crate) fn public_formats(&self) -> impl Iterator<Item = PluginFormat> + '_ {
+        self.formats.iter().filter_map(|policy| {
+            (policy.distribution == wrac_manifest::FormatDistribution::Public)
+                .then_some(policy.format)
+        })
+    }
+
     fn from_manifest(manifest: wrac_manifest::PluginManifest) -> Result<Self> {
-        let public_formats = manifest
-            .public_formats()
-            .map(convert_plugin_format)
-            .collect();
         let package_name = manifest
             .package
             .package_name
@@ -103,12 +126,14 @@ impl PluginMetadata {
             support_url: manifest.support_url,
             description: manifest.description,
             copyright: manifest.copyright,
-            supported_formats: manifest
+            formats: manifest
                 .formats
                 .into_iter()
-                .map(|definition| convert_plugin_format(definition.format))
+                .map(|definition| PluginFormatPolicy {
+                    format: convert_plugin_format(definition.format),
+                    distribution: definition.distribution,
+                })
                 .collect(),
-            public_formats,
             plugins: manifest
                 .plugins
                 .into_iter()
@@ -159,8 +184,20 @@ mod tests {
             support_url: "https://example.com/support".to_string(),
             description: "Test plugin".to_string(),
             copyright: "Copyright Example".to_string(),
-            supported_formats: vec![PluginFormat::Clap, PluginFormat::Vst3, PluginFormat::Au],
-            public_formats: vec![PluginFormat::Vst3, PluginFormat::Au],
+            formats: vec![
+                PluginFormatPolicy {
+                    format: PluginFormat::Clap,
+                    distribution: wrac_manifest::FormatDistribution::DevelopmentOnly,
+                },
+                PluginFormatPolicy {
+                    format: PluginFormat::Vst3,
+                    distribution: wrac_manifest::FormatDistribution::Public,
+                },
+                PluginFormatPolicy {
+                    format: PluginFormat::Au,
+                    distribution: wrac_manifest::FormatDistribution::Public,
+                },
+            ],
             plugins: vec![PluginProductMetadata {
                 plugin_id: "com.example.test-plugin".to_string(),
                 plugin_name: "Test Plugin".to_string(),

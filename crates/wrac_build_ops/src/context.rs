@@ -62,15 +62,15 @@ impl WracContext {
     }
 
     pub fn supports_plugin_format(&self, format: PluginFormat) -> bool {
-        self.metadata.supported_formats.contains(&format)
+        self.metadata.supports_format(format)
     }
 
     pub fn publicly_distributes_plugin_format(&self, format: PluginFormat) -> bool {
-        self.metadata.public_formats.contains(&format)
+        self.metadata.publicly_distributes_format(format)
     }
 
-    pub fn public_plugin_formats(&self) -> &[PluginFormat] {
-        &self.metadata.public_formats
+    pub fn public_plugin_formats(&self) -> impl Iterator<Item = PluginFormat> + '_ {
+        self.metadata.public_formats()
     }
 
     pub fn plugin_manifest(&self) -> PathBuf {
