@@ -181,12 +181,6 @@ impl PluginManifest {
             .any(|definition| definition.format == format)
     }
 
-    pub fn public_formats(&self) -> impl Iterator<Item = PluginFormat> + '_ {
-        self.formats.iter().filter_map(|definition| {
-            (definition.distribution == FormatDistribution::Public).then_some(definition.format)
-        })
-    }
-
     pub fn validate(&self, label: &str) -> Result<()> {
         validate_required(&format!("{label}.company_name"), &self.company_name)?;
         validate_four_ascii(

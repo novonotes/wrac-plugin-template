@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use cargo_metadata::MetadataCommand;
 
@@ -59,6 +62,11 @@ impl WracContext {
 
     pub fn gui_dir(&self) -> PathBuf {
         self.plugin_root.join("src-gui")
+    }
+
+    /// Returns the product-owned plugin directory containing `src-plugin` and distribution output.
+    pub fn plugin_root(&self) -> &Path {
+        &self.plugin_root
     }
 
     pub fn supports_plugin_format(&self, format: PluginFormat) -> bool {
