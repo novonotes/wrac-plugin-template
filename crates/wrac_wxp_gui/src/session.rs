@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
 use url::{Host, Url};
-use wrac_clap_adapter::{GuiSize, PluginError, PluginResult};
+use wrac_clap_adapter::interface::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
 use crate::controller::GuiSizeLimits;
@@ -79,7 +79,7 @@ impl WxpWebViewSession {
 
         let data_dir = webview_data_dir(config.plugin_id);
         std::fs::create_dir_all(&data_dir)
-            .map_err(|_| PluginError::Message("failed to create GUI data directory"))?;
+            .map_err(|_| PluginError::Message("failed to create GUI data directory".into()))?;
         log::debug!("using GUI data directory: {}", data_dir.display());
 
         let mut wxp_context = WebContext::new(data_dir);
@@ -133,14 +133,14 @@ impl WxpWebViewSession {
                     .with_visible(true)
                     .with_bounds(bounds)
                     .with_serve_zip(scheme, bytes)
-                    .map_err(|_| PluginError::Message("failed to serve GUI assets"))?
+                    .map_err(|_| PluginError::Message("failed to serve GUI assets".into()))?
                     .with_url(url)
             }
         };
 
         let web_view = builder
             .build_as_child(&config.parent)
-            .map_err(|_| PluginError::Message("failed to build webview"))?;
+            .map_err(|_| PluginError::Message("failed to build webview".into()))?;
 
         log::debug!("creating wxp WebView session completed");
         Ok(Self {
@@ -182,7 +182,7 @@ impl WxpWebViewSession {
             web_view
                 .dispatch()
                 .post_set_visible(true)
-                .map_err(|_| PluginError::Message("failed to show webview"))?;
+                .map_err(|_| PluginError::Message("failed to show webview".into()))?;
         }
         Ok(())
     }
@@ -193,7 +193,7 @@ impl WxpWebViewSession {
             web_view
                 .dispatch()
                 .post_set_visible(false)
-                .map_err(|_| PluginError::Message("failed to hide webview"))?;
+                .map_err(|_| PluginError::Message("failed to hide webview".into()))?;
         }
         Ok(())
     }
@@ -205,7 +205,7 @@ impl WxpWebViewSession {
             web_view
                 .dispatch()
                 .post_set_bounds(self.dpi_converter.create_webview_bounds(self.logical_size))
-                .map_err(|_| PluginError::Message("failed to resize webview"))?;
+                .map_err(|_| PluginError::Message("failed to resize webview".into()))?;
         }
         Ok(())
     }

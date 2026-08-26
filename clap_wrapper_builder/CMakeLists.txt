@@ -38,6 +38,9 @@ project(clap_wrapper_builder)
 #                                           CLAP plugin ID used by standalone.
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_STANDALONE_NAME
 #                                           Standalone app output name.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_STANDALONE_AUDIO_INPUT
+#                                           Enables physical audio input in the
+#                                           standalone app. Default ON.
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_TYPE
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_SUBTYPE
 #                                           Product AUv2 type/subtype codes.
@@ -250,12 +253,17 @@ set(STANDALONE_TARGETS)
 if(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE)
     message(STATUS "  Standalone Enabled: ON")
     set(STANDALONE_CONFIGURATIONS)
+    set(STANDALONE_AUDIO_INPUTS)
     # Standalone hosts load exactly one CLAP plugin ID, so each product needs its
     # own app target even when all products come from the same static library.
     foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
         clap_wrapper_builder_product_output_name(${PRODUCT_INDEX} PRODUCT_OUTPUT_NAME)
         clap_wrapper_builder_product_value(${PRODUCT_INDEX} "PLUGIN_ID" PRODUCT_PLUGIN_ID)
         clap_wrapper_builder_product_value(${PRODUCT_INDEX} "STANDALONE_NAME" PRODUCT_STANDALONE_NAME)
+        clap_wrapper_builder_product_value(${PRODUCT_INDEX} "STANDALONE_AUDIO_INPUT" PRODUCT_STANDALONE_AUDIO_INPUT)
+        if("${PRODUCT_STANDALONE_AUDIO_INPUT}" STREQUAL "")
+            set(PRODUCT_STANDALONE_AUDIO_INPUT ON)
+        endif()
         if(NOT PRODUCT_PLUGIN_ID)
             message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_PLUGIN_ID must be specified when CLAP_WRAPPER_BUILDER_BUILD_STANDALONE=ON")
         endif()
@@ -265,6 +273,7 @@ if(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE)
         set(STANDALONE_POSTFIX "product_${PRODUCT_INDEX}_standalone")
         set(STANDALONE_TARGET "${PLUGIN_NAME_SAFE}_${STANDALONE_POSTFIX}")
         list(APPEND STANDALONE_TARGETS "${STANDALONE_TARGET}")
+        list(APPEND STANDALONE_AUDIO_INPUTS "${PRODUCT_STANDALONE_AUDIO_INPUT}")
         list(APPEND STANDALONE_CONFIGURATIONS "${STANDALONE_POSTFIX}" "${PRODUCT_STANDALONE_NAME}" "${PRODUCT_PLUGIN_ID}")
         message(STATUS "  Standalone Product: ${PRODUCT_STANDALONE_NAME} -> ${PRODUCT_PLUGIN_ID}")
     endforeach()
@@ -273,6 +282,26 @@ if(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE)
         ${CLAPFIRST_COMMON_ARGS}
         STANDALONE_CONFIGURATIONS ${STANDALONE_CONFIGURATIONS}
     )
+
+    list(LENGTH STANDALONE_TARGETS STANDALONE_TARGET_COUNT)
+    math(EXPR STANDALONE_TARGET_LAST_INDEX "${STANDALONE_TARGET_COUNT} - 1")
+    foreach(STANDALONE_INDEX RANGE 0 ${STANDALONE_TARGET_LAST_INDEX})
+        list(GET STANDALONE_TARGETS ${STANDALONE_INDEX} STANDALONE_TARGET)
+        list(GET STANDALONE_AUDIO_INPUTS ${STANDALONE_INDEX} STANDALONE_AUDIO_INPUT)
+        # The standalone app's device access is a product capability, not a property of the
+        # audio buses exposed to DAW hosts. Compile it into both wrapper targets so a product
+        # that does not capture audio cannot request or reopen a physical input at runtime.
+        target_compile_definitions(${STANDALONE_TARGET} PRIVATE
+            CLAP_WRAPPER_STANDALONE_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
+        target_compile_definitions(${STANDALONE_TARGET}-clap-wrapper-standalone-lib PRIVATE
+            CLAP_WRAPPER_STANDALONE_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
+        if(APPLE AND NOT STANDALONE_AUDIO_INPUT)
+            add_custom_command(TARGET ${STANDALONE_TARGET} POST_BUILD
+                COMMAND /usr/bin/plutil -remove NSMicrophoneUsageDescription
+                    "$<TARGET_BUNDLE_DIR:${STANDALONE_TARGET}>/Contents/Info.plist"
+                COMMENT "Removing unused microphone declaration from ${STANDALONE_TARGET}")
+        endif()
+    endforeach()
 else()
     make_clapfirst_plugins(${CLAPFIRST_COMMON_ARGS})
 endif()

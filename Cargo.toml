@@ -6,17 +6,22 @@ members = [
     "crates/wrac_clap_adapter",
     "crates/wrac_host_context",
     "crates/wrac_log",
-    "crates/wrac_xtask",
+    "crates/wrac_manifest",
+    "crates/xtask_workflow",
+    "crates/wrac_build_ops",
     "crates/wrac_wxp_gui",
 ]
 resolver = "2"
 
 [workspace.dependencies]
 clap-sys = "0.5.0"
-novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
-run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
+novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "93d7ed412b7206351100e6a1970628d3bedab2cc" }
+run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "93d7ed412b7206351100e6a1970628d3bedab2cc" }
 wrac_clap_adapter = { path = "crates/wrac_clap_adapter" }
+wrac_build_ops = { path = "crates/wrac_build_ops" }
+wrac_manifest = { path = "crates/wrac_manifest" }
 wrac_host_context = { path = "crates/wrac_host_context" }
 wrac_log = { path = "crates/wrac_log" }
 wrac_wxp_gui = { path = "crates/wrac_wxp_gui" }
-wxp = { git = "https://github.com/novonotes/wxp.git", rev = "db0db1c0ba795fd434a981c903dcd882b638e5ed" }
+xtask_workflow = { path = "crates/xtask_workflow" }
+wxp = { git = "https://github.com/novonotes/wxp.git", rev = "93d7ed412b7206351100e6a1970628d3bedab2cc" }

@@ -1,0 +1,141 @@
+use clap_sys::ext::params::{
+    CLAP_EXT_PARAMS, CLAP_PARAM_RESCAN_VALUES, clap_host_params, clap_param_clear_flags,
+    clap_param_rescan_flags,
+};
+use clap_sys::host::clap_host;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
+
+use crate::interface::HostParams;
+
+/// Thin proxy for the CLAP host params extension.
+pub(crate) struct HostParamsProxy {
+    host: *const clap_host,
+    initialized: Arc<AtomicBool>,
+    host_params: OnceLock<Option<HostParamsCallbacks>>,
+}
+
+impl HostParamsProxy {
+    pub(crate) fn new(host: *const clap_host, initialized: Arc<AtomicBool>) -> Self {
+        Self {
+            host,
+            initialized,
+            host_params: OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn rescan_values(&self) {
+        let Some(params) = self.callbacks() else {
+            log::debug!("host_params.rescan_values: host params extension unavailable");
+            return;
+        };
+
+        if let Some(rescan) = params.rescan {
+            unsafe {
+                rescan(params.host, CLAP_PARAM_RESCAN_VALUES);
+            }
+        } else {
+            log::debug!("host_params.rescan_values: host rescan callback unavailable");
+        }
+    }
+
+    fn callbacks(&self) -> Option<HostParamsCallbacks> {
+        if !self.initialized.load(Ordering::Acquire) {
+            log::debug!("host_params: host extension unavailable before plugin.init");
+            return None;
+        }
+
+        *self.host_params.get_or_init(|| host_params(self.host))
+    }
+}
+
+impl HostParams for HostParamsProxy {
+    fn request_flush(&self) {
+        let Some(params) = self.callbacks() else {
+            log::debug!("host_params.request_flush: host params extension unavailable");
+            return;
+        };
+
+        if let Some(request_flush) = params.request_flush {
+            unsafe {
+                request_flush(params.host);
+            }
+        } else {
+            log::debug!("host_params.request_flush: host request_flush callback unavailable");
+        }
+    }
+    fn rescan(&self, flags: u32) {
+        let Some(params) = self.callbacks() else {
+            log::debug!("host_params.rescan: host params extension unavailable");
+            return;
+        };
+
+        if let Some(rescan) = params.rescan {
+            unsafe {
+                rescan(params.host, flags);
+            }
+        } else {
+            log::debug!("host_params.rescan: host rescan callback unavailable");
+        }
+    }
+
+    fn clear(&self, param_id: u32, flags: u32) {
+        let Some(params) = self.callbacks() else {
+            log::debug!("host_params.clear: host params extension unavailable");
+            return;
+        };
+
+        if let Some(clear) = params.clear {
+            unsafe {
+                clear(params.host, param_id, flags);
+            }
+        } else {
+            log::debug!("host_params.clear: host clear callback unavailable");
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct HostParamsCallbacks {
+    host: *const clap_host,
+    rescan: Option<unsafe extern "C" fn(host: *const clap_host, flags: clap_param_rescan_flags)>,
+    clear: Option<
+        unsafe extern "C" fn(host: *const clap_host, param_id: u32, flags: clap_param_clear_flags),
+    >,
+    request_flush: Option<unsafe extern "C" fn(host: *const clap_host)>,
+}
+
+// The instance lifetime of the host pointer is the minimal unavoidable assumption of the
+// CLAP ABI. Product-facing usage is limited to `request_flush()`; adapter-internal
+// `rescan_values()` is called only after state load, where CLAP gives the callback a
+// main-thread contract.
+unsafe impl Send for HostParamsCallbacks {}
+unsafe impl Sync for HostParamsCallbacks {}
+
+// The host pointer is owned by the host for the plugin instance lifetime. Extension
+// lookup is delayed until after `plugin.init`, and product code only receives the
+// trait object, never this raw pointer.
+unsafe impl Send for HostParamsProxy {}
+unsafe impl Sync for HostParamsProxy {}
+
+fn host_params(host: *const clap_host) -> Option<HostParamsCallbacks> {
+    if host.is_null() {
+        return None;
+    }
+
+    unsafe {
+        let get_extension = (*host).get_extension?;
+        let params = get_extension(host, CLAP_EXT_PARAMS.as_ptr()) as *const clap_host_params;
+        if params.is_null() {
+            return None;
+        }
+        Some(HostParamsCallbacks {
+            host,
+            rescan: (*params).rescan,
+            clear: (*params).clear,
+            request_flush: (*params).request_flush,
+        })
+    }
+}

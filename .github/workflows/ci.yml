@@ -38,6 +38,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Run static quality checks
+        run: cargo xtask quality
+
   rust-test:
     name: Rust lint and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

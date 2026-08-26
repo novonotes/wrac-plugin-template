@@ -13,9 +13,9 @@ use clap_sys::ext::params::{
 };
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
 use super::ffi::{ffi_bool, ffi_u32, ffi_unit, fill_c_char_array, write_c_str_buffer};
-use crate::ParamFlags;
+use super::{PluginInstanceState, RtDepthGuard};
+use crate::interface::ParamFlags;
 use wrac_host_context::PluginFormat;
 
 const CLAP_INVALID_PARAM_ID: u32 = u32::MAX;
@@ -31,23 +31,20 @@ pub(super) static PARAMS: clap_plugin_params = clap_plugin_params {
 };
 
 // VST3/AU/AAX wrappers may invoke parameter queries outside the CLAP `[main-thread]` assumption.
-// The parameters capability reads the Arc fixed at instance creation and does not touch
+// The parameters capability reads the Arc fixed during plugin initialization and does not touch
 // GUI/runtime ownership or lifecycle mutation.
 unsafe extern "C" fn params_count(plugin: *const clap_plugin) -> u32 {
     ffi_u32(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("params.count: missing plugin instance");
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
+            wrac_log::rtwarn!("params.count: missing plugin instance");
             return 0;
         };
-        let Some(parameters) = instance.parameters.as_ref() else {
-            log::warn!("params.count: plugin has no parameters");
+        let Some(runtime) = instance.runtime.get() else {
+            wrac_log::rtwarn!("params.count: plugin instance is not initialized");
             return 0;
         };
-        let count = parameters.param_count();
-        log::debug!(
-            "params.count: count={count} thread={:?}",
-            std::thread::current().id()
-        );
+        let count = runtime.parameters.count();
+        wrac_log::rtdebug!("params.count: count={count}");
         count
     })
 }
@@ -62,15 +59,15 @@ unsafe extern "C" fn params_get_info(
             log::warn!("params.get_info: null output pointer index={param_index}");
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("params.get_info: missing plugin instance index={param_index}");
             return false;
         };
-        let Some(parameters) = instance.parameters.as_ref() else {
-            log::warn!("params.get_info: plugin has no parameters index={param_index}");
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!("params.get_info: plugin instance is not initialized index={param_index}");
             return false;
         };
-        let Some(info) = parameters.param_info(param_index) else {
+        let Some(info) = runtime.parameters.get_info(param_index) else {
             log::warn!("params.get_info: invalid index={param_index}");
             return false;
         };
@@ -98,8 +95,8 @@ unsafe extern "C" fn params_get_info(
             (*param_info).id = info.id;
             (*param_info).flags = parameter_flags(info.flags);
             (*param_info).cookie = ptr::null_mut();
-            fill_c_char_array(&mut (*param_info).name, info.name);
-            fill_c_char_array(&mut (*param_info).module, info.module);
+            fill_c_char_array(&mut (*param_info).name, &info.name);
+            fill_c_char_array(&mut (*param_info).module, &info.module);
             (*param_info).min_value = info.min_value;
             (*param_info).max_value = info.max_value;
             (*param_info).default_value = info.default_value;
@@ -122,25 +119,24 @@ unsafe extern "C" fn params_get_value(
 ) -> bool {
     ffi_bool(|| {
         if out_value.is_null() {
-            log::warn!("params.get_value: null output pointer param_id={param_id}");
+            wrac_log::rtwarn!("params.get_value: null output pointer param_id={param_id}");
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
-            log::warn!("params.get_value: missing plugin instance param_id={param_id}");
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
+            wrac_log::rtwarn!("params.get_value: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Some(parameters) = instance.parameters.as_ref() else {
-            log::warn!("params.get_value: plugin has no parameters param_id={param_id}");
+        let Some(runtime) = instance.runtime.get() else {
+            wrac_log::rtwarn!(
+                "params.get_value: plugin instance is not initialized param_id={param_id}"
+            );
             return false;
         };
-        let Ok(value) = parameters.param_value(param_id) else {
-            log::warn!("params.get_value: invalid param_id={param_id}");
+        let Ok(value) = runtime.parameters.get_value(param_id) else {
+            wrac_log::rtwarn!("params.get_value: invalid param_id={param_id}");
             return false;
         };
-        log::debug!(
-            "params.get_value: param_id={param_id} value={value} thread={:?}",
-            std::thread::current().id()
-        );
+        wrac_log::rtdebug!("params.get_value: param_id={param_id} value={value}");
         unsafe {
             *out_value = value;
         }
@@ -156,15 +152,17 @@ unsafe extern "C" fn params_value_to_text(
     out_buffer_capacity: u32,
 ) -> bool {
     ffi_bool(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("params.value_to_text: missing plugin instance param_id={param_id}");
             return false;
         };
-        let Some(parameters) = instance.parameters.as_ref() else {
-            log::warn!("params.value_to_text: plugin has no parameters param_id={param_id}");
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!(
+                "params.value_to_text: plugin instance is not initialized param_id={param_id}"
+            );
             return false;
         };
-        let Ok(text) = parameters.value_to_text(param_id, value) else {
+        let Ok(text) = runtime.parameters.value_to_text(param_id, value) else {
             log::warn!("params.value_to_text: invalid param_id={param_id} value={value}");
             return false;
         };
@@ -187,7 +185,7 @@ unsafe extern "C" fn params_text_to_value(
             log::warn!("params.text_to_value: null pointer param_id={param_id}");
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             log::warn!("params.text_to_value: missing plugin instance param_id={param_id}");
             return false;
         };
@@ -195,11 +193,13 @@ unsafe extern "C" fn params_text_to_value(
             log::warn!("params.text_to_value: invalid utf8 param_id={param_id}");
             return false;
         };
-        let Some(parameters) = instance.parameters.as_ref() else {
-            log::warn!("params.text_to_value: plugin has no parameters param_id={param_id}");
+        let Some(runtime) = instance.runtime.get() else {
+            log::warn!(
+                "params.text_to_value: plugin instance is not initialized param_id={param_id}"
+            );
             return false;
         };
-        let Ok(value) = parameters.text_to_value(param_id, text) else {
+        let Ok(value) = runtime.parameters.text_to_value(param_id, text) else {
             log::warn!("params.text_to_value: invalid param_id={param_id} text={text}");
             return false;
         };
@@ -220,23 +220,93 @@ unsafe extern "C" fn params_flush(
     out_events: *const clap_output_events,
 ) {
     ffi_unit(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             return;
         };
-        unsafe {
-            let mut events = crate::ProcessEvents::from_raw(in_events, out_events);
-            if let Some(parameters) = instance.parameters.as_ref() {
-                instance
-                    .parameter_edits
-                    .apply_input_parameter_events(parameters.as_ref(), &events.input);
+        let _flush_depth_guard = RtDepthGuard::enter(&instance.rt_flush_depth);
+        let process_depth = instance
+            .rt_process_depth
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if process_depth > 0 {
+            wrac_log::rtdebug!("params.flush enter pd={}", process_depth);
+        }
+        let result = if instance.is_processor_active() {
+            let Some(result) = instance.with_processor_mut(|active| {
+                let Some(active) = active else {
+                    wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
+                    return Ok(());
+                };
+                active.flush_params(param_flush_context(in_events, out_events))
+            }) else {
+                let flush_depth = instance
+                    .rt_flush_depth
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                wrac_log::rtdebug!(
+                    "params.flush active busy pd={} fd={}",
+                    process_depth,
+                    flush_depth
+                );
+                wrac_log::rtwarn!("params.flush: active processor is busy");
+                return;
+            };
+            result
+        } else {
+            let Some(_guard) = instance.try_enter_lifecycle() else {
+                wrac_log::rtwarn!("params.flush: lifecycle is busy");
+                return;
+            };
+            if instance.is_processor_active() {
+                drop(_guard);
+                let Some(result) = instance.with_processor_mut(|active| {
+                    let Some(active) = active else {
+                        wrac_log::rtwarn!("params.flush: active processor state is inconsistent");
+                        return Ok(());
+                    };
+                    active.flush_params(param_flush_context(in_events, out_events))
+                }) else {
+                    let flush_depth = instance
+                        .rt_flush_depth
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    wrac_log::rtdebug!(
+                        "params.flush active busy pd={} fd={}",
+                        process_depth,
+                        flush_depth
+                    );
+                    wrac_log::rtwarn!("params.flush: active processor is busy");
+                    return;
+                };
+                result
             } else {
-                wrac_log::rtwarn!("params.flush: plugin has no parameters");
+                let Some(result) = instance.with_inactive_processor_mut(|inactive| {
+                    let Some(inactive) = inactive else {
+                        wrac_log::rtwarn!(
+                            "params.flush: no active or inactive processor is available"
+                        );
+                        return Ok(());
+                    };
+                    inactive.flush_params(param_flush_context(in_events, out_events))
+                }) else {
+                    wrac_log::rtwarn!("params.flush: inactive processor is busy");
+                    return;
+                };
+                result
             }
-            instance
-                .parameter_edits
-                .drain_output_parameter_events(&mut events.output);
+        };
+        if let Err(error) = result {
+            wrac_log::rtwarn!("params.flush: processor failed: {error}");
         }
     });
+}
+
+fn param_flush_context<'a>(
+    in_events: *const clap_input_events,
+    out_events: *const clap_output_events,
+) -> crate::interface::ParamFlushContext<'a> {
+    crate::interface::ParamFlushContext {
+        events: unsafe { crate::interface::EventLists::from_raw(in_events, out_events) },
+        #[cfg(feature = "raw-clap-forwarding")]
+        raw: unsafe { crate::interface::RawParamFlushContext::from_raw(in_events, out_events) },
+    }
 }
 
 fn parameter_flags(flags: ParamFlags) -> u32 {

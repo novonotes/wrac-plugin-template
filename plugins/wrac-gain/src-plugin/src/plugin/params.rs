@@ -1,7 +1,10 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
-use wrac_clap_adapter::{
-    ParamFlags, ParamInfo, ParamInputEvents, PluginError, PluginParamsExtension, PluginResult,
+use parking_lot::Mutex;
+use wrac_clap_adapter::interface::{
+    HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags, ParamGestureEvent, ParamInfo,
+    ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
 };
 
 use crate::state::SharedState;
@@ -26,7 +29,13 @@ enum ParameterKind {
 #[derive(Debug, Clone, Copy)]
 struct ParameterSpec {
     kind: ParameterKind,
-    info: ParamInfo,
+    id: u32,
+    name: &'static str,
+    module: &'static str,
+    min_value: f64,
+    max_value: f64,
+    default_value: f64,
+    flags: ParamFlags,
     // CLAP exposes normalized host-domain values, while the DSP and GUI use plain
     // product-domain values. Keeping both domains in the spec prevents host metadata,
     // GUI mapping, defaults, and DSP ranges from drifting inside the Rust contract.
@@ -44,15 +53,13 @@ struct ParameterSpec {
 const PARAM_SPECS: &[ParameterSpec] = &[
     ParameterSpec {
         kind: ParameterKind::Bypass,
-        info: ParamInfo {
-            id: PARAM_BYPASS_ID,
-            name: "Bypass",
-            module: "",
-            min_value: 0.0,
-            max_value: 1.0,
-            default_value: 0.0,
-            flags: param_flags(true, true, true, true),
-        },
+        id: PARAM_BYPASS_ID,
+        name: "Bypass",
+        module: "",
+        min_value: 0.0,
+        max_value: 1.0,
+        default_value: 0.0,
+        flags: param_flags(true, true, true, true),
         plain_min: 0.0,
         plain_max: 1.0,
         plain_default: 0.0,
@@ -62,15 +69,13 @@ const PARAM_SPECS: &[ParameterSpec] = &[
     },
     ParameterSpec {
         kind: ParameterKind::Gain,
-        info: ParamInfo {
-            id: PARAM_GAIN_ID,
-            name: "Gain",
-            module: "",
-            min_value: 0.0,
-            max_value: 1.0,
-            default_value: DEFAULT_GAIN_HOST_VALUE,
-            flags: param_flags(true, false, false, false),
-        },
+        id: PARAM_GAIN_ID,
+        name: "Gain",
+        module: "",
+        min_value: 0.0,
+        max_value: 1.0,
+        default_value: DEFAULT_GAIN_HOST_VALUE,
+        flags: param_flags(true, false, false, false),
         plain_min: MIN_GAIN as f64,
         plain_max: MAX_GAIN as f64,
         plain_default: DEFAULT_GAIN as f64,
@@ -121,49 +126,23 @@ impl WracGainParamsExtension {
     }
 }
 
-impl PluginParamsExtension for WracGainParamsExtension {
-    fn param_count(&self) -> u32 {
+impl PluginParamsQuery for WracGainParamsExtension {
+    fn count(&self) -> u32 {
         PARAM_SPECS.len() as u32
     }
 
-    fn param_info(&self, index: u32) -> Option<ParamInfo> {
-        PARAM_SPECS.get(index as usize).map(|spec| spec.info)
+    fn get_info(&self, index: u32) -> Option<ParamInfo> {
+        PARAM_SPECS.get(index as usize).map(param_info)
     }
 
     /// Answers the host's query for the current value of a parameter.
-    fn param_value(&self, param_id: u32) -> PluginResult<f64> {
+    fn get_value(&self, param_id: u32) -> PluginResult<f64> {
         let spec = param_spec(param_id)?;
         let value = self
             .shared
             .parameter_value(param_id)
             .ok_or(PluginError::InvalidParameter)?;
         Ok(plain_to_host(spec, value))
-    }
-
-    /// Called when parameter values arrive from the host as input events.
-    fn apply_param_events(&self, events: ParamInputEvents<'_>) -> PluginResult<()> {
-        for event in events.values() {
-            let Ok(plain_value) = parameter_host_input_to_plain(event.param_id, event.value) else {
-                wrac_log::rtwarn!(
-                    "params.flush: ignoring invalid parameter input param_id={} value={}",
-                    event.param_id,
-                    event.value
-                );
-                continue;
-            };
-            if self
-                .shared
-                .set_parameter_value(event.param_id, plain_value)
-                .is_none()
-            {
-                wrac_log::rtwarn!(
-                    "params.flush: ignoring unknown parameter input param_id={} value={}",
-                    event.param_id,
-                    event.value
-                );
-            }
-        }
-        Ok(())
     }
 
     /// Converts a host-domain value to a display string. Example: 0.5 -> "0.0 dB".
@@ -177,6 +156,92 @@ impl PluginParamsExtension for WracGainParamsExtension {
         let spec = param_spec(param_id)?;
         let plain_value = text_to_plain(spec, text)?;
         Ok(plain_to_host(spec, plain_value as f32))
+    }
+}
+
+/// Product-owned queue for GUI-originated parameter events.
+///
+/// CLAP output event queues only exist during `process` and `flush_params`, so GUI
+/// commands store typed CLAP events here and ask the host for a params flush.
+pub(crate) struct WracGainParamOutputQueue {
+    pending: Mutex<VecDeque<OutputEvent>>,
+    flush_requester: Arc<dyn HostParams>,
+}
+
+impl WracGainParamOutputQueue {
+    pub(crate) fn new(flush_requester: Arc<dyn HostParams>) -> Self {
+        Self {
+            pending: Mutex::new(VecDeque::new()),
+            flush_requester,
+        }
+    }
+
+    pub(crate) fn begin_edit(&self, param_id: u32) {
+        self.push(OutputEvent::ParamGestureBegin(ParamGestureEvent {
+            time: 0,
+            param_id,
+        }));
+    }
+
+    pub(crate) fn update_edit(&self, param_id: u32, value: f64) {
+        self.push(OutputEvent::ParamValue(ParamValueEvent {
+            time: 0,
+            param_id,
+            value,
+            note_id: -1,
+            port_index: -1,
+            channel: -1,
+            key: -1,
+        }));
+    }
+
+    pub(crate) fn end_edit(&self, param_id: u32) {
+        self.push(OutputEvent::ParamGestureEnd(ParamGestureEvent {
+            time: 0,
+            param_id,
+        }));
+    }
+
+    pub(crate) fn drain(&self, events: &mut OutputEvents<'_>) {
+        let Some(mut pending) = self.pending.try_lock() else {
+            wrac_log::rtdebug!("param_output_queue.drain: pending queue is busy");
+            return;
+        };
+
+        while let Some(event) = pending.pop_front() {
+            if !events.try_push(event.clone()) {
+                pending.push_front(event);
+                break;
+            }
+        }
+    }
+
+    fn push(&self, event: OutputEvent) {
+        self.pending.lock().push_back(event);
+        self.flush_requester.request_flush();
+    }
+}
+
+pub(crate) fn apply_param_input_events(shared: &SharedState, events: &InputEvents<'_>) {
+    for event in events.parameter_values() {
+        let Ok(plain_value) = parameter_host_input_to_plain(event.param_id, event.value) else {
+            wrac_log::rtwarn!(
+                "params.input: ignoring invalid parameter input param_id={} value={}",
+                event.param_id,
+                event.value
+            );
+            continue;
+        };
+        if shared
+            .set_parameter_value(event.param_id, plain_value)
+            .is_none()
+        {
+            wrac_log::rtwarn!(
+                "params.input: ignoring unknown parameter input param_id={} value={}",
+                event.param_id,
+                event.value
+            );
+        }
     }
 }
 
@@ -224,7 +289,7 @@ fn param_spec(parameter_id: u32) -> PluginResult<&'static ParameterSpec> {
     // by id after discovery so inserting a new parameter does not silently reroute edits.
     PARAM_SPECS
         .iter()
-        .find(|spec| spec.info.id == parameter_id)
+        .find(|spec| spec.id == parameter_id)
         .ok_or(PluginError::InvalidParameter)
 }
 
@@ -235,7 +300,7 @@ pub(crate) fn clamp_gain(gain: f32) -> f32 {
 }
 
 pub(crate) fn parameter_infos() -> impl Iterator<Item = ParamInfo> {
-    PARAM_SPECS.iter().map(|spec| spec.info)
+    PARAM_SPECS.iter().map(param_info)
 }
 
 /// Converts a plain value to a display string. GUI payloads route through here too, so
@@ -266,8 +331,8 @@ pub(crate) fn notify_gui_parameters(shared: &SharedState, mut notify: impl FnMut
     // still maps the gain control explicitly in TypeScript, but Rust owns the list of
     // parameters worth pushing over the WebView channel.
     for spec in PARAM_SPECS.iter().filter(|spec| spec.gui_role.is_some()) {
-        if let Some(value) = shared.parameter_value(spec.info.id) {
-            notify(spec.info.id, value);
+        if let Some(value) = shared.parameter_value(spec.id) {
+            notify(spec.id, value);
         }
     }
 }
@@ -303,6 +368,18 @@ pub(crate) fn gain_db_text(gain: f64) -> String {
 fn gain_spec() -> &'static ParameterSpec {
     PARAM_SPECS
         .iter()
-        .find(|spec| spec.info.id == PARAM_GAIN_ID)
+        .find(|spec| spec.id == PARAM_GAIN_ID)
         .expect("PARAM_GAIN_ID must be present in PARAM_SPECS")
+}
+
+fn param_info(spec: &ParameterSpec) -> ParamInfo {
+    ParamInfo {
+        id: spec.id,
+        name: spec.name.to_string(),
+        module: spec.module.to_string(),
+        min_value: spec.min_value,
+        max_value: spec.max_value,
+        default_value: spec.default_value,
+        flags: spec.flags,
+    }
 }

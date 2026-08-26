@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use wrac_clap_adapter::{
+use wrac_clap_adapter::interface::{
     AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
     PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginError, PluginResult,
 };
@@ -9,7 +9,7 @@ use wrac_clap_adapter::{
 /// Source of truth for the audio layout negotiated with the host.
 ///
 /// Host port queries and configurable-audio-ports apply operations read/write this store,
-/// and wrappers may issue those queries from audio/render workers. `Processor::process()`
+/// and wrappers may issue those queries from audio/render workers. `ActiveProcessor::process()`
 /// still uses the snapshot captured at `activate()`, so layout changes cannot alter the
 /// running processor's buffer contract.
 pub(super) struct AudioLayoutStore {
@@ -54,7 +54,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
         (index == 0).then_some(if is_input {
             AudioPortInfo {
                 id: 1,
-                name: "Main In",
+                name: "Main In".to_string(),
                 flags: AudioPortFlags {
                     is_main: true,
                     ..AudioPortFlags::default()
@@ -66,7 +66,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
         } else {
             AudioPortInfo {
                 id: 2,
-                name: "Main Out",
+                name: "Main Out".to_string(),
                 flags: AudioPortFlags {
                     is_main: true,
                     ..AudioPortFlags::default()
@@ -84,7 +84,7 @@ impl PluginAudioPortsExtension for WracGainAudioPorts {
 /// Mutation via `&self` is intentional: the adapter calls this without acquiring the
 /// `&mut self` lock (see [`WracGainPlugin`](super::WracGainPlugin)). This does not mean
 /// changes are allowed while active — the adapter enforces that this is only called when
-/// no `Processor` exists (inactive).
+/// no active processor exists.
 pub(super) struct WracGainConfigurableAudioPorts {
     layout: Arc<AudioLayoutStore>,
 }
@@ -107,7 +107,7 @@ impl PluginConfigurableAudioPortsExtension for WracGainConfigurableAudioPorts {
         &self,
         requests: &[AudioPortConfigRequest],
     ) -> PluginResult<()> {
-        // The adapter rejects configuration apply while a Processor exists. This updates
+        // The adapter rejects configuration apply while an active processor exists. This updates
         // only the non-RT query store; the audio thread uses the snapshot captured at activate.
         let previous_channel_count = self.layout.channel_count();
         let channel_count =
@@ -176,7 +176,7 @@ fn is_supported_audio_port_request(request: &AudioPortConfigRequest) -> bool {
 mod tests {
     // Unit test examples for pure logic that can be verified without a host or CLAP runtime.
 
-    use wrac_clap_adapter::{AudioPortConfigRequest, AudioPortType};
+    use wrac_clap_adapter::interface::{AudioPortConfigRequest, AudioPortType};
 
     use super::resolve_audio_channel_count;
 
