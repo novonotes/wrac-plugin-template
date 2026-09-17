@@ -5,7 +5,7 @@ use crate::{
     context::Context,
     target_resolution::resolve_build_targets_from_metadata,
     targets::{Platform, Target},
-    util::{ensure_exists, env_value_or, remove_if_exists, run_with_language},
+    util::{ensure_exists, macos_deployment_target, remove_if_exists, run_with_language},
 };
 
 use super::{
@@ -51,7 +51,7 @@ pub fn build_macos_universal_wrappers(ctx: &Context, targets: &[WrapperTarget]) 
     // Do not reuse the native target directory: Cargo may otherwise make a host-architecture
     // archive look current after switching between native and universal workflows.
     let cargo_root = ctx.wrac_dir().join("cargo/macos-universal");
-    let deployment_target = env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0");
+    let deployment_target = macos_deployment_target();
     let library_name = ctx.platform.static_library_name(&ctx.metadata.package_name);
     let mut architecture_libraries = Vec::new();
 
