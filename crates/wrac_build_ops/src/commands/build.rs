@@ -12,7 +12,7 @@ use crate::metadata::PluginProductMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::util::{
-    ensure_exists, env_value_or, on_off, remove_if_exists, run_output_with_language,
+    ensure_exists, macos_deployment_target, on_off, remove_if_exists, run_output_with_language,
     run_with_language, run_with_optional_xcbeautify_language,
 };
 use crate::{Result, XtaskOutputLanguage};
@@ -216,10 +216,7 @@ pub fn build_rust_plugin(
     }
     if ctx.platform == Platform::Macos {
         // Respect CI and user environment variables; inject the template's safe default only when unset.
-        command.env(
-            "MACOSX_DEPLOYMENT_TARGET",
-            env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
-        );
+        command.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target());
     }
     run_with_language(command.current_dir(&ctx.root), ctx.output_language)?;
 
@@ -473,10 +470,12 @@ fn configure_wrapper_with_options(
     }
 
     if ctx.platform == Platform::Macos {
-        let macos_deployment_target = env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0");
         push_cmake_arg(
             &mut args,
-            format!("-DCMAKE_OSX_DEPLOYMENT_TARGET={macos_deployment_target}"),
+            format!(
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET={}",
+                macos_deployment_target()
+            ),
         );
         if let Some(architectures) = options.macos_architectures {
             push_cmake_arg(
@@ -532,10 +531,7 @@ fn configure_wrapper_with_options(
     let mut configure = Command::new("cmake");
     configure.args(&args);
     if ctx.platform == Platform::Macos {
-        configure.env(
-            "MACOSX_DEPLOYMENT_TARGET",
-            env_value_or("MACOSX_DEPLOYMENT_TARGET", "11.0"),
-        );
+        configure.env("MACOSX_DEPLOYMENT_TARGET", macos_deployment_target());
     }
     run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
     write_cmake_configure_stamp(&build_dir, &args, &ctx.wrapper_dir)?;

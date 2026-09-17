@@ -269,8 +269,20 @@ pub(crate) fn common_program_files() -> Result<PathBuf> {
         .ok_or_else(|| "CommonProgramFiles is not set".into())
 }
 
-pub(crate) fn env_value_or(name: &str, fallback: &str) -> String {
-    env::var(name).unwrap_or_else(|_| fallback.to_owned())
+/// macOS plugin bundle の既定 deployment target。
+///
+/// Xcode 27 以降は 12.0 未満の deployment target を構成時に拒否するため、
+/// この値を下限として扱う。clap_wrapper_builder/CMakeLists.txt の既定値と
+/// 揃える必要がある。
+const DEFAULT_MACOS_DEPLOYMENT_TARGET: &str = "12.0";
+
+/// macOS の deployment target を、環境変数による上書き込みで解決する。
+///
+/// 呼び出し元ごとに既定値が分岐すると bundle 間で最小 OS が食い違うため、
+/// 環境変数の参照箇所をここへ集約する。
+pub(crate) fn macos_deployment_target() -> String {
+    env::var("MACOSX_DEPLOYMENT_TARGET")
+        .unwrap_or_else(|_| DEFAULT_MACOS_DEPLOYMENT_TARGET.to_owned())
 }
 
 pub(crate) fn on_off(value: bool) -> &'static str {
