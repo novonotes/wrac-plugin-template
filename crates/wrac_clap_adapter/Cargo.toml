@@ -15,5 +15,9 @@ parking_lot = "0.12"
 wrac_host_context = { workspace = true }
 wrac_log = { workspace = true }
 
+[features]
+default = []
+raw-clap-forwarding = []
+
 [lints.rust]
 unreachable_pub = "deny"

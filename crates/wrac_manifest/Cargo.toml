@@ -1,0 +1,15 @@
+[package]
+name = "wrac_manifest"
+version = "0.1.0"
+edition = "2024"
+description = "Manifest parser and conversion helpers for WRAC plugins"
+license = "MIT"
+repository = "https://github.com/novonotes/wrac-plugin-template"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[lints.rust]
+unreachable_pub = "deny"

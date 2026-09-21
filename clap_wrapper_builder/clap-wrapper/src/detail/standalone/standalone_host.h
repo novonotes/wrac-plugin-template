@@ -18,6 +18,12 @@
 #endif
 
 #include "RtAudio.h"
+
+// Preserve the upstream standalone behavior unless the embedding build declares that physical
+// audio capture is outside the app's capability set.
+#ifndef CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
+#define CLAP_WRAPPER_STANDALONE_AUDIO_INPUT 1
+#endif
 #include "RtMidi.h"
 
 #ifdef __GNUC__

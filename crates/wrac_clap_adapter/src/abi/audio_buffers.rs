@@ -1,7 +1,7 @@
 use clap_sys::audio_buffer::clap_audio_buffer;
 use clap_sys::process::clap_process;
 
-use crate::{AudioBufferError, AudioProcessBuffer};
+use crate::interface::{AudioBufferError, AudioProcessBuffer};
 
 // CLAP audio buffer arrays are valid only for the duration of the callback. Here they are
 // converted to slices bound to the callback lifetime without interpreting port or channel layout.

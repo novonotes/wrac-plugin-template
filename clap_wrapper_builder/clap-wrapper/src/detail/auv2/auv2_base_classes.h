@@ -20,10 +20,12 @@
 #include <iostream>
 #include <memory>
 #include <map>
+#include <atomic>
 
 #include "process.h"
 #include "parameter.h"
 #include "detail/shared/fixedqueue.h"
+#include "detail/shared/spinlock.h"
 #include "detail/os/osutil.h"
 #include "detail/clap/automation.h"
 
@@ -566,6 +568,11 @@ class WrapAsAUV2 : public ausdk::AUBase,
 
   std::atomic_bool _requestUICallback = false;
   std::atomic_bool _flushRequested = false;
+  std::atomic_bool _processEverCalled = false;
+  // CLAP requires params.flush() and process() to be mutually exclusive. AUv2
+  // can run idle callbacks while GarageBand is rendering, so use the same
+  // process/flush exclusion model as the VST3 wrapper.
+  ClapWrapper::detail::shared::SpinLock _processOrFlushLock;
 
   // the queue from audiothread to UI thread
   ClapWrapper::detail::shared::fixedqueue<queueEvent, 8192> _queueToUI;

@@ -8,9 +8,9 @@ use clap_sys::ext::audio_ports::{
 };
 use clap_sys::plugin::clap_plugin;
 
-use super::PluginInstance;
+use super::PluginInstanceState;
 use super::ffi::{ffi_bool, ffi_u32, fill_c_char_array};
-use crate::{AudioPortFlags, AudioPortType};
+use crate::interface::{AudioPortFlags, AudioPortType};
 
 pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports {
     count: Some(audio_ports_count),
@@ -19,11 +19,15 @@ pub(super) static AUDIO_PORTS: clap_plugin_audio_ports = clap_plugin_audio_ports
 
 unsafe extern "C" fn audio_ports_count(plugin: *const clap_plugin, is_input: bool) -> u32 {
     ffi_u32(|| {
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!("audio_ports.count: missing plugin instance is_input={is_input}");
             return 0;
         };
-        let Some(audio_ports) = instance.audio_ports.as_ref() else {
+        let Some(audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.audio_ports.as_ref())
+        else {
             wrac_log::rtwarn!("audio_ports.count: plugin has no audio ports is_input={is_input}");
             return 0;
         };
@@ -44,13 +48,17 @@ unsafe extern "C" fn audio_ports_get(
             );
             return false;
         }
-        let Some(instance) = (unsafe { PluginInstance::from_plugin(plugin) }) else {
+        let Some(instance) = (unsafe { PluginInstanceState::from_plugin(plugin) }) else {
             wrac_log::rtwarn!(
                 "audio_ports.get: missing plugin instance index={index} is_input={is_input}"
             );
             return false;
         };
-        let Some(audio_ports) = instance.audio_ports.as_ref() else {
+        let Some(audio_ports) = instance
+            .runtime
+            .get()
+            .and_then(|runtime| runtime.audio_ports.as_ref())
+        else {
             wrac_log::rtwarn!(
                 "audio_ports.get: plugin has no audio ports index={index} is_input={is_input}"
             );
@@ -67,7 +75,7 @@ unsafe extern "C" fn audio_ports_get(
             (*info).channel_count = port.channel_count;
             (*info).port_type = audio_port_type(port.port_type);
             (*info).in_place_pair = port.in_place_pair.unwrap_or(u32::MAX);
-            fill_c_char_array(&mut (*info).name, port.name);
+            fill_c_char_array(&mut (*info).name, &port.name);
         }
         true
     })
