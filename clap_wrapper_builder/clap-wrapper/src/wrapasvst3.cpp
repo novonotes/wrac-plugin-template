@@ -249,9 +249,30 @@ tresult PLUGIN_API ClapAsVst3::process(Vst::ProcessData &data)
 
 tresult PLUGIN_API ClapAsVst3::canProcessSampleSize(int32 symbolicSampleSize)
 {
-  if (symbolicSampleSize != Steinberg::Vst::kSample32)
+  if (symbolicSampleSize == Steinberg::Vst::kSample32)
+  {
+    return kResultOk;
+  }
+  if (symbolicSampleSize != Steinberg::Vst::kSample64 || !_plugin ||
+      !_plugin->_ext._audioports)
   {
     return kResultFalse;
+  }
+
+  // VST3 selects one precision for the complete process call, so every CLAP port must
+  // explicitly accept 64-bit buffers before the wrapper can advertise that precision.
+  for (auto isInput : {true, false})
+  {
+    auto portCount = _plugin->_ext._audioports->count(_plugin->_plugin, isInput);
+    for (decltype(portCount) portIndex = 0; portIndex < portCount; ++portIndex)
+    {
+      clap_audio_port_info_t info{};
+      if (!_plugin->_ext._audioports->get(_plugin->_plugin, portIndex, isInput, &info) ||
+          !(info.flags & CLAP_AUDIO_PORT_SUPPORTS_64BITS))
+      {
+        return kResultFalse;
+      }
+    }
   }
   return kResultOk;
 }
@@ -319,7 +340,9 @@ uint32 PLUGIN_API ClapAsVst3::getTailSamples()
 
 tresult PLUGIN_API ClapAsVst3::setupProcessing(Vst::ProcessSetup &newSetup)
 {
-  if (newSetup.symbolicSampleSize != Vst::kSample32)
+  // Reject unknown layouts here so ProcessAdapter can map the selected VST3 buffer type
+  // directly to the matching CLAP buffer without a precision-changing conversion.
+  if (canProcessSampleSize(newSetup.symbolicSampleSize) != kResultOk)
   {
     return kResultFalse;
   }

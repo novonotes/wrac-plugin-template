@@ -457,7 +457,18 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
     {
       if (_vstdata->inputs[i].numChannels == (Steinberg::int32)_input_ports[i].channel_count)
       {
-        _input_ports[i].data32 = _vstdata->inputs[i].channelBuffers32;
+        // CLAP requires exactly one sample pointer representation per port. Mapping the
+        // host-selected representation directly preserves 64-bit samples end to end.
+        if (_vstdata->symbolicSampleSize == Steinberg::Vst::kSample64)
+        {
+          _input_ports[i].data32 = nullptr;
+          _input_ports[i].data64 = _vstdata->inputs[i].channelBuffers64;
+        }
+        else
+        {
+          _input_ports[i].data64 = nullptr;
+          _input_ports[i].data32 = _vstdata->inputs[i].channelBuffers32;
+        }
       }
       else
       {
@@ -470,7 +481,16 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
     {
       if (_vstdata->outputs[i].numChannels == (Steinberg::int32)_output_ports[i].channel_count)
       {
-        _output_ports[i].data32 = _vstdata->outputs[i].channelBuffers32;
+        if (_vstdata->symbolicSampleSize == Steinberg::Vst::kSample64)
+        {
+          _output_ports[i].data32 = nullptr;
+          _output_ports[i].data64 = _vstdata->outputs[i].channelBuffers64;
+        }
+        else
+        {
+          _output_ports[i].data64 = nullptr;
+          _output_ports[i].data32 = _vstdata->outputs[i].channelBuffers32;
+        }
       }
       else
       {

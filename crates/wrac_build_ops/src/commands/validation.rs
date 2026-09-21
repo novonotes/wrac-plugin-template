@@ -899,7 +899,12 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
         .arg("-DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF")
         .arg("-DSMTG_ENABLE_VSTGUI_SUPPORT=OFF");
     if ctx.platform == Platform::Macos {
-        configure.arg("-G").arg("Xcode");
+        // The SDK defaults to macOS 10.13, which current Xcode releases reject before the
+        // compiler probe. Keep validation aligned with the template's supported minimum.
+        configure
+            .arg("-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0")
+            .arg("-G")
+            .arg("Xcode");
     }
     run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
 
