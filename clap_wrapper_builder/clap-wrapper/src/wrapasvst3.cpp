@@ -249,7 +249,8 @@ tresult PLUGIN_API ClapAsVst3::process(Vst::ProcessData &data)
 
 tresult PLUGIN_API ClapAsVst3::canProcessSampleSize(int32 symbolicSampleSize)
 {
-  if (symbolicSampleSize != Steinberg::Vst::kSample32)
+  if (symbolicSampleSize != Steinberg::Vst::kSample32 &&
+      symbolicSampleSize != Steinberg::Vst::kSample64)
   {
     return kResultFalse;
   }
@@ -319,7 +320,10 @@ uint32 PLUGIN_API ClapAsVst3::getTailSamples()
 
 tresult PLUGIN_API ClapAsVst3::setupProcessing(Vst::ProcessSetup &newSetup)
 {
-  if (newSetup.symbolicSampleSize != Vst::kSample32)
+  // Reject unknown layouts here so ProcessAdapter can map the selected VST3 buffer type
+  // directly to the matching CLAP buffer without a precision-changing conversion.
+  if (newSetup.symbolicSampleSize != Vst::kSample32 &&
+      newSetup.symbolicSampleSize != Vst::kSample64)
   {
     return kResultFalse;
   }

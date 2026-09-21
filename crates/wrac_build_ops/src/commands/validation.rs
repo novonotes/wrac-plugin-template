@@ -14,7 +14,7 @@ use crate::profile::BuildProfile;
 use crate::targets::{Platform, ValidateTarget};
 use crate::util::{
     copy_path, ensure_exists, print_detail, print_section, remove_if_exists,
-    run_output_with_language, run_with_language, run_with_optional_xcbeautify_language,
+    run_output_with_language, run_with_language,
 };
 
 /// Caller-owned choices for external format validator adapters.
@@ -899,7 +899,9 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
         .arg("-DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF")
         .arg("-DSMTG_ENABLE_VSTGUI_SUPPORT=OFF");
     if ctx.platform == Platform::Macos {
-        configure.arg("-G").arg("Xcode");
+        // The validator is a command-line tool and does not need an Xcode project. The
+        // default Makefiles generator also avoids coupling validation to simulator plugins.
+        configure.arg("-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0");
     }
     run_with_language(configure.current_dir(&ctx.root), ctx.output_language)?;
 
@@ -911,20 +913,8 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
         .arg("validator")
         .arg("--config")
         .arg("Debug");
-    if ctx.platform == Platform::Macos {
-        build.args([
-            "--",
-            "-quiet",
-            "OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-unknown-warning-option -Wno-gnu-statement-expression-from-macro-expansion -Wno-shorten-64-to-32 -Wno-perf-constraint-implies-noexcept",
-        ]);
-    }
-
     let build = build.current_dir(&ctx.root);
-    if ctx.platform == Platform::Macos {
-        run_with_optional_xcbeautify_language(build, ctx.output_language)?;
-    } else {
-        run_with_language(build, ctx.output_language)?;
-    }
+    run_with_language(build, ctx.output_language)?;
 
     if validator.exists() {
         Ok(validator)
