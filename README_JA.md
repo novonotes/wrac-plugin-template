@@ -87,6 +87,8 @@ cargo xtask build --release
 cargo xtask build --target=vst3
 # AU をリリースビルド
 cargo xtask build --target=au --release
+# プラグインのクレートで Cargo feature を有効にしてデバッグビルド
+cargo xtask build --features my-feature
 # プラグインをビルドして検証
 cargo xtask validate
 # プラグインをビルドしてインストール

@@ -94,6 +94,9 @@ struct BuildArgs {
     target: Vec<Target>,
     #[arg(long = "plugin-id")]
     plugin_id: Option<String>,
+    /// Cargo features to enable for the plugin crate, separated by commas.
+    #[arg(long, value_delimiter = ',')]
+    features: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -417,7 +420,7 @@ fn completed(result: Result<()>) -> Result<TaskOutcome> {
 
 fn execute_build(config: &XtaskConfig, args: BuildArgs) -> Result<()> {
     for package in select_packages(config, args.package.as_deref(), args.all)? {
-        let ctx = WracContext::new(config, &package)?;
+        let ctx = WracContext::new(config, &package)?.with_cargo_features(args.features.clone());
         let profile = BuildProfile::from_release(args.release);
         let targets = resolve_build_targets_from_metadata(&ctx, &args.target)?;
         let artifact_plan =

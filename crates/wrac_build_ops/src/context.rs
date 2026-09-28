@@ -22,6 +22,7 @@ pub struct WracContext {
     pub(crate) default_aax_sdk_root: Option<PathBuf>,
     pub output_language: XtaskOutputLanguage,
     pub(crate) metadata: PluginMetadata,
+    pub(crate) cargo_features: Vec<String>,
 }
 
 impl WracContext {
@@ -57,7 +58,18 @@ impl WracContext {
             default_aax_sdk_root: config.default_aax_sdk_root.clone(),
             output_language: config.output_language,
             metadata,
+            cargo_features: Vec::new(),
         })
+    }
+
+    /// Enables Cargo features when building the plugin crate.
+    ///
+    /// Features select build variants of the same plugin, such as development-only diagnostics.
+    /// They apply to both the dynamic and static libraries, so wrapper formats built from the
+    /// static library see the same variant as the CLAP bundle.
+    pub fn with_cargo_features(mut self, features: Vec<String>) -> Self {
+        self.cargo_features = features;
+        self
     }
 
     pub fn gui_dir(&self) -> PathBuf {
