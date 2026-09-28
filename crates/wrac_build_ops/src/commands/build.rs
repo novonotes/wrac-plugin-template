@@ -211,6 +211,9 @@ pub fn build_rust_plugin(
         .arg(build.cargo_target_dir(ctx))
         .arg("--manifest-path")
         .arg(ctx.plugin_manifest());
+    if !ctx.cargo_features.is_empty() {
+        command.arg("--features").arg(ctx.cargo_features.join(","));
+    }
     if let Some(flag) = profile.cargo_flag() {
         command.arg(flag);
     }

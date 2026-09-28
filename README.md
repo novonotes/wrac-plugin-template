@@ -90,6 +90,8 @@ cargo xtask build --release
 cargo xtask build --target=vst3
 # Release build for AU
 cargo xtask build --target=au --release
+# Debug build with Cargo features enabled on the plugin crate
+cargo xtask build --features my-feature
 # Build and validate plugins
 cargo xtask validate
 # Build and install plugins
