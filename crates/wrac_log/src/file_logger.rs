@@ -239,6 +239,8 @@ fn resolve_release_log_dir(app_name: &str) -> Option<PathBuf> {
     None
 }
 
+// Only `init_test` reaches this, and it is a no-op in release builds.
+#[cfg(debug_assertions)]
 fn init_stderr(dotenv_rust_log: Option<&str>) {
     record_current_log_paths(None);
     announce_log_output("stderr");
@@ -249,6 +251,8 @@ fn init_stderr(dotenv_rust_log: Option<&str>) {
     crate::rt::init_rt_buffer();
 }
 
+// Only `init_test` reaches this, and it is a no-op in release builds.
+#[cfg(debug_assertions)]
 fn init_with_file(log_file: impl AsRef<Path>, dotenv_rust_log: Option<&str>) {
     let log_file = log_file.as_ref();
     announce_log_output(&log_file.to_string_lossy());
@@ -384,6 +388,8 @@ fn record_current_log_paths(log_file: Option<PathBuf>) {
     let _ = CURRENT_LOG_DIR.set(log_dir);
 }
 
+// Only `init_test` reaches this, and it is a no-op in release builds.
+#[cfg(debug_assertions)]
 fn announce_log_output(destination: &str) {
     eprintln!("[wrac_log] output={destination}");
 }
@@ -398,6 +404,9 @@ fn apply_default_filter(builder: &mut Builder, dotenv_rust_log: Option<&str>) {
 
         builder.filter_level(default_level_filter());
     }
+    // Release builds ignore `.env` overrides, so the value is intentionally unused there.
+    #[cfg(not(debug_assertions))]
+    let _ = dotenv_rust_log;
 }
 
 fn build_file_logger(config: LogConfig, writer: LazyFileWriter) -> Logger {
@@ -425,6 +434,8 @@ fn install_lazy_logger(
     install_wrac_logger(logger, Some(file_writer), LevelFilter::Trace)
 }
 
+// Only `init_test` reaches this, and it is a no-op in release builds.
+#[cfg(debug_assertions)]
 fn install_logger(
     mut builder: Builder,
     file_writer: Option<LazyFileWriter>,
@@ -514,6 +525,8 @@ impl LazyFileWriter {
         Self { shared }
     }
 
+    // Only `init_test` reaches this, and it is a no-op in release builds.
+    #[cfg(debug_assertions)]
     fn from_open_file(file: std::fs::File) -> Self {
         let shared = Arc::new(LazyFileWriterShared {
             config: Mutex::new(None),
@@ -604,6 +617,8 @@ impl LazyFileWriter {
 }
 
 enum LoggerInner {
+    // Only `init_test` constructs this, and it is a no-op in release builds.
+    #[cfg(debug_assertions)]
     Immediate(Logger),
     Lazy {
         logger: OnceLock<Logger>,
@@ -620,6 +635,7 @@ struct WracLogger {
 impl WracLogger {
     fn logger(&self) -> &Logger {
         match &self.inner {
+            #[cfg(debug_assertions)]
             LoggerInner::Immediate(logger) => logger,
             LoggerInner::Lazy {
                 logger,
@@ -637,6 +653,7 @@ impl WracLogger {
 
     fn rt_enabled(&self, metadata: &Metadata<'_>) -> bool {
         match &self.inner {
+            #[cfg(debug_assertions)]
             LoggerInner::Immediate(logger) => logger.enabled(metadata),
             LoggerInner::Lazy { logger, .. } => logger
                 .get()
@@ -759,6 +776,8 @@ fn flush_log_outputs(destination: &mut LogDestination) -> std::io::Result<()> {
     }
 }
 
+// `init_test` and unit tests are the only callers.
+#[cfg(any(debug_assertions, test))]
 fn get_test_name() -> String {
     std::thread::current()
         .name()

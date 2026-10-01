@@ -1,4 +1,6 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(debug_assertions)]
+use std::path::PathBuf;
 
 #[cfg(debug_assertions)]
 pub(super) fn rust_log_from_debug_dotenv(search_dir: Option<&Path>) -> Option<String> {
