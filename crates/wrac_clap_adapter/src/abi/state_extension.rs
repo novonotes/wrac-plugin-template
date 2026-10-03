@@ -77,7 +77,7 @@ unsafe extern "C" fn state_load(plugin: *const clap_plugin, stream: *const clap_
             log::warn!("state.load: missing plugin instance");
             return false;
         };
-        if instance.is_in_realtime_callback() {
+        if instance.is_current_thread_in_realtime_callback() {
             wrac_log::rtwarn!("state.load: rejected from realtime callback");
             return false;
         }

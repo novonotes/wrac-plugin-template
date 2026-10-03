@@ -413,7 +413,7 @@ pub(super) unsafe extern "C" fn plugin_process(
                 }
             }
         }) else {
-            let flush_depth = instance.rt_flush_depth.load(Ordering::Relaxed);
+            let flush_depth = instance.rt_flush_depth.depth();
             wrac_log::rtdebug!("plugin.process busy fd={}", flush_depth);
             wrac_log::rtwarn!("plugin.process: processor is busy");
             return CLAP_PROCESS_SLEEP;

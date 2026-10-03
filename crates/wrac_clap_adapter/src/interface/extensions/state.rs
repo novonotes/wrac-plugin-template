@@ -50,5 +50,8 @@ pub trait PluginStateExtension: Send + Sync + 'static {
     fn save_state(&self) -> PluginResult<PreparedStateSave>;
 
     /// Called from CLAP `state.load`. `[non-realtime]`
+    ///
+    /// Hosts may call this while the audio thread is processing an active instance, so
+    /// implementations must not assume that `process` is paused during restore.
     fn restore_state(&self, state: State) -> PluginResult<()>;
 }

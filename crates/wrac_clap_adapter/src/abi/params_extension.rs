@@ -224,9 +224,7 @@ unsafe extern "C" fn params_flush(
             return;
         };
         let _flush_depth_guard = RtDepthGuard::enter(&instance.rt_flush_depth);
-        let process_depth = instance
-            .rt_process_depth
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let process_depth = instance.rt_process_depth.depth();
         if process_depth > 0 {
             wrac_log::rtdebug!("params.flush enter pd={}", process_depth);
         }
@@ -238,9 +236,7 @@ unsafe extern "C" fn params_flush(
                 };
                 active.flush_params(param_flush_context(in_events, out_events))
             }) else {
-                let flush_depth = instance
-                    .rt_flush_depth
-                    .load(std::sync::atomic::Ordering::Relaxed);
+                let flush_depth = instance.rt_flush_depth.depth();
                 wrac_log::rtdebug!(
                     "params.flush active busy pd={} fd={}",
                     process_depth,
@@ -264,9 +260,7 @@ unsafe extern "C" fn params_flush(
                     };
                     active.flush_params(param_flush_context(in_events, out_events))
                 }) else {
-                    let flush_depth = instance
-                        .rt_flush_depth
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let flush_depth = instance.rt_flush_depth.depth();
                     wrac_log::rtdebug!(
                         "params.flush active busy pd={} fd={}",
                         process_depth,
