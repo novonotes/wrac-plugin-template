@@ -15,8 +15,8 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 
 use super::{
-    PluginInstanceState, plugin_activate, plugin_destroy, plugin_get_extension, plugin_init,
-    plugin_on_main_thread,
+    PluginInstanceState, RtCallbackTracker, RtDepthGuard, plugin_activate, plugin_destroy,
+    plugin_get_extension, plugin_init, plugin_on_main_thread,
 };
 use crate::entry::EntryRegistration;
 use crate::interface::{
@@ -726,4 +726,20 @@ impl ActiveProcessor for TestActiveProcessor {
     fn flush_params(&mut self, _context: ParamFlushContext<'_>) -> PluginResult<()> {
         Ok(())
     }
+}
+
+#[test]
+fn realtime_callback_tracking_only_counts_the_entering_thread() {
+    let tracker = RtCallbackTracker::new();
+    let _guard = RtDepthGuard::enter(&tracker);
+
+    // `state.load` from the main thread may overlap with `process` on the audio thread.
+    // Only a re-entrant call from inside the callback itself must be rejected.
+    assert!(tracker.is_entered_by_current_thread());
+    std::thread::scope(|scope| {
+        scope.spawn(|| assert!(!tracker.is_entered_by_current_thread()));
+    });
+
+    drop(_guard);
+    assert!(!tracker.is_entered_by_current_thread());
 }

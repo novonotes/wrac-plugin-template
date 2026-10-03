@@ -6,7 +6,7 @@
 use std::cell::UnsafeCell;
 use std::ffi::CStr;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
@@ -65,18 +65,67 @@ const CLAP_PLUGIN_AS_VST3: &CStr = c"clap.plugin-info-as-vst3/0";
 const CLAP_PLUGIN_FACTORY_INFO_AAX: &CStr = c"clap.plugin-factory-info-as-aax/1";
 const WRAC_PLUGIN_MAIN_THREAD_HOOK: &CStr = c"com.novonotes.wrac.plugin-main-thread-hook/0";
 
-pub(crate) struct RtDepthGuard<'a>(&'a AtomicU32);
+/// Tracks one kind of realtime callback (`process` or `params.flush`) of one instance.
+///
+/// The thread that entered the callback is recorded so that main-thread calls such as
+/// `state.load` can tell a re-entrant call from the callback itself apart from a legitimate
+/// call that merely overlaps with processing on the audio thread.
+pub(crate) struct RtCallbackTracker {
+    depth: AtomicU32,
+    thread: AtomicUsize,
+}
+
+impl RtCallbackTracker {
+    const fn new() -> Self {
+        Self {
+            depth: AtomicU32::new(0),
+            thread: AtomicUsize::new(NO_THREAD),
+        }
+    }
+
+    pub(crate) fn depth(&self) -> u32 {
+        self.depth.load(Ordering::Relaxed)
+    }
+
+    fn is_entered_by_current_thread(&self) -> bool {
+        self.depth.load(Ordering::Acquire) > 0
+            && self.thread.load(Ordering::Acquire) == current_thread_token()
+    }
+}
+
+// Thread tokens are addresses of a thread-local byte, so they are never zero.
+const NO_THREAD: usize = 0;
+
+/// `[realtime-safe]` Identifies the calling thread without allocating. A const-initialized
+/// thread-local without a destructor needs no lazy registration, unlike `std::thread::current()`.
+fn current_thread_token() -> usize {
+    thread_local! {
+        static TOKEN: u8 = const { 0 };
+    }
+    TOKEN.with(|token| ptr::from_ref(token) as usize)
+}
+
+pub(crate) struct RtDepthGuard<'a>(&'a RtCallbackTracker);
 
 impl<'a> RtDepthGuard<'a> {
-    pub(crate) fn enter(depth: &'a AtomicU32) -> Self {
-        depth.fetch_add(1, Ordering::Relaxed);
-        Self(depth)
+    pub(crate) fn enter(tracker: &'a RtCallbackTracker) -> Self {
+        // CLAP never runs the same realtime callback of one instance on two threads at once,
+        // so the outermost entry owns the thread slot until the depth returns to zero.
+        if tracker.depth.fetch_add(1, Ordering::AcqRel) == 0 {
+            tracker
+                .thread
+                .store(current_thread_token(), Ordering::Release);
+        }
+        Self(tracker)
     }
 }
 
 impl Drop for RtDepthGuard<'_> {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
+        if self.0.depth.load(Ordering::Acquire) == 1 {
+            self.0.thread.store(NO_THREAD, Ordering::Release);
+        }
+        self.0.depth.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -138,8 +187,8 @@ pub(crate) struct PluginInstanceState {
     active_max_frames_count: AtomicU32,
     lifecycle_busy: AtomicBool,
     lifecycle_thread: Mutex<Option<ThreadId>>,
-    rt_process_depth: AtomicU32,
-    rt_flush_depth: AtomicU32,
+    rt_process_depth: RtCallbackTracker,
+    rt_flush_depth: RtCallbackTracker,
     rt_processor_contention: AtomicBool,
 }
 
@@ -246,8 +295,8 @@ impl PluginInstanceState {
             active_max_frames_count: AtomicU32::new(0),
             lifecycle_busy: AtomicBool::new(false),
             lifecycle_thread: Mutex::new(None),
-            rt_process_depth: AtomicU32::new(0),
-            rt_flush_depth: AtomicU32::new(0),
+            rt_process_depth: RtCallbackTracker::new(),
+            rt_flush_depth: RtCallbackTracker::new(),
             rt_processor_contention: AtomicBool::new(false),
         }))
     }
@@ -279,15 +328,15 @@ impl PluginInstanceState {
         struct ProcessorBusyGuard<'a> {
             busy: &'a AtomicBool,
             contention: &'a AtomicBool,
-            process_depth: &'a AtomicU32,
-            flush_depth: &'a AtomicU32,
+            process_depth: &'a RtCallbackTracker,
+            flush_depth: &'a RtCallbackTracker,
         }
         impl Drop for ProcessorBusyGuard<'_> {
             fn drop(&mut self) {
                 self.busy.store(false, Ordering::Release);
                 if self.contention.swap(false, Ordering::AcqRel) {
-                    let process_depth = self.process_depth.load(Ordering::Relaxed);
-                    let flush_depth = self.flush_depth.load(Ordering::Relaxed);
+                    let process_depth = self.process_depth.depth();
+                    let flush_depth = self.flush_depth.depth();
                     wrac_log::rtdebug!(
                         "processor.busy clear pd={} fd={}",
                         process_depth,
@@ -336,15 +385,15 @@ impl PluginInstanceState {
         struct ProcessorBusyGuard<'a> {
             busy: &'a AtomicBool,
             contention: &'a AtomicBool,
-            process_depth: &'a AtomicU32,
-            flush_depth: &'a AtomicU32,
+            process_depth: &'a RtCallbackTracker,
+            flush_depth: &'a RtCallbackTracker,
         }
         impl Drop for ProcessorBusyGuard<'_> {
             fn drop(&mut self) {
                 self.busy.store(false, Ordering::Release);
                 if self.contention.swap(false, Ordering::AcqRel) {
-                    let process_depth = self.process_depth.load(Ordering::Relaxed);
-                    let flush_depth = self.flush_depth.load(Ordering::Relaxed);
+                    let process_depth = self.process_depth.depth();
+                    let flush_depth = self.flush_depth.depth();
                     wrac_log::rtdebug!(
                         "processor.busy clear pd={} fd={}",
                         process_depth,
@@ -418,9 +467,13 @@ impl PluginInstanceState {
         self.processor_active.load(Ordering::Acquire)
     }
 
-    pub(crate) fn is_in_realtime_callback(&self) -> bool {
-        self.rt_process_depth.load(Ordering::Acquire) > 0
-            || self.rt_flush_depth.load(Ordering::Acquire) > 0
+    /// Whether the calling thread is inside `process` or `params.flush` of this instance.
+    ///
+    /// Other threads being inside those callbacks does not count: CLAP lets the host call
+    /// main-thread functions such as `state.load` while the audio thread is processing.
+    pub(crate) fn is_current_thread_in_realtime_callback(&self) -> bool {
+        self.rt_process_depth.is_entered_by_current_thread()
+            || self.rt_flush_depth.is_entered_by_current_thread()
     }
 
     fn take_processor_blocking(&self) -> Option<Box<dyn ActiveProcessor>> {
