@@ -1,47 +1,20 @@
 //! Adapter crate that connects the CLAP ABI to the plugin core.
 //!
-//! Product crates only need to implement the safe traits in [`api`] and declare
-//! the CLAP entry with [`export_clap_entry!`]. `clap-sys`, raw pointers, event
-//! conversion, and host callbacks are all encapsulated inside the adapter.
-//! See `api.rs` for the trait contracts.
+//! Product crates implement the contracts from [`interface`]. ABI callbacks, registration
+//! storage, raw CLAP construction, and host proxy implementations stay confined to this crate.
 
 mod abi;
-mod api;
 mod descriptor;
 mod entry;
-mod events;
 mod factory;
-mod host_gui;
-mod host_state;
-mod params;
-mod process_buffer;
+mod host_proxy;
+pub mod interface;
 
-pub use api::{
-    ActivateContext, AudioPortConfigRequest, AudioPortFlags, AudioPortInfo, AudioPortType,
-    DetectedHost, GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostContext, HostFamily,
-    HostGuiResizeRequester, HostParamsEditNotifier, HostStateDirtyNotifier, HostVersion,
-    HostWindow, NoteDialects, NotePortInfo, ParamFlags, ParamInfo, ParamValueEvent,
-    PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension, PluginCore,
-    PluginCoreContext, PluginError, PluginFormat, PluginGuiExtension, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsExtension, PluginRenderExtension, PluginRenderMode,
-    PluginResult, PluginStateExtension, PluginTailExtension, ProcessContext, ProcessStatus,
-    Processor, State, SystemContext,
-};
-pub use descriptor::{
-    AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
-};
-pub use entry::{EntryContext, PluginEntry, PluginFactory};
-pub use events::{
-    InputEvent, InputEvents, Midi2Event, MidiEvent, MidiSysexEvent, NoteEvent, NoteExpressionEvent,
-    OutputEvent, OutputEvents, ParamGestureEvent, ParamInputEvents, ParamModEvent, ProcessEvents,
-    TransportEvent, TransportFlags, UnknownEvent,
-};
-pub use process_buffer::{
-    AudioBufferError, AudioChannelPair, AudioPairedChannels, AudioPortChannels, AudioPortPair,
-    AudioPortPairs, AudioProcessBuffer,
-};
-
-#[doc(hidden)]
+/// Macro support items used by [`export_clap_entry!`].
+///
+/// These items stay public because exported macros must refer to them through
+/// `$crate`. They are not part of the plugin authoring API: plugin code should
+/// not import, call, or rely on them directly.
 pub mod __private {
     pub use crate::entry::EntryRegistration;
 
@@ -66,14 +39,32 @@ pub mod __private {
         revision: ::clap_sys::version::CLAP_VERSION.revision,
     };
 
+    /// Initializes the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// `plugin_path` must be a valid CLAP plugin path pointer provided by the host for
+    /// the duration of this call.
     pub unsafe fn entry_init(registration: &'static EntryRegistration, plugin_path: usize) -> bool {
         unsafe { crate::abi::entry_init(registration, plugin_path as *const ::std::ffi::c_char) }
     }
 
+    /// Deinitializes the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure this is called according to the CLAP entry lifecycle,
+    /// after initialization and while no plugin factory call is active.
     pub unsafe fn entry_deinit(registration: &'static EntryRegistration) {
         unsafe { crate::abi::entry_deinit(registration) }
     }
 
+    /// Returns a factory pointer from the registered CLAP entry.
+    ///
+    /// # Safety
+    ///
+    /// `factory_id` must be a valid CLAP factory identifier pointer provided by the
+    /// host for the duration of this call.
     pub unsafe fn entry_get_factory(
         registration: &'static EntryRegistration,
         factory_id: usize,

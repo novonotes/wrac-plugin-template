@@ -17,7 +17,8 @@ defaults:
     shell: bash
 
 env:
-  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  # macOS deployment target comes from the build tool's default so this
+  # workflow cannot silently pin an older minimum than the code.
   WRY_OBJC_SUFFIX: WracGainPlugin
 
 jobs:
@@ -37,6 +38,9 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Run static quality checks
+        run: cargo xtask quality
 
   rust-test:
     name: Rust lint and test (${{ matrix.os }})

@@ -1,6 +1,7 @@
 use std::ffi::{CStr, CString, c_char};
 use std::ptr;
 
+use crate::interface::{PluginDescriptor, PluginFeature};
 use clap_sys::plugin::clap_plugin_descriptor;
 use clap_sys::plugin_features::{
     CLAP_PLUGIN_FEATURE_AMBISONIC, CLAP_PLUGIN_FEATURE_ANALYZER, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
@@ -22,155 +23,49 @@ use clap_sys::version::CLAP_VERSION;
 
 use crate::factory::{ClapPluginInfoAsAax, ClapPluginInfoAsVst3};
 
-#[derive(Debug, Clone, Copy)]
-pub struct PluginDescriptor {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub vendor: &'static str,
-    pub url: &'static str,
-    pub manual_url: &'static str,
-    pub support_url: &'static str,
-    pub version: &'static str,
-    pub description: &'static str,
-    pub features: &'static [PluginFeature],
-    pub auv2: Option<Auv2Descriptor>,
-    pub vst3: Option<Vst3Descriptor>,
-    pub aax: Option<AaxDescriptor>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PluginFeature {
-    AudioEffect,
-    Analyzer,
-    Ambisonic,
-    Chorus,
-    Compressor,
-    DeEsser,
-    Delay,
-    Instrument,
-    NoteEffect,
-    NoteDetector,
-    Drum,
-    DrumMachine,
-    Equalizer,
-    Expander,
-    Filter,
-    Flanger,
-    FrequencyShifter,
-    Gate,
-    Glitch,
-    Granular,
-    Distortion,
-    Limiter,
-    Mastering,
-    Mixing,
-    Mono,
-    MultiEffects,
-    Phaser,
-    PhaseVocoder,
-    PitchCorrection,
-    PitchShifter,
-    Restoration,
-    Reverb,
-    Sampler,
-    Stereo,
-    Surround,
-    Synthesizer,
-    TransientShaper,
-    Tremolo,
-    Utility,
-}
-
-impl PluginFeature {
-    fn as_cstr(self) -> &'static CStr {
-        match self {
-            Self::AudioEffect => CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
-            Self::Analyzer => CLAP_PLUGIN_FEATURE_ANALYZER,
-            Self::Ambisonic => CLAP_PLUGIN_FEATURE_AMBISONIC,
-            Self::Chorus => CLAP_PLUGIN_FEATURE_CHORUS,
-            Self::Compressor => CLAP_PLUGIN_FEATURE_COMPRESSOR,
-            Self::DeEsser => CLAP_PLUGIN_FEATURE_DEESSER,
-            Self::Delay => CLAP_PLUGIN_FEATURE_DELAY,
-            Self::Instrument => CLAP_PLUGIN_FEATURE_INSTRUMENT,
-            Self::NoteEffect => CLAP_PLUGIN_FEATURE_NOTE_EFFECT,
-            Self::NoteDetector => CLAP_PLUGIN_FEATURE_NOTE_DETECTOR,
-            Self::Drum => CLAP_PLUGIN_FEATURE_DRUM,
-            Self::DrumMachine => CLAP_PLUGIN_FEATURE_DRUM_MACHINE,
-            Self::Equalizer => CLAP_PLUGIN_FEATURE_EQUALIZER,
-            Self::Expander => CLAP_PLUGIN_FEATURE_EXPANDER,
-            Self::Filter => CLAP_PLUGIN_FEATURE_FILTER,
-            Self::Flanger => CLAP_PLUGIN_FEATURE_FLANGER,
-            Self::FrequencyShifter => CLAP_PLUGIN_FEATURE_FREQUENCY_SHIFTER,
-            Self::Gate => CLAP_PLUGIN_FEATURE_GATE,
-            Self::Glitch => CLAP_PLUGIN_FEATURE_GLITCH,
-            Self::Granular => CLAP_PLUGIN_FEATURE_GRANULAR,
-            Self::Distortion => CLAP_PLUGIN_FEATURE_DISTORTION,
-            Self::Limiter => CLAP_PLUGIN_FEATURE_LIMITER,
-            Self::Mastering => CLAP_PLUGIN_FEATURE_MASTERING,
-            Self::Mixing => CLAP_PLUGIN_FEATURE_MIXING,
-            Self::Mono => CLAP_PLUGIN_FEATURE_MONO,
-            Self::MultiEffects => CLAP_PLUGIN_FEATURE_MULTI_EFFECTS,
-            Self::Phaser => CLAP_PLUGIN_FEATURE_PHASER,
-            Self::PhaseVocoder => CLAP_PLUGIN_FEATURE_PHASE_VOCODER,
-            Self::PitchCorrection => CLAP_PLUGIN_FEATURE_PITCH_CORRECTION,
-            Self::PitchShifter => CLAP_PLUGIN_FEATURE_PITCH_SHIFTER,
-            Self::Restoration => CLAP_PLUGIN_FEATURE_RESTORATION,
-            Self::Reverb => CLAP_PLUGIN_FEATURE_REVERB,
-            Self::Sampler => CLAP_PLUGIN_FEATURE_SAMPLER,
-            Self::Stereo => CLAP_PLUGIN_FEATURE_STEREO,
-            Self::Surround => CLAP_PLUGIN_FEATURE_SURROUND,
-            Self::Synthesizer => CLAP_PLUGIN_FEATURE_SYNTHESIZER,
-            Self::TransientShaper => CLAP_PLUGIN_FEATURE_TRANSIENT_SHAPER,
-            Self::Tremolo => CLAP_PLUGIN_FEATURE_TREMOLO,
-            Self::Utility => CLAP_PLUGIN_FEATURE_UTILITY,
-        }
+fn plugin_feature_cstr(feature: PluginFeature) -> &'static CStr {
+    match feature {
+        PluginFeature::AudioEffect => CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
+        PluginFeature::Analyzer => CLAP_PLUGIN_FEATURE_ANALYZER,
+        PluginFeature::Ambisonic => CLAP_PLUGIN_FEATURE_AMBISONIC,
+        PluginFeature::Chorus => CLAP_PLUGIN_FEATURE_CHORUS,
+        PluginFeature::Compressor => CLAP_PLUGIN_FEATURE_COMPRESSOR,
+        PluginFeature::DeEsser => CLAP_PLUGIN_FEATURE_DEESSER,
+        PluginFeature::Delay => CLAP_PLUGIN_FEATURE_DELAY,
+        PluginFeature::Instrument => CLAP_PLUGIN_FEATURE_INSTRUMENT,
+        PluginFeature::NoteEffect => CLAP_PLUGIN_FEATURE_NOTE_EFFECT,
+        PluginFeature::NoteDetector => CLAP_PLUGIN_FEATURE_NOTE_DETECTOR,
+        PluginFeature::Drum => CLAP_PLUGIN_FEATURE_DRUM,
+        PluginFeature::DrumMachine => CLAP_PLUGIN_FEATURE_DRUM_MACHINE,
+        PluginFeature::Equalizer => CLAP_PLUGIN_FEATURE_EQUALIZER,
+        PluginFeature::Expander => CLAP_PLUGIN_FEATURE_EXPANDER,
+        PluginFeature::Filter => CLAP_PLUGIN_FEATURE_FILTER,
+        PluginFeature::Flanger => CLAP_PLUGIN_FEATURE_FLANGER,
+        PluginFeature::FrequencyShifter => CLAP_PLUGIN_FEATURE_FREQUENCY_SHIFTER,
+        PluginFeature::Gate => CLAP_PLUGIN_FEATURE_GATE,
+        PluginFeature::Glitch => CLAP_PLUGIN_FEATURE_GLITCH,
+        PluginFeature::Granular => CLAP_PLUGIN_FEATURE_GRANULAR,
+        PluginFeature::Distortion => CLAP_PLUGIN_FEATURE_DISTORTION,
+        PluginFeature::Limiter => CLAP_PLUGIN_FEATURE_LIMITER,
+        PluginFeature::Mastering => CLAP_PLUGIN_FEATURE_MASTERING,
+        PluginFeature::Mixing => CLAP_PLUGIN_FEATURE_MIXING,
+        PluginFeature::Mono => CLAP_PLUGIN_FEATURE_MONO,
+        PluginFeature::MultiEffects => CLAP_PLUGIN_FEATURE_MULTI_EFFECTS,
+        PluginFeature::Phaser => CLAP_PLUGIN_FEATURE_PHASER,
+        PluginFeature::PhaseVocoder => CLAP_PLUGIN_FEATURE_PHASE_VOCODER,
+        PluginFeature::PitchCorrection => CLAP_PLUGIN_FEATURE_PITCH_CORRECTION,
+        PluginFeature::PitchShifter => CLAP_PLUGIN_FEATURE_PITCH_SHIFTER,
+        PluginFeature::Restoration => CLAP_PLUGIN_FEATURE_RESTORATION,
+        PluginFeature::Reverb => CLAP_PLUGIN_FEATURE_REVERB,
+        PluginFeature::Sampler => CLAP_PLUGIN_FEATURE_SAMPLER,
+        PluginFeature::Stereo => CLAP_PLUGIN_FEATURE_STEREO,
+        PluginFeature::Surround => CLAP_PLUGIN_FEATURE_SURROUND,
+        PluginFeature::Synthesizer => CLAP_PLUGIN_FEATURE_SYNTHESIZER,
+        PluginFeature::TransientShaper => CLAP_PLUGIN_FEATURE_TRANSIENT_SHAPER,
+        PluginFeature::Tremolo => CLAP_PLUGIN_FEATURE_TREMOLO,
+        PluginFeature::Utility => CLAP_PLUGIN_FEATURE_UTILITY,
     }
 }
-
-#[derive(Debug, Clone, Copy)]
-pub struct Auv2Descriptor {
-    pub manufacturer_code: [u8; 4],
-    pub manufacturer_name: &'static str,
-    pub plugin_type: [u8; 4],
-    pub plugin_subtype: [u8; 4],
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Vst3Descriptor {
-    /// VST3 PClassInfo2 subCategories string, such as `Fx|Tools`.
-    pub subcategories: &'static str,
-    /// Stable VST3 class ID. Changing this after release breaks host project recall.
-    pub component_id: [u8; 16],
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct AaxDescriptor {
-    pub package_name: &'static str,
-    /// AAX package version encoded as 0xMMmmppbb.
-    pub package_version: u32,
-    pub categories: u32,
-    /// Avid-facing FourCC identity. Changing these IDs after release breaks recall.
-    pub manufacturer_id: u32,
-    pub product_id: u32,
-    /// AAX wrapper asks for stem metadata before creating plugin instances.
-    /// Keep these callbacks independent from product runtime state.
-    pub get_num_stem_configs: unsafe extern "C" fn() -> u32,
-    pub get_stem_config: unsafe extern "C" fn(index: u32) -> *const AaxStemConfig,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct AaxStemConfig {
-    pub name: *const c_char,
-    pub format_in: u32,
-    pub format_out: u32,
-    pub plugin_id: u32,
-}
-
-// Safety: generated stem configs point at immutable, NUL-terminated static strings.
-// clap-wrapper reads them during factory-time metadata collection only.
-unsafe impl Sync for AaxStemConfig {}
-unsafe impl Send for AaxStemConfig {}
 
 // `clap_plugin_descriptor` holds only C string pointers, so the owners of the CString
 // and feature pointer arrays are placed in the same storage to keep their lifetimes
@@ -220,7 +115,7 @@ impl ClapDescriptorStorage {
         let mut feature_ptrs = descriptor
             .features
             .iter()
-            .map(|feature| feature.as_cstr().as_ptr())
+            .map(|feature| plugin_feature_cstr(*feature).as_ptr())
             .collect::<Vec<_>>();
         feature_ptrs.push(ptr::null());
 

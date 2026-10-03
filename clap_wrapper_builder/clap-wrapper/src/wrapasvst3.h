@@ -391,6 +391,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   std::shared_ptr<Clap::Plugin> _plugin;
   clap_plugin_as_vst3_t *_vst3specifics = nullptr;
   Clap::ProcessAdapter *_processAdapter = nullptr;
+  std::vector<int32_t> _outputEventBusByPort;
   WrappedView *_wrappedview = nullptr;
 
   void *_creationcontext;  // context from the CLAP library

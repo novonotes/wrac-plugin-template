@@ -1046,6 +1046,7 @@ void WrapAsAUV2::activateCLAP()
   if (_plugin)
   {
     assert(!_initialized);
+    _processEverCalled = false;
     if (!_processAdapter) _processAdapter = std::make_unique<Clap::AUv2::ProcessAdapter>();
     auto maxSampleFrames = Base::GetMaxFramesPerSlice();
     auto minSampleFrames = (maxSampleFrames >= 16) ? 16 : 1;
@@ -1066,6 +1067,7 @@ void WrapAsAUV2::deactivateCLAP()
   if (_plugin)
   {
     _initialized = false;
+    _processEverCalled = false;
     _processAdapter.reset();
     _plugin->stop_processing();
     _plugin->deactivate();
@@ -1112,8 +1114,10 @@ OSStatus WrapAsAUV2::Render(AudioUnitRenderActionFlags &inFlags, const AudioTime
     // with an arbitrary number of output channels is mapped onto a
     // continuous array of float buffers for the VST process function
 
+    ClapWrapper::detail::shared::SpinLockGuard processOrFlushLock(_processOrFlushLock);
     auto it_is = _plugin->AlwaysAudioThread();
 
+    _processEverCalled = true;
     _processAdapter->process(data);
 
     {
@@ -1203,8 +1207,9 @@ void WrapAsAUV2::onIdle()
   if (!_plugin) return;
   if (_flushRequested.exchange(false))
   {
+    ClapWrapper::detail::shared::SpinLockGuard processOrFlushLock(_processOrFlushLock);
     auto guarantee_mainthread = _plugin->AlwaysMainThread();
-    if (_processAdapter)
+    if (_processAdapter && (!_initialized || !_processEverCalled))
     {
       _processAdapter->flush();
     }
@@ -1475,13 +1480,18 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
 
     std::set<int> inSets, outSets;
 
+    // AUChannelInfo describes the main input/output pair. Including auxiliary bus channel counts
+    // advertises main-bus configurations that ValidFormat correctly rejects for element zero.
     bool hasInMain{false};
     for (int i = 0; i < numAudioInputs; ++i)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, true, &inf);
-      inSets.insert(inf.channel_count);
-      hasInMain |= (inf.flags & CLAP_AUDIO_PORT_IS_MAIN);
+      if (inf.flags & CLAP_AUDIO_PORT_IS_MAIN)
+      {
+        inSets.insert(inf.channel_count);
+        hasInMain = true;
+      }
     }
     if (!hasInMain) inSets.insert(0);
 
@@ -1490,8 +1500,11 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
     {
       clap_audio_port_info inf;
       ap->get(pl, i, false, &inf);
-      outSets.insert(inf.channel_count);
-      hasOutMain |= (inf.flags & CLAP_AUDIO_PORT_IS_MAIN);
+      if (inf.flags & CLAP_AUDIO_PORT_IS_MAIN)
+      {
+        outSets.insert(inf.channel_count);
+        hasOutMain = true;
+      }
     }
     if (!hasOutMain) outSets.insert(0);
 
