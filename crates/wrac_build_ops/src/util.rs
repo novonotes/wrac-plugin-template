@@ -48,7 +48,9 @@ pub(crate) fn run_with_language(
     // xtask is a build orchestrator, so seeing the exact external command on failure is important.
     // Run directly via Command without a shell, but print in a form that humans can re-run easily.
     println!("  $ {}", format_command(command));
-    let status = command.status()?;
+    let status = command
+        .status()
+        .map_err(|error| start_failed_message(language, command, &error))?;
     if !status.success() {
         return Err(command_failed_message(language, status, &format_command(command)).into());
     }
@@ -68,7 +70,8 @@ pub(crate) fn run_with_optional_xcbeautify_language(
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()?;
+        .spawn()
+        .map_err(|error| start_failed_message(language, command, &error))?;
     let stdout = child
         .stdout
         .take()
@@ -151,7 +154,9 @@ pub(crate) fn run_output_with_language(
     language: XtaskOutputLanguage,
 ) -> Result<Output> {
     println!("  $ {}", format_command(command));
-    let output = command.output()?;
+    let output = command
+        .output()
+        .map_err(|error| start_failed_message(language, command, &error))?;
     if !output.status.success() {
         return Err(
             command_failed_message(language, output.status, &format_command(command)).into(),
@@ -182,6 +187,30 @@ pub(crate) fn print_detail(language: XtaskOutputLanguage, english: &str, japanes
             XtaskOutputLanguage::Japanese => japanese,
         }
     );
+}
+
+// The bare `io::Error` from spawning (e.g. `Os { code: 2, kind: NotFound }`) does not say which
+// program was missing, which leaves users guessing when a tool such as pnpm is not on PATH.
+fn start_failed_message(
+    language: XtaskOutputLanguage,
+    command: &Command,
+    error: &io::Error,
+) -> String {
+    let program = command.get_program().to_string_lossy();
+    match (language, error.kind()) {
+        (XtaskOutputLanguage::English, io::ErrorKind::NotFound) => {
+            format!("command not found: `{program}`. Install it or add it to PATH")
+        }
+        (XtaskOutputLanguage::English, _) => format!("failed to start `{program}`: {error}"),
+        (XtaskOutputLanguage::Japanese, io::ErrorKind::NotFound) => {
+            format!(
+                "コマンドが見つかりません: `{program}`。インストールするか PATH に追加してください"
+            )
+        }
+        (XtaskOutputLanguage::Japanese, _) => {
+            format!("`{program}` を起動できませんでした: {error}")
+        }
+    }
 }
 
 fn command_failed_message(

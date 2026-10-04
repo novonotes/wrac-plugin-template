@@ -962,7 +962,8 @@ fn drop_session(session: Option<GuiSession>) -> bool {
         log::debug!("wxp controller: drop_session completed");
         destroyed_runtime
     } else {
-        log::debug!("wxp controller: drop_session skipped; no active session");
+        // Hosts and validators call this on every teardown path, so logging the no-op case only
+        // floods debug output without telling anything about a real session.
         false
     }
 }
