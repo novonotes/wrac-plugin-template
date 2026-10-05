@@ -72,6 +72,12 @@ pub trait PluginInstance: Send + 'static {
     fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>>;
 
     /// Called from the plugin activation callback. `[non-realtime]`
+    ///
+    /// Format validators activate the plugin across a wide range of sample rates, including
+    /// fractional ones: clap-validator 0.4.1 uses 1234.5678 Hz to 768 kHz, and the VST3
+    /// validator uses up to 1234567.8 Hz, which clap-wrapper forwards to this method.
+    /// Returning an error for any of these rates fails validation, so accept them and keep
+    /// processing stable instead of restricting `context.sample_rate` to musically common rates.
     fn activate(
         &mut self,
         context: ActivateContext,
