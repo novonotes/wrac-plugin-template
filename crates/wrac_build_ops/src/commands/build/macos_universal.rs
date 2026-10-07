@@ -153,11 +153,16 @@ fn build_and_verify_wrappers(
 }
 
 fn verify_universal_binary(ctx: &Context, binary: &Path) -> Result<()> {
-    run_with_language(
-        Command::new("lipo")
-            .arg(binary)
-            .arg("-verify_arch")
-            .args(RUST_TARGETS.map(|(_, architecture)| architecture)),
-        ctx.output_language,
-    )
+    // Some Apple lipo versions require one architecture per -verify_arch invocation.
+    // Verify each slice separately so the same check works across toolchain versions.
+    for (_, architecture) in RUST_TARGETS {
+        run_with_language(
+            Command::new("lipo")
+                .arg(binary)
+                .arg("-verify_arch")
+                .arg(architecture),
+            ctx.output_language,
+        )?;
+    }
+    Ok(())
 }
