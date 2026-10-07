@@ -14,7 +14,7 @@ mod rt;
 pub use file_logger::{
     LogConfig, LogOutput, PluginLogInstanceGuard, PluginLogRuntime, RecentLogFilesOptions,
     StandaloneLogRuntime, collect_recent_log_files, configure_plugin, configure_standalone,
-    current_log_dir, current_log_file, init_test,
+    current_log_dir, current_log_file, flush_pending_logs, init_test,
 };
 /// Macro support function used by the realtime log macros to check filtering.
 ///

@@ -219,3 +219,37 @@ fn log_files(dir: &Path) -> Vec<PathBuf> {
     files.sort();
     files
 }
+
+// A completed flush must include queued records and allow subsequent writes.
+#[test]
+fn flush_waits_for_queued_records_and_keeps_writer_active() {
+    let _drain = crate::rt::TEST_DRAIN_LOCK.lock().unwrap();
+    let temp = TempDir::new("wrac-log-flush-barrier");
+    let path = temp.path().join("barrier.log");
+    let mut config = LogConfig::new("Barrier", None);
+    config.output = LogOutput::File(Box::leak(
+        path.to_str().unwrap().to_string().into_boxed_str(),
+    ));
+    struct Writer(LazyFileWriter);
+    impl Drop for Writer {
+        fn drop(&mut self) {
+            self.0.shutdown();
+        }
+    }
+    let mut writer = Writer(LazyFileWriter::new(config));
+    writer.0.start();
+    writer.0.write_all(b"before flush\n").unwrap();
+    writer.0.flush_pending().unwrap();
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("before flush")
+    );
+    writer.0.write_all(b"after flush\n").unwrap();
+    writer.0.flush_pending().unwrap();
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("after flush")
+    );
+}

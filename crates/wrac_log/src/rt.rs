@@ -346,6 +346,10 @@ fn u8_to_level(level: u8) -> Level {
     }
 }
 
+// Global drain tests must not race file writers that drain the same buffer.
+#[cfg(test)]
+pub(crate) static TEST_DRAIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,6 +385,7 @@ mod tests {
 
     #[test]
     fn rt_logs_are_dropped_while_drain_is_stopped() {
+        let _drain = TEST_DRAIN_LOCK.lock().unwrap();
         RT_LOG_ACCEPTING.store(false, Ordering::Release);
 
         write_rt_log(Level::Warn, "test", format_args!("stopped"));

@@ -126,6 +126,17 @@ impl Default for RecentLogFilesOptions {
     }
 }
 
+/// Waits for queued regular log records to be written and flushes the file.
+///
+/// Call only from a non-realtime thread. Logging remains active; records queued after
+/// this barrier may still be written later. Returns file flush errors to the caller.
+pub fn flush_pending_logs() -> std::io::Result<()> {
+    match FILE_WRITER.get() {
+        Some(writer) => writer.flush_pending(),
+        None => Ok(()),
+    }
+}
+
 /// Returns the current log and recent archived logs, newest first.
 pub fn collect_recent_log_files(options: RecentLogFilesOptions) -> std::io::Result<Vec<PathBuf>> {
     let current_log_file = current_log_file()
@@ -499,10 +510,15 @@ struct LazyFileWriter {
     shared: Arc<LazyFileWriterShared>,
 }
 
+enum FileLogMessage {
+    Write(Vec<u8>),
+    Flush(mpsc::SyncSender<std::io::Result<()>>),
+}
+
 struct LazyFileWriterShared {
     config: Mutex<Option<LogConfig>>,
     destination: Mutex<LogDestination>,
-    sender: Mutex<Option<mpsc::SyncSender<Vec<u8>>>>,
+    sender: Mutex<Option<mpsc::SyncSender<FileLogMessage>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
     shutdown: Mutex<()>,
     mode: AtomicU8,
@@ -611,6 +627,24 @@ impl LazyFileWriter {
         write_log_bytes_blocking(&mut self.shared.destination.lock().unwrap(), buf)
     }
 
+    fn flush_pending(&self) -> std::io::Result<()> {
+        self.ensure_initialized();
+        // Serializing against shutdown keeps the consumer alive until the barrier completes.
+        let _shutdown = self.shared.shutdown.lock().unwrap();
+        let sender = self.shared.sender.lock().unwrap().clone();
+        if let Some(sender) = sender {
+            let (reply, result) = mpsc::sync_channel(1);
+            sender
+                .send(FileLogMessage::Flush(reply))
+                .map_err(|_| std::io::Error::other("log writer disconnected"))?;
+            result
+                .recv()
+                .map_err(|_| std::io::Error::other("log flush reply disconnected"))?
+        } else {
+            self.flush_blocking()
+        }
+    }
+
     fn flush_blocking(&self) -> std::io::Result<()> {
         flush_log_outputs(&mut self.shared.destination.lock().unwrap())
     }
@@ -691,7 +725,7 @@ impl Write for LazyFileWriter {
                 .lock()
                 .unwrap()
                 .as_ref()
-                .map(|sender| sender.try_send(buf.to_vec()));
+                .map(|sender| sender.try_send(FileLogMessage::Write(buf.to_vec())));
             match send_result {
                 Some(Ok(())) => return Ok(buf.len()),
                 Some(Err(mpsc::TrySendError::Full(_))) => {
@@ -723,13 +757,23 @@ enum LogDestination {
     Stderr,
 }
 
-fn async_file_writer_worker(shared: Arc<LazyFileWriterShared>, receiver: mpsc::Receiver<Vec<u8>>) {
+fn async_file_writer_worker(
+    shared: Arc<LazyFileWriterShared>,
+    receiver: mpsc::Receiver<FileLogMessage>,
+) {
     loop {
         match receiver.recv_timeout(ASYNC_WORKER_RT_DRAIN_INTERVAL) {
-            Ok(buf) => {
+            Ok(FileLogMessage::Write(buf)) => {
                 write_dropped_record_notice_if_needed(&shared);
                 let _ = write_log_bytes_blocking(&mut shared.destination.lock().unwrap(), &buf);
                 drain_rt_records_to_destination(&shared);
+            }
+            Ok(FileLogMessage::Flush(reply)) => {
+                write_dropped_record_notice_if_needed(&shared);
+                drain_rt_records_to_destination(&shared);
+                let result = flush_log_outputs(&mut shared.destination.lock().unwrap());
+                // The caller may have stopped waiting for the flush result.
+                let _ = reply.send(result);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 write_dropped_record_notice_if_needed(&shared);
