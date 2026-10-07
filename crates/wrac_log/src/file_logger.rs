@@ -126,13 +126,20 @@ impl Default for RecentLogFilesOptions {
     }
 }
 
-/// Waits for queued regular log records to be written and flushes the file.
+/// Blocks until regular log records queued before the barrier have been processed,
+/// then flushes the file without stopping logging.
 ///
-/// Call only from a non-realtime thread. Logging remains active; records queued after
-/// this barrier may still be written later. Returns file flush errors to the caller.
-pub fn flush_pending_logs() -> std::io::Result<()> {
+/// Call only from a non-realtime worker: this waits for file I/O without a timeout
+/// and may also delay concurrent regular logging and logger shutdown. The realtime
+/// write path remains non-blocking.
+///
+/// Success confirms completion of the barrier and the file flush, not persistence
+/// to disk. Earlier dropped records are not recovered, and earlier write errors are
+/// not reported. Records queued after the barrier may still be written later.
+/// Returns flush or channel errors. If no file writer is configured, this is a no-op.
+pub fn flush_pending_logs_blocking() -> std::io::Result<()> {
     match FILE_WRITER.get() {
-        Some(writer) => writer.flush_pending(),
+        Some(writer) => writer.flush_pending_blocking(),
         None => Ok(()),
     }
 }
@@ -627,7 +634,7 @@ impl LazyFileWriter {
         write_log_bytes_blocking(&mut self.shared.destination.lock().unwrap(), buf)
     }
 
-    fn flush_pending(&self) -> std::io::Result<()> {
+    fn flush_pending_blocking(&self) -> std::io::Result<()> {
         self.ensure_initialized();
         // Serializing against shutdown keeps the consumer alive until the barrier completes.
         let _shutdown = self.shared.shutdown.lock().unwrap();

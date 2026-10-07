@@ -239,14 +239,14 @@ fn flush_waits_for_queued_records_and_keeps_writer_active() {
     let mut writer = Writer(LazyFileWriter::new(config));
     writer.0.start();
     writer.0.write_all(b"before flush\n").unwrap();
-    writer.0.flush_pending().unwrap();
+    writer.0.flush_pending_blocking().unwrap();
     assert!(
         std::fs::read_to_string(&path)
             .unwrap()
             .contains("before flush")
     );
     writer.0.write_all(b"after flush\n").unwrap();
-    writer.0.flush_pending().unwrap();
+    writer.0.flush_pending_blocking().unwrap();
     assert!(
         std::fs::read_to_string(&path)
             .unwrap()
