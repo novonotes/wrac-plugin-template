@@ -153,8 +153,30 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
   _activeNotes.reserve(32);
 }
 
+namespace
+{
+bool isParameterEvent(const clap_multi_event_t &event)
+{
+  return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
+         (event.header.type == CLAP_EVENT_PARAM_VALUE || event.header.type == CLAP_EVENT_PARAM_MOD);
+}
+}  // namespace
+
+void ProcessAdapter::prepareInputEvents()
+{
+  // Keep parameter edits pending while load runs, including edits arriving
+  // during recall. MIDI continues on its timeline; render never waits for load.
+  if (_stateRecallPending || _eventindices.size() != _events.size())
+  {
+    _eventindices.clear();
+    for (size_t i = 0; i < _events.size(); ++i)
+      if (!_stateRecallPending || !isParameterEvent(_events[i])) _eventindices.emplace_back(i);
+  }
+}
+
 void ProcessAdapter::sortEventIndices()
 {
+  prepareInputEvents();
   // just sorting the index
   // an item must be sorted to front of
   // if the timestamp if event[a] is earlier than
@@ -273,26 +295,78 @@ void ProcessAdapter::process(ProcessData &data)
 
   processOutputEvents();
 
-  // clean up and prepare the events for the next cycle
-  _events.clear();
+  finishInputEvents();
+}
+
+bool ProcessAdapter::restoreState(const clap_plugin_state_t &state, const clap_istream_t *stream,
+                                  ClapWrapper::detail::shared::SpinLock &processOrFlushLock)
+{
+  {
+    ClapWrapper::detail::shared::SpinLockGuard lock(processOrFlushLock);
+    // A reentrant recall cannot own or commit the outer recall's pending edits.
+    if (_stateRecallPending) return false;
+    _stateRecallPending = true;
+    _preRecallEventCount = _events.size();
+  }
+  const bool loaded = state.load(_plugin, stream);
+  {
+    ClapWrapper::detail::shared::SpinLockGuard lock(processOrFlushLock);
+    if (loaded)
+    {
+      // Only parameter values are replaced by saved state. External modulation,
+      // MIDI, and host edits queued after recall began must remain effective.
+      auto boundary = _events.begin() + _preRecallEventCount;
+      auto kept = std::remove_if(_events.begin(), boundary,
+                                 [](const auto &event)
+                                 {
+                                   return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
+                                          event.header.type == CLAP_EVENT_PARAM_VALUE;
+                                 });
+      _events.erase(kept, boundary);
+    }
+    // Failure leaves edits queued rather than turning a rejected preset into a
+    // lost user operation. This is queue rollback, not rollback of plugin state.
+    // Queue compaction and edits arriving after the last render invalidate the
+    // old index mapping even when its length happens to match the new queue.
+    _eventindices.clear();
+    _stateRecallPending = false;
+    _preRecallEventCount = 0;
+  }
+  return loaded;
+}
+
+void ProcessAdapter::finishInputEvents()
+{
+  if (_stateRecallPending)
+  {
+    // Render/flush consumed only non-parameter events. Retain pending edits and
+    // track the original boundary after MIDI compaction without allocating.
+    _preRecallEventCount =
+        std::count_if(_events.begin(), _events.begin() + _preRecallEventCount, isParameterEvent);
+    _events.erase(std::remove_if(_events.begin(), _events.end(),
+                                 [](const auto &event) { return !isParameterEvent(event); }),
+                  _events.end());
+  }
+  else
+    _events.clear();
   _eventindices.clear();
 }
 
 void ProcessAdapter::flush()
 {
+  prepareInputEvents();
   if (_plugin && _ext_params)
   {
     _ext_params->flush(_plugin, &_in_events, &_out_events);
     processOutputEvents();
   }
-  _events.clear();
-  _eventindices.clear();
+  finishInputEvents();
 }
 
 uint32_t ProcessAdapter::input_events_size(const struct clap_input_events *list)
 {
   auto self = static_cast<ProcessAdapter *>(list->ctx);
-  auto k = (uint32_t)self->_events.size();
+  auto k = (uint32_t)self->_eventindices.size();
   return k;
   // return self->_vstdata->inputEvents->getEventCount();
 }
@@ -303,7 +377,7 @@ const clap_event_header_t *ProcessAdapter::input_events_get(const struct clap_in
                                                             uint32_t index)
 {
   auto self = static_cast<ProcessAdapter *>(list->ctx);
-  if (self->_events.size() > index)
+  if (self->_eventindices.size() > index)
   {
     // we can safely return the note.header also for other event types
     // since they are at the same memory address
