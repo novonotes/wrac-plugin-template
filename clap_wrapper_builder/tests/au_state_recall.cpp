@@ -7,6 +7,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <functional>
+#include <thread>
+#include <exception>
 
 static void require(bool condition, const char *message)
 {
@@ -38,6 +41,28 @@ static bool sameState(AudioUnit unit, CFPropertyListRef expected)
                       CFDictionaryGetValue(static_cast<CFDictionaryRef>(actual), CFSTR("data")));
   CFRelease(actual);
   return same;
+}
+struct RecallNotification
+{
+  std::function<void()> action;
+  std::exception_ptr error;
+  bool called = false;
+};
+static void duringRecall(void *context, AudioUnit, AudioUnitPropertyID, AudioUnitScope, AudioUnitElement)
+{
+  auto &notification = *static_cast<RecallNotification *>(context);
+  if (notification.called) return;
+  notification.called = true;
+  // AU property listeners run inside CLAP load. A render on another thread
+  // must finish before load resumes; holding its spinlock across load deadlocks.
+  try
+  {
+    notification.action();
+  }
+  catch (...)
+  {
+    notification.error = std::current_exception();
+  }
 }
 int main(int argc, char **argv)
 {
@@ -170,15 +195,53 @@ int main(int argc, char **argv)
     CFRelease(invalid);
     require(status != noErr, "Failed CLAP recall reported success");
     render();
-    require(sameState(unit, baseline), "Rejected CLAP load replayed pre-recall parameters");
+    require(!sameState(unit, baseline), "Rejected CLAP load discarded pending parameters");
+    ok(recall());
+    RecallNotification notification;
+    notification.action = [&]
+    {
+      auto renderOnAudioThread = [&]
+      {
+        std::exception_ptr error;
+        std::thread audio(
+            [&]
+            {
+              try
+              {
+                render();
+              }
+              catch (...)
+              {
+                error = std::current_exception();
+              }
+            });
+        audio.join();
+        if (error) std::rethrow_exception(error);
+      };
+      renderOnAudioThread();
+      change();
+      renderOnAudioThread();
+    };
+    ok(AudioUnitAddPropertyListener(unit, kAudioUnitProperty_ClassInfo, duringRecall, &notification));
+    auto concurrentStatus = recall();
+    ok(AudioUnitRemovePropertyListenerWithUserData(unit, kAudioUnitProperty_ClassInfo, duringRecall,
+                                                   &notification));
+    ok(concurrentStatus);
+    if (notification.error) std::rethrow_exception(notification.error);
+    if (notification.called)
+    {
+      render();
+      require(!sameState(unit, baseline), "Edit queued during recall was discarded");
+      std::puts("PASS: render during load completed and a during-recall edit survived");
+    }
+    else
+      std::puts("SKIP: plugin does not notify ClassInfo during load; concurrent recall not tested");
     CFRelease(baseline);
     baseline = nullptr;
     ok(AudioUnitUninitialize(unit));
     ok(AudioComponentInstanceDispose(unit));
     unit = nullptr;
-    std::puts(
-        "PASS: pre-recall events replaced, post-recall events retained, rejected load reported and "
-        "pre-recall events dropped");
+    std::puts("PASS: pre-recall values replaced, subsequent edits retained, failed recall preserved");
     return 0;
   }
   catch (const std::exception &error)

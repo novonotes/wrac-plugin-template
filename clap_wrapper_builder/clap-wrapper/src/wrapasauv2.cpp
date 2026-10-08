@@ -1345,16 +1345,13 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
 
   auto restoreClapState = [this](Clap::StateMemento &chunk) -> OSStatus
   {
-    // Drop pre-recall parameters before loading so render cannot apply them
-    // between load completion and queue cleanup. Never hold the render lock
-    // across parsing or host callbacks: the audio thread would spin throughout.
-    // A load attempt supersedes queued parameters even if CLAP rejects its data;
-    // malformed AU dictionaries are rejected before reaching this point.
-    {
-      ClapWrapper::detail::shared::SpinLockGuard processOrFlushLock(_processOrFlushLock);
-      if (_processAdapter) _processAdapter->discardPendingParameterEvents();
-    }
-    if (!_plugin->_ext._state->load(_plugin->_plugin, chunk)) return kAudioUnitErr_InvalidPropertyValue;
+    // The adapter owns the recall boundary so parsing and host callbacks run
+    // outside the render lock, while failed loads retain pending host edits.
+    const bool loaded = _processAdapter
+                            ? _processAdapter->restoreState(*_plugin->_ext._state, chunk,
+                                                            _processOrFlushLock)
+                            : _plugin->_ext._state->load(_plugin->_plugin, chunk);
+    if (!loaded) return kAudioUnitErr_InvalidPropertyValue;
     return noErr;
   };
 

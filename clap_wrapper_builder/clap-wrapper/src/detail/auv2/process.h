@@ -31,6 +31,12 @@
 #include "../clap/automation.h"
 #include "parameter.h"
 #include <map>
+#include "../shared/spinlock.h"
+
+namespace free_audio::auv2_wrapper
+{
+class WrapAsAUV2;
+}
 
 namespace Clap::AUv2
 {
@@ -97,7 +103,6 @@ class ProcessAdapter
 
   void process(ProcessData &data);  // AU Data
   void flush();
-  void discardPendingParameterEvents();
 
   // interface for AUv2 wrapper:
   void addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData2, UInt32 inOffsetSampleFrame);
@@ -106,6 +111,16 @@ class ProcessAdapter
   ~ProcessAdapter();
 
  private:
+  friend class free_audio::auv2_wrapper::WrapAsAUV2;
+
+  // [main-thread] Only the AU owner may recall state. Queue bookkeeping is
+  // protected by its render/flush lock, but plugin loading never holds that lock.
+  bool restoreState(const clap_plugin_state_t &state, const clap_istream_t *stream,
+                    ClapWrapper::detail::shared::SpinLock &processOrFlushLock);
+  void finishInputEvents();
+  bool _stateRecallPending = false;
+  size_t _preRecallEventCount = 0;
+
   // necessary C callbacks:
   static uint32_t input_events_size(const struct clap_input_events *list);
   static const clap_event_header_t *input_events_get(const struct clap_input_events *list,
