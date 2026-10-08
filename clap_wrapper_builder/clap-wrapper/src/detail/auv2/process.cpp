@@ -278,6 +278,23 @@ void ProcessAdapter::process(ProcessData &data)
   _eventindices.clear();
 }
 
+void ProcessAdapter::discardPendingParameterEvents()
+{
+  // Recall replaces parameter state. Events queued before it must not overwrite
+  // the restored values on the next render; pending MIDI events still belong to
+  // the host's current timeline and must remain available.
+  _events.erase(std::remove_if(_events.begin(), _events.end(),
+                               [](const auto &event)
+                               {
+                                 return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
+                                        (event.header.type == CLAP_EVENT_PARAM_VALUE ||
+                                         event.header.type == CLAP_EVENT_PARAM_MOD);
+                               }),
+                _events.end());
+  _eventindices.resize(_events.size());
+  for (size_t i = 0; i < _eventindices.size(); ++i) _eventindices[i] = i;
+}
+
 void ProcessAdapter::flush()
 {
   if (_plugin && _ext_params)

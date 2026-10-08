@@ -97,6 +97,7 @@ class ProcessAdapter
 
   void process(ProcessData &data);  // AU Data
   void flush();
+  void discardPendingParameterEvents();
 
   // interface for AUv2 wrapper:
   void addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData2, UInt32 inOffsetSampleFrame);
