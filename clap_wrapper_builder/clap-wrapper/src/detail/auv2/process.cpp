@@ -597,4 +597,18 @@ void ProcessAdapter::addParameterEvent(const clap_param_info_t &info, double val
   this->_eventindices.emplace_back(this->_events.size());
   this->_events.emplace_back(n);
 }
+
+void ProcessAdapter::discardPendingParameterEvents()
+{
+  // Keep non-parameter events such as MIDI, and rebuild the index list so it
+  // only points at the events that survive.
+  _events.erase(std::remove_if(_events.begin(), _events.end(), [](const clap_multi_event_t &e)
+                               { return e.header.type == CLAP_EVENT_PARAM_VALUE; }),
+                _events.end());
+  _eventindices.clear();
+  for (size_t i = 0; i < _events.size(); ++i)
+  {
+    _eventindices.emplace_back(i);
+  }
+}
 }  // namespace Clap::AUv2

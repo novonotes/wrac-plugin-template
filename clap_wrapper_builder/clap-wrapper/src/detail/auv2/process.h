@@ -101,6 +101,8 @@ class ProcessAdapter
   // interface for AUv2 wrapper:
   void addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData2, UInt32 inOffsetSampleFrame);
   void addParameterEvent(const clap_param_info_t &info, double value, uint32_t inOffsetSampleFrame);
+  // Drops host parameter changes that have not reached the plugin yet.
+  void discardPendingParameterEvents();
   // void startNote()
   ~ProcessAdapter();
 

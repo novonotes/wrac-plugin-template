@@ -1343,6 +1343,18 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
 
   if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
 
+  if (_processAdapter)
+  {
+    // Parameter changes queued by SetParameter() only reach the plugin on the next
+    // render or flush, so without this they would be applied after the state below
+    // and overwrite it. Ableton Live, for example, sets kAudioUnitProperty_BypassEffect
+    // to 1 right before restoring a project and only clears it again if the restored
+    // bypass value still reads as on, which leaves the plugin bypassed.
+    // The restored state is newer than anything the host queued before it.
+    ClapWrapper::detail::shared::SpinLockGuard processOrFlushLock(_processOrFlushLock);
+    _processAdapter->discardPendingParameterEvents();
+  }
+
   CFDictionaryRef tDict = CFDictionaryRef(plist);
 
   // Find 'data' key
