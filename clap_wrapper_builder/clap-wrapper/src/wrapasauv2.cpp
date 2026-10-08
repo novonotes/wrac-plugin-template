@@ -1351,6 +1351,9 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
                             ? _processAdapter->restoreState(*_plugin->_ext._state, chunk,
                                                             _processOrFlushLock)
                             : _plugin->_ext._state->load(_plugin->_plugin, chunk);
+    // An idle flush during load may have deferred edits and consumed its wakeup.
+    // Re-arm it so retained edits also reach plugins before their first render.
+    _flushRequested.store(true);
     if (!loaded) return kAudioUnitErr_InvalidPropertyValue;
     return noErr;
   };

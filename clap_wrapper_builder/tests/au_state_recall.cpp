@@ -221,6 +221,7 @@ int main(int argc, char **argv)
       renderOnAudioThread();
       change();
       renderOnAudioThread();
+      change();
     };
     ok(AudioUnitAddPropertyListener(unit, kAudioUnitProperty_ClassInfo, duringRecall, &notification));
     auto concurrentStatus = recall();

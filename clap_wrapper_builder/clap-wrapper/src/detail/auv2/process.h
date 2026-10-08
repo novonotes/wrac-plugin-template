@@ -117,6 +117,7 @@ class ProcessAdapter
   // protected by its render/flush lock, but plugin loading never holds that lock.
   bool restoreState(const clap_plugin_state_t &state, const clap_istream_t *stream,
                     ClapWrapper::detail::shared::SpinLock &processOrFlushLock);
+  void prepareInputEvents();
   void finishInputEvents();
   bool _stateRecallPending = false;
   size_t _preRecallEventCount = 0;

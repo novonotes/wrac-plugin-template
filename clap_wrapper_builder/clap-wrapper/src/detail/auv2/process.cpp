@@ -162,7 +162,7 @@ bool isParameterEvent(const clap_multi_event_t &event)
 }
 }  // namespace
 
-void ProcessAdapter::sortEventIndices()
+void ProcessAdapter::prepareInputEvents()
 {
   // Keep parameter edits pending while load runs, including edits arriving
   // during recall. MIDI continues on its timeline; render never waits for load.
@@ -172,6 +172,11 @@ void ProcessAdapter::sortEventIndices()
     for (size_t i = 0; i < _events.size(); ++i)
       if (!_stateRecallPending || !isParameterEvent(_events[i])) _eventindices.emplace_back(i);
   }
+}
+
+void ProcessAdapter::sortEventIndices()
+{
+  prepareInputEvents();
   // just sorting the index
   // an item must be sorted to front of
   // if the timestamp if event[a] is earlier than
@@ -321,6 +326,9 @@ bool ProcessAdapter::restoreState(const clap_plugin_state_t &state, const clap_i
     }
     // Failure leaves edits queued rather than turning a rejected preset into a
     // lost user operation. This is queue rollback, not rollback of plugin state.
+    // Queue compaction and edits arriving after the last render invalidate the
+    // old index mapping even when its length happens to match the new queue.
+    _eventindices.clear();
     _stateRecallPending = false;
     _preRecallEventCount = 0;
   }
@@ -346,7 +354,7 @@ void ProcessAdapter::finishInputEvents()
 
 void ProcessAdapter::flush()
 {
-  sortEventIndices();
+  prepareInputEvents();
   if (_plugin && _ext_params)
   {
     _ext_params->flush(_plugin, &_in_events, &_out_events);
