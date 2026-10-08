@@ -17,4 +17,7 @@ CLAP payload after the first render. Reading only `AudioUnitGetParameter` would
 miss the regression: the AU cache can contain the restored value while the
 pending event changes the plugin's internal state. It also verifies that edits
 made after successful recall remain effective and that failed recall reports an
-error without discarding pending host parameters.
+error. A CLAP load attempt supersedes queued parameters even when the payload is
+rejected; invalid AU dictionaries never reach the queue reset. The render/flush
+spinlock protects only queue cleanup and is released before CLAP state loading,
+which may parse data and notify the host.

@@ -152,6 +152,15 @@ int main(int argc, char **argv)
     require(!sameState(unit, baseline), "Post-recall parameter was discarded");
     ok(recall());
     auto invalid = CFDictionaryCreateMutableCopy(nullptr, 0, static_cast<CFDictionaryRef>(baseline));
+    // Invalid AU metadata must fail before the recall attempt touches the queue.
+    CFDictionaryRemoveValue(invalid, CFSTR("data"));
+    change();
+    auto malformedStatus = AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo,
+                                                kAudioUnitScope_Global, 0, &invalid, sizeof(invalid));
+    require(malformedStatus != noErr, "Malformed AU dictionary reported success");
+    render();
+    require(!sameState(unit, baseline), "Malformed AU dictionary discarded pending parameters");
+    ok(recall());
     auto invalidData = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>("invalid"), 7);
     CFDictionarySetValue(invalid, CFSTR("data"), invalidData);
     CFRelease(invalidData);
@@ -161,13 +170,15 @@ int main(int argc, char **argv)
     CFRelease(invalid);
     require(status != noErr, "Failed CLAP recall reported success");
     render();
-    require(!sameState(unit, baseline), "Failed recall discarded pending parameters");
+    require(sameState(unit, baseline), "Rejected CLAP load replayed pre-recall parameters");
     CFRelease(baseline);
     baseline = nullptr;
     ok(AudioUnitUninitialize(unit));
     ok(AudioComponentInstanceDispose(unit));
     unit = nullptr;
-    std::puts("PASS: pre-recall events replaced, post-recall events retained, failed recall preserved");
+    std::puts(
+        "PASS: pre-recall events replaced, post-recall events retained, rejected load reported and "
+        "pre-recall events dropped");
     return 0;
   }
   catch (const std::exception &error)
