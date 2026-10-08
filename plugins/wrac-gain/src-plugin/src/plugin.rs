@@ -3,33 +3,37 @@
 //! What is declared here:
 //! 1. Plugin self-descriptions generated from package metadata
 //! 2. [`SharedState`] shared by the audio thread, GUI, and host
-//! 3. The audio [`Processor`] handed over at activation, and how host extension
+//! 3. The audio [`ActiveProcessor`] handed over at activation, and how host extension
 //!    capabilities are bundled
 //!
 //! Parameter, audio port, and state-persistence implementations live under `plugin/`.
-//! Format differences between CLAP, VST3, and AU are absorbed by `wrac_clap_adapter`,
+//! Format differences between CLAP, VST3, and AU are absorbed by `wrac_clap_adapter::interface`,
 //! so this module focuses solely on "which capabilities this plugin offers."
 
 use std::sync::Arc;
 
 mod audio_ports;
+mod latency;
 mod params;
 mod state;
 
 pub(crate) use params::{
-    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain, notify_gui_parameters,
-    parameter_default_value, parameter_host_input_to_plain, parameter_host_value, parameter_infos,
-    parameter_text_value, parameter_value_text,
+    DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue,
+    apply_param_input_events, clamp_gain, notify_gui_parameters, parameter_default_value,
+    parameter_host_input_to_plain, parameter_host_value, parameter_infos, parameter_text_value,
+    parameter_value_text,
 };
 
 use audio_ports::{AudioLayoutStore, WracGainAudioPorts, WracGainConfigurableAudioPorts};
+use latency::WracGainLatencyExtension;
 use params::WracGainParamsExtension;
 use state::WracGainStateExtension;
-use wrac_clap_adapter::{
-    AaxDescriptor, AaxStemConfig, ActivateContext, Auv2Descriptor, PluginAudioPortsExtension,
-    PluginConfigurableAudioPortsExtension, PluginCore, PluginCoreContext, PluginDescriptor,
-    PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension, PluginParamsExtension,
-    PluginResult, PluginStateExtension, Processor, Vst3Descriptor,
+use wrac_clap_adapter::interface::{
+    AaxDescriptor, AaxStemConfig, ActivateContext, ActivateResult, ActiveProcessor, Auv2Descriptor,
+    InactiveProcessor, LogConfig, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
+    PluginDescriptor, PluginEntry, PluginFactory, PluginFeature, PluginGuiExtension,
+    PluginInstance, PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery, PluginResult,
+    PluginStateExtension, Vst3Descriptor,
 };
 use wrac_wxp_gui::WxpGuiController;
 
@@ -37,16 +41,24 @@ use crate::audio::WracGainAudioProcessor;
 use crate::gui::create_gui_integration;
 use crate::state::{ProjectStateStore, SharedState};
 
-// Generated from [package.metadata.wrac] in src-plugin/Cargo.toml. The manifest is
+// Generated from wrac-plugin.toml. The manifest is
 // the single source of truth for product identity across descriptors, GUI metadata,
 // wrapper arguments, AUv2 registration, WebView data dirs, and logs.
 include!(concat!(env!("OUT_DIR"), "/wrac_plugin_products.rs"));
 
 pub(crate) static PLUGIN_ENTRY: WracGainEntry = WracGainEntry;
+static LOG_CONFIG: LogConfig = LogConfig::new(
+    PLUGIN_DESCRIPTORS[0].name,
+    Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../.log")),
+);
 
 pub(crate) struct WracGainEntry;
 
 impl PluginEntry for WracGainEntry {
+    fn log_config(&'static self) -> Option<&'static LogConfig> {
+        Some(&LOG_CONFIG)
+    }
+
     fn plugin_factory(&self) -> Option<&dyn PluginFactory> {
         Some(&WRAC_GAIN_FACTORY)
     }
@@ -68,8 +80,8 @@ impl PluginFactory for WracGainFactory {
     fn create_plugin(
         &self,
         plugin_id: &str,
-        context: PluginCoreContext,
-    ) -> Option<Box<dyn PluginCore>> {
+        context: PluginInstanceContext,
+    ) -> Option<Box<dyn PluginInstance>> {
         // The host creates by descriptor id after discovery. Carry the matched descriptor
         // into the instance so logs, WebView identity, and About metadata follow the product
         // actually requested instead of falling back to the first manifest entry.
@@ -82,13 +94,13 @@ impl PluginFactory for WracGainFactory {
 
 /// One instance of the plugin, created each time the host loads the plugin.
 ///
-/// The audio processing core is split into a [`Processor`] by [`PluginCore::activate`],
+/// The audio processing core is split into an [`ActiveProcessor`] by [`PluginInstance::activate`],
 /// so this struct is responsible only for lifecycle management and holding the host
 /// extension capabilities.
 ///
 /// Capabilities are held behind `Arc` because the host (wrapper) may query them
 /// re-entrantly during lifecycle callbacks, requiring them to be reachable without
-/// acquiring the `&mut self` lock on `PluginCore`.
+/// acquiring the `&mut self` lock on `PluginInstance`.
 pub(crate) struct WracGainPlugin {
     // The descriptor is instance data, not a global primary descriptor. This matters for
     // multi-product bundles where the same binary can expose more than one plugin id.
@@ -100,7 +112,9 @@ pub(crate) struct WracGainPlugin {
     audio_ports: Arc<WracGainAudioPorts>,
     configurable_audio_ports: Arc<WracGainConfigurableAudioPorts>,
     params: Arc<WracGainParamsExtension>,
+    param_output_queue: Arc<WracGainParamOutputQueue>,
     gui: Arc<WxpGuiController>,
+    latency: Arc<WracGainLatencyExtension>,
     // Project state save/restore. A dedicated capability independent of the lifecycle
     // lock so that a committed snapshot can be returned even while active or during a
     // wrapper re-entry.
@@ -108,20 +122,23 @@ pub(crate) struct WracGainPlugin {
 }
 
 impl WracGainPlugin {
-    pub(crate) fn new(context: PluginCoreContext, descriptor: PluginDescriptor) -> Self {
+    pub(crate) fn new(context: PluginInstanceContext, descriptor: PluginDescriptor) -> Self {
         let shared = Arc::new(SharedState::new());
         let audio_layout = Arc::new(AudioLayoutStore::new(2));
         let audio_ports = Arc::new(WracGainAudioPorts::new(audio_layout.clone()));
         let configurable_audio_ports =
             Arc::new(WracGainConfigurableAudioPorts::new(audio_layout.clone()));
         let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
+        let param_output_queue =
+            Arc::new(WracGainParamOutputQueue::new(context.host_params.clone()));
+        let latency = Arc::new(WracGainLatencyExtension);
         let project_state = Arc::new(ProjectStateStore::new());
         let gui = create_gui_integration(
             descriptor,
             project_state.clone(),
             shared.clone(),
-            context.host_parameter_edit_notifier,
-            context.host_gui_resize_requester,
+            param_output_queue.clone(),
+            context.host_gui,
             context.host_context,
         );
         let state_extension = Arc::new(WracGainStateExtension::new(
@@ -137,20 +154,20 @@ impl WracGainPlugin {
             audio_ports,
             configurable_audio_ports,
             params,
+            param_output_queue,
             gui: gui.controller,
+            latency,
             state_extension,
         }
     }
 }
 
 /// Called from this product's [`PluginFactory`] implementation.
-/// Called each time the host requests a new instance; returns a [`PluginCore`].
+/// Called each time the host requests a new instance; returns a [`PluginInstance`].
 pub(crate) fn create_plugin_core(
-    context: PluginCoreContext,
+    context: PluginInstanceContext,
     descriptor: PluginDescriptor,
-) -> Box<dyn PluginCore> {
-    wrac_log::init!(descriptor.name);
-
+) -> Box<dyn PluginInstance> {
     log::debug!(
         "creating plugin core: id={}, name={}",
         descriptor.id,
@@ -174,12 +191,23 @@ pub(crate) fn create_plugin_core(
 }
 
 // ---------------------------------------------------------------------------
-// PluginCore: plugin lifecycle and the extension capabilities offered
+// PluginInstance: plugin lifecycle and the extension capabilities offered
 // ---------------------------------------------------------------------------
-impl PluginCore for WracGainPlugin {
+impl PluginInstance for WracGainPlugin {
+    fn initialize_processor(&mut self) -> PluginResult<Box<dyn InactiveProcessor>> {
+        Ok(Box::new(crate::audio::WracGainInactiveProcessor::new(
+            self.shared.clone(),
+            self.param_output_queue.clone(),
+        )))
+    }
+
     /// Called just before the host starts audio processing.
-    /// The returned [`Processor`] is subsequently `process()`-ed on the audio thread.
-    fn activate(&mut self, context: ActivateContext) -> PluginResult<Box<dyn Processor>> {
+    /// The returned [`ActiveProcessor`] is subsequently `process()`-ed on the audio thread.
+    fn activate(
+        &mut self,
+        context: ActivateContext,
+        _processor: Box<dyn InactiveProcessor>,
+    ) -> PluginResult<ActivateResult> {
         // Boundary between the non-RT layout store and the RT processor.
         //
         // The adapter rejects layout changes while active, so the channel count
@@ -196,17 +224,20 @@ impl PluginCore for WracGainPlugin {
             context.max_frames_count,
             audio_channel_count
         );
-        Ok(Box::new(WracGainAudioProcessor::new(
+        Ok(ActivateResult::new(Box::new(WracGainAudioProcessor::new(
             self.shared.clone(),
+            self.param_output_queue.clone(),
             audio_channel_count,
-        )))
+        ))))
     }
 
-    /// Called when the host stops audio processing. `_processor` is the value returned
-    /// from `activate`; dropping it is sufficient cleanup.
-    fn deactivate(&mut self, _processor: Box<dyn Processor>) -> PluginResult<()> {
+    /// Called when the host stops audio processing.
+    fn deactivate(
+        &mut self,
+        _processor: Box<dyn ActiveProcessor>,
+    ) -> PluginResult<Box<dyn InactiveProcessor>> {
         log::debug!("deactivating audio processor");
-        Ok(())
+        self.initialize_processor()
     }
 
     // Extension declarations. Some = implemented, None = unsupported. Implementations live in separate modules.
@@ -219,8 +250,8 @@ impl PluginCore for WracGainPlugin {
         Some(self.configurable_audio_ports.clone())
     }
 
-    fn params(&self) -> Option<Arc<dyn PluginParamsExtension>> {
-        Some(self.params.clone())
+    fn params(&self) -> Arc<dyn PluginParamsQuery> {
+        self.params.clone()
     }
 
     fn state(&self) -> Option<Arc<dyn PluginStateExtension>> {
@@ -229,5 +260,9 @@ impl PluginCore for WracGainPlugin {
 
     fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
         Some(self.gui.clone())
+    }
+
+    fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
+        Some(self.latency.clone())
     }
 }

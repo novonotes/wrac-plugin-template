@@ -1,0 +1,11 @@
+[package]
+name = "xtask_workflow"
+version = "0.1.0"
+edition = "2024"
+description = "Dependency-ordered workflow primitives for repository-local xtask crates"
+license = "MIT"
+repository = "https://github.com/novonotes/wrac-plugin-template"
+publish = false
+
+[dependencies]
+petgraph = "0.8"

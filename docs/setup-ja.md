@@ -52,13 +52,15 @@ AAX ビルドには、加えて private な AAX SDK が必要です。ローカ�
 
 ### 2. プラグインの識別情報を設定する
 
-プラグインの識別情報は、プラグインパッケージの manifest に集約しています。初期状態では `plugins/wrac-gain/src-plugin/Cargo.toml` です。
-この guide に別の manifest sample を複製するのではなく、そこにあるコメント付きの `[package.metadata.wrac]` と `[[package.metadata.wrac.plugins]]` を直接編集してください。
+プラグインの識別情報は `plugins/wrac-gain/src-plugin/wrac-plugin.toml` に集約しています。
+host-visible ID を Rust code や Cargo metadata に重複して書かず、この manifest を編集してください。
 
+各プラグインのマニフェストは `<plugin-root>/src-plugin/Cargo.toml` と `<plugin-root>/src-plugin/wrac-plugin.toml` に置いてください。xtask と CI は WRAC マニフェストの欠落や別配置を拒否します。
 > **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
 > AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
 > `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
-> `supported_formats` は、既定の `xtask` build/install/validate が使う製品方針です。
+> `formats` は、既定の `xtask` build/install/validate が使う製品方針です。各形式の
+> `distribution` は公開配布物へ含めてよいかを宣言します。
 > `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
 > `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
 > `aax_manufacturer_id`、`aax_product_id`、各 AAX stem config の `plugin_id` は、安定した 4 byte ASCII ID にしてください。
@@ -77,25 +79,6 @@ IDE の機能や `rg`、LLM エージェントなどで全ファイルを検索�
 | GUI / スクリプト内などの kebab-case 名 | `wrac-gain-plugin` | `my-plugin` |
 | `Cargo.toml` 内の repository URL | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
-repository URL は、デフォルトではこのテンプレートを指しています。新しいプロジェクトを作成した後、crate metadata を公開する場合は自分のリポジトリに変更してください。
-
-**手順:**
-
-対象ファイルと残件数を確認します。
-
-rg を用いる例:
-
-```sh
-rg --hidden "wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin" \
-    --glob '!node_modules' --glob '!dist' --glob '!*.lock' \
-    --glob '!package-lock.json' --glob '!*.zip' \
-    --glob '!docs/setup.md' --glob '!docs/setup-ja.md'
-
-rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' --glob 'Cargo.toml'
-```
-
-確認できたら、上の置換テーブルの通りに**全件置換**してください。
-置換後に同じコマンド群を再実行し、出力がゼロ件になれば完了です。
 
 ### 4. ビルド & インストール
 
@@ -106,16 +89,8 @@ cd /path/to/my_plugin
 cargo xtask install
 ```
 
-`cargo xtask install` は選択したプラグインフォーマットを task graph に展開してからインストールします。
-workspace に複数の WRAC plugin package がある場合は、Cargo package 名を `-p/--package` で指定してください。
-既定の plugin format は `package.metadata.wrac.supported_formats` から決まります。
-`cargo xtask build` も同じ plugin format default を使い、さらに開発用 standalone app もビルドします。
-`cargo xtask validate` も同じ plugin format default を使い、選択した validator に必要な artifact をビルドします。
-`cargo xtask install --scope=default` は CLAP/VST3/AU を user-local path に、AAX を system-wide の Avid plugin folder にインストールします。
-system-wide の plugin folder だけをスキャンするホスト向けには、`cargo xtask install --scope=system` を使います。
-`--target` オプションで `clap`、`vst3`、`au`、`aax` をカンマ区切りで指定できます。
-明示した target は `supported_formats` に含まれている必要があります。
-`--dry-run` を使うと、build/install を実行せずに task graph と依存順を確認できます。
+`cargo xtask install` は選択したプラグインフォーマットをビルドしてインストールします。
+各 xtask コマンドの詳しい使い方は `cargo xtask --help` を参照してください。
 
 ### 5. 動作確認
 
@@ -139,13 +114,10 @@ GUI はホットリロード可能です。HTML ファイルを編集してみ�
 DAW はデバッガーのアタッチが難しいケースがあるので、まずは開発用 standalone app でデバッグすることをお勧めします。
 VS Code で「Debug gain plugin standalone」構成を選択して実行します。
 
-Standalone app は軽量な開発用 host であり、リリース用のプラグインフォーマットや出荷物ではありません。
-`cargo xtask launch` は standalone target とその依存 task だけをビルドしてから app を開きます。
-package が複数の plugin product を公開している場合は `--plugin-id` を指定してください。無効な plugin ID はビルド前に失敗します。
-
 > **注意:** スタンドアローンモードでは音声フィードバックがあります。**ヘッドフォンを使用してください。**
 
 ### デバッグログを見る
 
 デバッグビルドのログは `.log/<plugin_name> Latest.log` に出ます。
 追いかける場合は macOS / Linux では `tail -f ".log/<plugin_name> Latest.log"`、Windows PowerShell では `Get-Content ".log\<plugin_name> Latest.log" -Wait` などを使います。
+ログについての詳細は `crates/wrac_log` のディレクトリを参照してください。
