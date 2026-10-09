@@ -13,7 +13,9 @@ clang++ -std=c++17 -Wall -Wextra -Werror \
 ```
 
 The test first saves and restores ClassInfo before AU Initialize, then verifies
-that idle applies a host edit before the first render.
+that idle applies an immediate host edit before the first render while retaining
+a timed edit for render. Idle flush passes only immediate parameter events; MIDI
+and timed events stay queued. Active flush uses the serialized CLAP audio role.
 It then inspects serialized CLAP state after rendering, detecting changes hidden
 by the AU parameter cache. It checks pre-recall edits, subsequent edits, and
 preservation of pending edits after malformed AU dictionaries or rejected CLAP

@@ -180,6 +180,16 @@ int main(int argc, char **argv)
       ok(AudioUnitRender(unit, &flags, &timestamp, 0, 512,
                          reinterpret_cast<AudioBufferList *>(&output)));
     };
+    // Immediate flush must retain a timed edit even when both target the same parameter.
+    float restoredValue = 0;
+    ok(AudioUnitGetParameter(unit, id, kAudioUnitScope_Global, 0, &restoredValue));
+    ok(AudioUnitSetParameter(unit, id, kAudioUnitScope_Global, 0, changed, 32));
+    ok(AudioUnitSetParameter(unit, id, kAudioUnitScope_Global, 0, restoredValue, 0));
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+    require(sameState(unit, baseline), "Idle applied a timed edit before render");
+    render();
+    require(!sameState(unit, baseline), "Idle discarded a timed edit awaiting render");
+    ok(recall());
     change();
     ok(recall());
     render();

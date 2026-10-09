@@ -354,13 +354,24 @@ void ProcessAdapter::finishInputEvents()
 
 void ProcessAdapter::flush()
 {
-  prepareInputEvents();
+  // flush has no sample timeline and accepts parameter events only. Preserve
+  // MIDI and timed edits for render, including when an immediate edit wakes idle.
+  _eventindices.clear();
+  auto immediateParameter = [](const auto &event)
+  { return isParameterEvent(event) && event.header.time == 0; };
+  if (!_stateRecallPending)
+    for (size_t i = 0; i < _events.size(); ++i)
+      if (immediateParameter(_events[i])) _eventindices.emplace_back(i);
   if (_plugin && _ext_params)
   {
     _ext_params->flush(_plugin, &_in_events, &_out_events);
     processOutputEvents();
   }
-  finishInputEvents();
+  // Recall owns queued parameters until load completes. An idle notification
+  // must not consume them, nor compact MIDI across the recall boundary.
+  if (!_stateRecallPending)
+    _events.erase(std::remove_if(_events.begin(), _events.end(), immediateParameter), _events.end());
+  _eventindices.clear();
 }
 
 uint32_t ProcessAdapter::input_events_size(const struct clap_input_events *list)

@@ -609,7 +609,8 @@ OSStatus WrapAsAUV2::SetParameter(AudioUnitParameterID inID, AudioUnitScope inSc
         _processAdapter->addParameterEvent(param, inValue, inBufferOffsetInFrames);
         // Before the first render, idle must apply host edits without consuming audio.
         // This also makes a subsequent ClassInfo save reflect the edited parameters.
-        _flushRequested.store(true);
+        if (inBufferOffsetInFrames == 0 && !_processEverCalled.load())
+          _flushRequested.store(true);
       }
     }
   }
@@ -1211,9 +1212,11 @@ void WrapAsAUV2::onIdle()
   if (_flushRequested.exchange(false))
   {
     ClapWrapper::detail::shared::SpinLockGuard processOrFlushLock(_processOrFlushLock);
-    auto guarantee_mainthread = _plugin->AlwaysMainThread();
     if (_processAdapter && (!_initialized || !_processEverCalled))
     {
+      // CLAP permits the serialized audio role on any OS thread. Active flush
+      // must report that role; inactive flush remains a main-thread operation.
+      auto threadRole = _initialized ? _plugin->AlwaysAudioThread() : _plugin->AlwaysMainThread();
       _processAdapter->flush();
     }
   }
