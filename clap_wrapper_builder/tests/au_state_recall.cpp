@@ -115,6 +115,12 @@ int main(int argc, char **argv)
     AURenderCallbackStruct callback{input, nullptr};
     ok(AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0,
                             &callback, sizeof(callback)));
+    // ClassInfo belongs to the constructed plugin, not render resources. Hosts
+    // may recall it before AU Initialize and must not need a dummy render.
+    auto beforeInitialize = save(unit);
+    ok(AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0,
+                            &beforeInitialize, sizeof(beforeInitialize)));
+    CFRelease(beforeInitialize);
     ok(AudioUnitInitialize(unit));
     UInt32 size = 0;
     Boolean writable = false;
@@ -152,6 +158,12 @@ int main(int argc, char **argv)
                                   &baseline, sizeof(baseline));
     };
     auto change = [&] { ok(AudioUnitSetParameter(unit, id, kAudioUnitScope_Global, 0, changed, 0)); };
+    // Saving before the first render must include host edits once idle has run.
+    change();
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
+    require(!sameState(unit, baseline), "Idle did not apply an edit before the first render");
+    ok(recall());
     double sampleTime = 0;
     auto render = [&]
     {

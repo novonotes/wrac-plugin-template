@@ -607,6 +607,9 @@ OSStatus WrapAsAUV2::SetParameter(AudioUnitParameterID inID, AudioUnitScope inSc
       {
         auto &param = p->second.get()->info();
         _processAdapter->addParameterEvent(param, inValue, inBufferOffsetInFrames);
+        // Before the first render, idle must apply host edits without consuming audio.
+        // This also makes a subsequent ClassInfo save reflect the edited parameters.
+        _flushRequested.store(true);
       }
     }
   }
@@ -1273,7 +1276,9 @@ OSStatus WrapAsAUV2::SaveState(CFPropertyListRef *ptPList)
 {
   if (!ptPList) return kAudioUnitErr_InvalidParameter;
 
-  if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
+  // CLAP instance construction already initialized state support. AU Initialize
+  // owns render resources, so hosts may save/restore ClassInfo before activation.
+  if (!_plugin) return kAudioUnitErr_Uninitialized;
 
   auto guarantee_mainthread = _plugin->AlwaysMainThread();
 
@@ -1341,7 +1346,9 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
 {
   if (!plist) return kAudioUnitErr_InvalidParameter;
 
-  if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
+  // CLAP instance construction already initialized state support. AU Initialize
+  // owns render resources, so hosts may save/restore ClassInfo before activation.
+  if (!_plugin) return kAudioUnitErr_Uninitialized;
 
   auto restoreClapState = [this](Clap::StateMemento &chunk) -> OSStatus
   {

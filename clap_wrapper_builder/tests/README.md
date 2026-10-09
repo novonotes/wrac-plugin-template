@@ -12,7 +12,9 @@ clang++ -std=c++17 -Wall -Wextra -Werror \
 /tmp/au-state-recall '/path/to/Your Plugin.component'
 ```
 
-The test inspects serialized CLAP state after rendering, detecting changes hidden
+The test first saves and restores ClassInfo before AU Initialize, then verifies
+that idle applies a host edit before the first render.
+It then inspects serialized CLAP state after rendering, detecting changes hidden
 by the AU parameter cache. It checks pre-recall edits, subsequent edits, and
 preservation of pending edits after malformed AU dictionaries or rejected CLAP
 payloads. For plugins that notify ClassInfo during load, it also renders on a
