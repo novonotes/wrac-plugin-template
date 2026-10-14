@@ -699,29 +699,40 @@ fn windows_cmake_generator() -> Result<String> {
         }
     }
 
-    ensure_visual_studio_msbuild_available()?;
-    let generator = latest_cmake_visual_studio_generator()?;
+    let installed_versions = installed_visual_studio_versions()?;
+    let generator = latest_cmake_visual_studio_generator(&installed_versions)?;
     println!("  ✅ CMake generator: {generator}");
     Ok(generator)
 }
 
-fn ensure_visual_studio_msbuild_available() -> Result<()> {
+fn installed_visual_studio_versions() -> Result<Vec<u32>> {
     let mut vswhere = Command::new(vswhere_command());
     vswhere.args([
         "-products",
         "*",
         "-requires",
         "Microsoft.Component.MSBuild",
-        "-latest",
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
         "-property",
-        "installationPath",
+        "installationVersion",
     ]);
     let output = run_output_with_language(&mut vswhere, XtaskOutputLanguage::English)?;
-    let installation_path = String::from_utf8(output.stdout)?;
-    if installation_path.trim().is_empty() {
-        return Err("Visual Studio with MSBuild was not found by vswhere".into());
+    let versions = String::from_utf8(output.stdout)?;
+    let installed_versions = versions
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.trim()
+                .split('.')
+                .next()
+                .unwrap_or_default()
+                .parse::<u32>()
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if installed_versions.is_empty() {
+        return Err("Visual Studio with MSBuild and C++ tools was not found by vswhere".into());
     }
-    Ok(())
+    Ok(installed_versions)
 }
 
 fn vswhere_command() -> PathBuf {
@@ -737,14 +748,14 @@ fn vswhere_command() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("vswhere"))
 }
 
-fn latest_cmake_visual_studio_generator() -> Result<String> {
+fn latest_cmake_visual_studio_generator(installed_versions: &[u32]) -> Result<String> {
     let output = run_output_with_language(
         Command::new("cmake").arg("--help"),
         XtaskOutputLanguage::English,
     )?;
     let help = String::from_utf8(output.stdout)?;
-    select_latest_visual_studio_generator(&help)
-        .ok_or_else(|| "CMake does not list any Visual Studio generator".into())
+    select_installed_visual_studio_generator(&help, installed_versions)
+        .ok_or_else(|| "CMake does not support any installed Visual Studio with C++ tools".into())
 }
 
 #[cfg(test)]
@@ -754,12 +765,18 @@ pub(super) fn cmake_help_lists_generator(help: &str, generator: &str) -> bool {
         .any(|available| available == generator)
 }
 
-pub(super) fn select_latest_visual_studio_generator(help: &str) -> Option<String> {
+pub(super) fn select_installed_visual_studio_generator(
+    help: &str,
+    installed_versions: &[u32],
+) -> Option<String> {
+    // CMake lists supported generators even when their Visual Studio version is absent.
+    // Intersect with installed C++ toolchains so a CMake upgrade cannot select a missing IDE.
     cmake_visual_studio_generators(help)
         .into_iter()
         .filter_map(|generator| {
             visual_studio_generator_version(&generator).map(|version| (version, generator))
         })
+        .filter(|(version, _)| installed_versions.contains(version))
         .max_by_key(|(version, _)| *version)
         .map(|(_, generator)| generator)
 }
