@@ -12,8 +12,8 @@ use crate::metadata::PluginProductMetadata;
 use crate::profile::BuildProfile;
 use crate::targets::Platform;
 use crate::util::{
-    ensure_exists, macos_deployment_target, on_off, remove_if_exists, run_output_with_language,
-    run_with_language, run_with_optional_xcbeautify_language,
+    ensure_exists, macos_deployment_target, on_off, remove_if_exists, run_with_language,
+    run_with_optional_xcbeautify_language,
 };
 use crate::{Result, XtaskOutputLanguage};
 
@@ -688,121 +688,21 @@ fn push_cmake_arg(args: &mut Vec<OsString>, arg: impl Into<OsString>) {
 fn cmake_generator(platform: Platform) -> Result<Option<String>> {
     match platform {
         Platform::Macos => Ok(platform.cmake_generator().map(ToOwned::to_owned)),
-        Platform::Windows => Ok(Some(windows_cmake_generator()?)),
+        Platform::Windows => windows_cmake_generator(),
         Platform::Linux => Ok(None),
     }
 }
 
-fn windows_cmake_generator() -> Result<String> {
-    if let Ok(generator) = env::var("WRAC_CMAKE_GENERATOR") {
-        let generator = generator.trim();
-        if !generator.is_empty() {
-            return Ok(generator.to_owned());
-        }
-    }
-
-    let installed_versions = installed_visual_studio_versions()?;
-    let generator = latest_cmake_visual_studio_generator(&installed_versions)?;
-    println!("  ✅ CMake generator: {generator}");
-    Ok(generator)
-}
-
-fn installed_visual_studio_versions() -> Result<Vec<u32>> {
-    let mut vswhere = Command::new(vswhere_command());
-    vswhere.args([
-        "-products",
-        "*",
-        "-requires",
-        "Microsoft.Component.MSBuild",
-        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-        "-property",
-        "installationVersion",
-    ]);
-    let output = run_output_with_language(&mut vswhere, XtaskOutputLanguage::English)?;
-    let versions = String::from_utf8(output.stdout)?;
-    let installed_versions = versions
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            line.trim()
-                .split('.')
-                .next()
-                .unwrap_or_default()
-                .parse::<u32>()
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    if installed_versions.is_empty() {
-        return Err("Visual Studio with MSBuild and C++ tools was not found by vswhere".into());
-    }
-    Ok(installed_versions)
-}
-
-fn vswhere_command() -> PathBuf {
-    env::var_os("ProgramFiles(x86)")
-        .map(PathBuf::from)
-        .map(|program_files_x86| {
-            program_files_x86
-                .join("Microsoft Visual Studio")
-                .join("Installer")
-                .join("vswhere.exe")
-        })
-        .filter(|path| path.exists())
-        .unwrap_or_else(|| PathBuf::from("vswhere"))
-}
-
-fn latest_cmake_visual_studio_generator(installed_versions: &[u32]) -> Result<String> {
-    let output = run_output_with_language(
-        Command::new("cmake").arg("--help"),
-        XtaskOutputLanguage::English,
-    )?;
-    let help = String::from_utf8(output.stdout)?;
-    select_installed_visual_studio_generator(&help, installed_versions)
-        .ok_or_else(|| "CMake does not support any installed Visual Studio with C++ tools".into())
-}
-
-#[cfg(test)]
-pub(super) fn cmake_help_lists_generator(help: &str, generator: &str) -> bool {
-    cmake_visual_studio_generators(help)
-        .into_iter()
-        .any(|available| available == generator)
-}
-
-pub(super) fn select_installed_visual_studio_generator(
-    help: &str,
-    installed_versions: &[u32],
-) -> Option<String> {
-    // CMake lists supported generators even when their Visual Studio version is absent.
-    // Intersect with installed C++ toolchains so a CMake upgrade cannot select a missing IDE.
-    cmake_visual_studio_generators(help)
-        .into_iter()
-        .filter_map(|generator| {
-            visual_studio_generator_version(&generator).map(|version| (version, generator))
-        })
-        .filter(|(version, _)| installed_versions.contains(version))
-        .max_by_key(|(version, _)| *version)
-        .map(|(_, generator)| generator)
-}
-
-fn visual_studio_generator_version(generator: &str) -> Option<u32> {
-    let mut words = generator.split_whitespace();
-    match (words.next(), words.next(), words.next()) {
-        (Some("Visual"), Some("Studio"), Some(version)) => version.parse().ok(),
-        _ => None,
-    }
-}
-
-pub(super) fn cmake_visual_studio_generators(help: &str) -> Vec<String> {
-    help.lines()
-        .filter_map(|line| {
-            let line = line
-                .trim_start()
-                .strip_prefix("* ")
-                .unwrap_or(line.trim_start());
-            let (name, _) = line.split_once(" = ")?;
-            let name = name.trim();
-            name.starts_with("Visual Studio").then(|| name.to_owned())
-        })
-        .collect()
+fn windows_cmake_generator() -> Result<Option<String>> {
+    let generator = match env::var("WRAC_CMAKE_GENERATOR") {
+        Ok(generator) => generator,
+        Err(env::VarError::NotPresent) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let generator = generator.trim();
+    // CMake owns installed-toolchain detection. Only an explicit override needs -G,
+    // so SDK/toolchain updates do not require a second selection algorithm here.
+    Ok((!generator.is_empty()).then(|| generator.to_owned()))
 }
 
 fn cmake_configure_stamp_path(build_dir: &Path) -> PathBuf {
