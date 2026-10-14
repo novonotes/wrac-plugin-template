@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -53,13 +53,13 @@ pub fn build_gui(ctx: &Context) -> Result<TaskOutcome> {
         // Standalone template projects keep the frontend package under src-gui
         // without a repository-level package.json.
         run_with_language(
-            Command::new(command_for_platform(ctx.platform, "npm"))
+            Command::new(command_for_platform(ctx.platform, "npm")?)
                 .arg("install")
                 .current_dir(ctx.gui_dir()),
             ctx.output_language,
         )?;
         run_with_language(
-            Command::new(command_for_platform(ctx.platform, "npm"))
+            Command::new(command_for_platform(ctx.platform, "npm")?)
                 .args(["run", "build"])
                 .current_dir(ctx.gui_dir()),
             ctx.output_language,
@@ -72,21 +72,21 @@ pub fn build_gui(ctx: &Context) -> Result<TaskOutcome> {
     // build.rs embeds src-gui/dist into the plugin binary. Workspace packages such as
     // @novonotes/webview-bridge also need their dist before the GUI typecheck runs.
     run_with_language(
-        Command::new(command_for_platform(ctx.platform, "pnpm"))
+        Command::new(command_for_platform(ctx.platform, "pnpm")?)
             .arg("install")
             .current_dir(&ctx.root),
         ctx.output_language,
     )?;
     for dependency_name in dependency_names {
         run_with_language(
-            Command::new(command_for_platform(ctx.platform, "pnpm"))
+            Command::new(command_for_platform(ctx.platform, "pnpm")?)
                 .args(["--filter", &dependency_name, "run", "--if-present", "build"])
                 .current_dir(&ctx.root),
             ctx.output_language,
         )?;
     }
     run_with_language(
-        Command::new(command_for_platform(ctx.platform, "pnpm"))
+        Command::new(command_for_platform(ctx.platform, "pnpm")?)
             .args(["--filter", &package_name, "run", "build"])
             .current_dir(&ctx.root),
         ctx.output_language,
@@ -133,35 +133,37 @@ fn workspace_dependency_names(json: &Value) -> Vec<String> {
         .collect()
 }
 
-fn command_for_platform(platform: Platform, command: &'static str) -> OsString {
-    if platform == Platform::Windows {
-        let candidates = [
-            format!("{command}.cmd"),
-            format!("{command}.exe"),
-            command.to_string(),
-        ];
-        for candidate in candidates {
-            let candidate = OsString::from(candidate);
-            if command_exists_on_path(&candidate) {
-                return candidate;
+fn command_for_platform(platform: Platform, command: &'static str) -> Result<OsString> {
+    if platform == Platform::Windows
+        && let Some(paths) = env::var_os("PATH")
+        && let Some(path) = windows_command_in_paths(command, env::split_paths(&paths))?
+    {
+        return Ok(path.into_os_string());
+    }
+    Ok(OsString::from(command))
+}
+
+pub(super) fn windows_command_in_paths(
+    command: &str,
+    paths: impl IntoIterator<Item = PathBuf>,
+) -> Result<Option<PathBuf>> {
+    // Respect PATH precedence across extensions so an earlier managed executable
+    // cannot be shadowed by a later Corepack shim. Keep the resolved path because
+    // the child process may run in a different working directory.
+    let candidates = [
+        format!("{command}.cmd"),
+        format!("{command}.exe"),
+        command.to_owned(),
+    ];
+    for directory in paths {
+        for candidate in &candidates {
+            let path = directory.join(candidate);
+            if path.is_file() {
+                return Ok(Some(std::path::absolute(path)?));
             }
         }
     }
-    OsString::from(command)
-}
-
-fn command_exists_on_path(command: &OsStr) -> bool {
-    let Some(paths) = env::var_os("PATH") else {
-        return false;
-    };
-    command_exists_in_paths(command, env::split_paths(&paths))
-}
-
-pub(super) fn command_exists_in_paths(
-    command: &OsStr,
-    paths: impl IntoIterator<Item = PathBuf>,
-) -> bool {
-    paths.into_iter().any(|path| path.join(command).is_file())
+    Ok(None)
 }
 
 #[derive(Debug, Clone, Copy)]
