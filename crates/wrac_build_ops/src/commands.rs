@@ -541,34 +541,45 @@ fn codesign_nested_macos_bundle(bundle: &Path, language: XtaskOutputLanguage) ->
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
-
     use super::build::{
-        cmake_help_lists_generator, cmake_visual_studio_generators, command_exists_in_paths,
-        select_latest_visual_studio_generator,
+        cmake_help_lists_generator, cmake_visual_studio_generators,
+        select_latest_visual_studio_generator, windows_command_in_paths,
     };
     use super::validation::parse_vst3_validator_cids;
     use super::*;
 
     #[test]
-    fn command_exists_in_paths_checks_exact_candidate_files() {
+    fn windows_command_resolution_respects_path_order_across_extensions() {
         let temp_dir = std::env::temp_dir().join(format!(
             "wrac_build_ops_command_path_test_{}",
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
+        let managed = temp_dir.join("managed");
+        let corepack = temp_dir.join("corepack");
+        fs::create_dir_all(&managed).unwrap();
+        fs::create_dir_all(&corepack).unwrap();
+        fs::write(managed.join("pnpm.exe"), "").unwrap();
+        fs::write(corepack.join("pnpm.cmd"), "").unwrap();
 
-        fs::write(temp_dir.join("pnpm.exe"), "").unwrap();
-
-        assert!(command_exists_in_paths(
-            OsStr::new("pnpm.exe"),
-            [temp_dir.clone()]
-        ));
-        assert!(!command_exists_in_paths(
-            OsStr::new("pnpm.cmd"),
-            [temp_dir.clone()]
-        ));
+        // Model competing installations without changing the process-wide PATH.
+        assert_eq!(
+            windows_command_in_paths("pnpm", [managed.clone(), corepack.clone()]).unwrap(),
+            Some(managed.join("pnpm.exe"))
+        );
+        assert_eq!(
+            windows_command_in_paths("pnpm", [corepack.clone(), managed.clone()]).unwrap(),
+            Some(corepack.join("pnpm.cmd"))
+        );
+        fs::write(managed.join("pnpm.cmd"), "").unwrap();
+        assert_eq!(
+            windows_command_in_paths("pnpm", [managed.clone()]).unwrap(),
+            Some(managed.join("pnpm.cmd"))
+        );
+        assert_eq!(
+            windows_command_in_paths("missing", [managed]).unwrap(),
+            None
+        );
 
         fs::remove_dir_all(temp_dir).unwrap();
     }
