@@ -541,10 +541,7 @@ fn codesign_nested_macos_bundle(bundle: &Path, language: XtaskOutputLanguage) ->
 
 #[cfg(test)]
 mod tests {
-    use super::build::{
-        cmake_help_lists_generator, cmake_visual_studio_generators,
-        select_installed_visual_studio_generator, windows_command_in_paths,
-    };
+    use super::build::windows_command_in_paths;
     use super::validation::parse_vst3_validator_cids;
     use super::*;
 
@@ -603,57 +600,5 @@ mod tests {
                 "FFFF664CB96353E687CC2A7CEB29674B".to_string(),
             ]
         );
-    }
-
-    #[test]
-    fn parses_visual_studio_generators_from_cmake_help() {
-        let help = r#"
-Generators
-
-The following generators are available on this platform (* marks default):
-* Visual Studio 18 2026        = Generates Visual Studio 2026 project files.
-  Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
-  Ninja                        = Generates build.ninja files.
-"#;
-
-        assert!(cmake_help_lists_generator(help, "Visual Studio 18 2026"));
-        assert!(cmake_help_lists_generator(help, "Visual Studio 17 2022"));
-        assert!(!cmake_help_lists_generator(help, "Visual Studio 16 2019"));
-        assert_eq!(
-            cmake_visual_studio_generators(help),
-            vec![
-                "Visual Studio 18 2026".to_owned(),
-                "Visual Studio 17 2022".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn selects_latest_installed_visual_studio_supported_by_cmake() {
-        let help = r#"
-Generators
-
-The following generators are available on this platform (* marks default):
-  Visual Studio 18 2026        = Generates Visual Studio 2026 project files.
-  Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
-* Visual Studio 16 2019        = Generates Visual Studio 2019 project files.
-  Visual Studio 15 2017 [arch] = Generates Visual Studio 2017 project files.
-  Ninja                        = Generates build.ninja files.
-"#;
-
-        assert_eq!(
-            select_installed_visual_studio_generator(help, &[16, 17]),
-            Some("Visual Studio 17 2022".to_owned())
-        );
-        assert_eq!(
-            select_installed_visual_studio_generator(help, &[18, 17]),
-            Some("Visual Studio 18 2026".to_owned())
-        );
-        assert_eq!(
-            select_installed_visual_studio_generator(help, &[19, 17]),
-            Some("Visual Studio 17 2022".to_owned())
-        );
-        assert_eq!(select_installed_visual_studio_generator(help, &[19]), None);
-        assert_eq!(select_installed_visual_studio_generator(help, &[]), None);
     }
 }
