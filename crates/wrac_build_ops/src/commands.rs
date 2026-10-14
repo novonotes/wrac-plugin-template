@@ -543,7 +543,7 @@ fn codesign_nested_macos_bundle(bundle: &Path, language: XtaskOutputLanguage) ->
 mod tests {
     use super::build::{
         cmake_help_lists_generator, cmake_visual_studio_generators,
-        select_latest_visual_studio_generator, windows_command_in_paths,
+        select_installed_visual_studio_generator, windows_command_in_paths,
     };
     use super::validation::parse_vst3_validator_cids;
     use super::*;
@@ -629,11 +629,12 @@ The following generators are available on this platform (* marks default):
     }
 
     #[test]
-    fn selects_latest_visual_studio_generator_from_cmake_help() {
+    fn selects_latest_installed_visual_studio_supported_by_cmake() {
         let help = r#"
 Generators
 
 The following generators are available on this platform (* marks default):
+  Visual Studio 18 2026        = Generates Visual Studio 2026 project files.
   Visual Studio 17 2022        = Generates Visual Studio 2022 project files.
 * Visual Studio 16 2019        = Generates Visual Studio 2019 project files.
   Visual Studio 15 2017 [arch] = Generates Visual Studio 2017 project files.
@@ -641,8 +642,18 @@ The following generators are available on this platform (* marks default):
 "#;
 
         assert_eq!(
-            select_latest_visual_studio_generator(help),
+            select_installed_visual_studio_generator(help, &[16, 17]),
             Some("Visual Studio 17 2022".to_owned())
         );
+        assert_eq!(
+            select_installed_visual_studio_generator(help, &[18, 17]),
+            Some("Visual Studio 18 2026".to_owned())
+        );
+        assert_eq!(
+            select_installed_visual_studio_generator(help, &[19, 17]),
+            Some("Visual Studio 17 2022".to_owned())
+        );
+        assert_eq!(select_installed_visual_studio_generator(help, &[19]), None);
+        assert_eq!(select_installed_visual_studio_generator(help, &[]), None);
     }
 }
