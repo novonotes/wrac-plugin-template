@@ -9,9 +9,9 @@
  * from this runtime and pass the same object back in the subscription command.
  */
 import {
-  createHostFocusRestorer,
   createWracFrontendRuntime,
   installConsoleLogPipe,
+  installHostKeyRouting,
   installNativeCursorBridge,
   installResizeBridge,
 } from "@novonotes/wrac-frontend-runtime";
@@ -21,6 +21,11 @@ const runtime = createWracFrontendRuntime();
 // One runtime must own both channels and commands because transport handles are not
 // interchangeable across runtime instances with different transport implementations.
 installConsoleLogPipe(runtime.writeToLog);
+// Installed before any other key listener so that keys such as Space go back to
+// the host after GUI operations. The returned restorer covers operations that end
+// without a pointerup, such as wheel gestures and closing the text field.
+const { restoreHostFocus: restoreHostFocusIfNeeded } =
+  installHostKeyRouting(runtime);
 
 type PluginMetadata = {
   pluginId: string;
@@ -117,8 +122,6 @@ let gestureActive = false;
 let parameterSubscriptionId: number | undefined;
 let editorPageSubscriptionId: number | undefined;
 let pluginMetadata: PluginMetadata | undefined;
-
-const restoreHostFocusIfNeeded = createHostFocusRestorer(runtime);
 
 function editableText(source: string): string {
   const match = source.match(/[-+]?\d*\.?\d+/);

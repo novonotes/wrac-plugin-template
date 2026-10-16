@@ -3,7 +3,6 @@ import {
   defaultIsEditableElement,
   type EditableElementPredicate,
   type HostFocusRestorer,
-  type HostFocusRestorerOptions,
 } from "./hostFocus";
 import { installImeKeyIsolation } from "./imeKeyIsolation";
 import type { WracFrontendRuntime } from "./runtime";
@@ -22,6 +21,15 @@ import type { WracFrontendRuntime } from "./runtime";
 // particular, belongs to the host. A GUI element that needs Space for its own
 // keyboard operation must call preventDefault on it.
 
+export type HostKeyRoutingOptions = {
+  /**
+   * Decides which focused elements keep keyboard input in the GUI. Defaults to
+   * `defaultIsEditableElement`. A GUI that owns keys outside text fields (e.g.
+   * Delete in a custom editor) extends the default instead of replacing it.
+   */
+  isEditableElement?: EditableElementPredicate;
+};
+
 export type HostKeyRouting = {
   /**
    * Returns focus to the host unless an editable element is focused. Call it
@@ -29,7 +37,7 @@ export type HostKeyRouting = {
    * the call is a no-op while the field still has focus), or when a GUI-owned
    * operation ends without a pointerup on the document.
    */
-  restoreHostFocus: HostFocusRestorer;
+  restoreHostFocus: (target?: EventTarget | null) => void;
   dispose: () => void;
 };
 
@@ -40,13 +48,11 @@ export type HostKeyRouting = {
  */
 export function installHostKeyRouting(
   runtime: WracFrontendRuntime,
-  options: HostFocusRestorerOptions = {},
+  options: HostKeyRoutingOptions = {},
 ): HostKeyRouting {
   const isEditableElement =
     options.isEditableElement ?? defaultIsEditableElement;
-  const restoreHostFocus = createHostFocusRestorer(runtime, {
-    isEditableElement,
-  });
+  const restoreHostFocus = createHostFocusRestorer(runtime, isEditableElement);
   const disposers = [
     installImeKeyIsolation(),
     restoreHostFocusAfterPointerUp(restoreHostFocus),
