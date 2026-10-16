@@ -37,4 +37,8 @@ export {
   type HostFocusRestorer,
   type HostFocusRestorerOptions,
 } from "./hostFocus";
+export {
+  installHostKeyRouting,
+  type HostKeyRouting,
+} from "./hostKeyRouting";
 export { installConsoleLogPipe } from "./consoleLogPipe";

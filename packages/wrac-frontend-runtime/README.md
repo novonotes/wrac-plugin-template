@@ -10,7 +10,8 @@ This package contains runtime behavior that is common to DAW-hosted WebView
 plugin GUIs:
 
 - frontend log forwarding via `write_to_log`
-- host focus restoration via `focus_host_window`
+- host key routing that keeps keys such as Space with the host and returns
+  focus via `focus_host_window` after GUI operations
 - frontend runtime context via `get_frontend_runtime_context`
 - typed command invocation via `runtime.invoke<TResponse>()`
 - push channels via `runtime.createChannel<T>()`
@@ -31,9 +32,9 @@ package and expose only what WRAC frontends need. The default transport uses
 
 ```ts
 import {
-  createHostFocusRestorer,
   createWracFrontendRuntime,
   installConsoleLogPipe,
+  installHostKeyRouting,
   installNativeCursorBridge,
   installResizeBridge,
 } from "@novonotes/wrac-frontend-runtime";
@@ -45,7 +46,7 @@ const events = runtime.createChannel<{ type: string }>((event) => {
 await runtime.invoke("subscribe", { channel: events });
 installConsoleLogPipe(runtime.writeToLog);
 
-const restoreHostFocus = createHostFocusRestorer(runtime);
+const { restoreHostFocus } = installHostKeyRouting(runtime);
 
 installResizeBridge({
   runtime,

@@ -10,7 +10,7 @@ frontend packageは、`@novonotes/webview-bridge`を直接importせず、このp
 提供します。
 
 - `write_to_log`によるfrontend log転送
-- `focus_host_window`によるhost windowへのfocus復元
+- Spaceなどのkeyをhostへ残し、GUI操作後に`focus_host_window`でfocusを戻すkey routing
 - `get_frontend_runtime_context`によるfrontend runtime context取得
 - `runtime.invoke<TResponse>()`による型付きcommand呼び出し
 - `runtime.createChannel<T>()`によるpush channel生成
@@ -31,9 +31,9 @@ subscription modelは意図的に定義しません。これらの契約はplugi
 
 ```ts
 import {
-  createHostFocusRestorer,
   createWracFrontendRuntime,
   installConsoleLogPipe,
+  installHostKeyRouting,
   installNativeCursorBridge,
   installResizeBridge,
 } from "@novonotes/wrac-frontend-runtime";
@@ -45,7 +45,7 @@ const events = runtime.createChannel<{ type: string }>((event) => {
 await runtime.invoke("subscribe", { channel: events });
 installConsoleLogPipe(runtime.writeToLog);
 
-const restoreHostFocus = createHostFocusRestorer(runtime);
+const { restoreHostFocus } = installHostKeyRouting(runtime);
 
 installResizeBridge({
   runtime,
