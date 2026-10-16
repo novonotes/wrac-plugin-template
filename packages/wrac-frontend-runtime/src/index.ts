@@ -31,14 +31,12 @@ export {
   type NativeCursorBridgeOptions,
 } from "./nativeCursorBridge";
 export {
-  createHostFocusRestorer,
   defaultIsEditableElement,
   type EditableElementPredicate,
-  type HostFocusRestorer,
-  type HostFocusRestorerOptions,
 } from "./hostFocus";
 export {
   installHostKeyRouting,
   type HostKeyRouting,
+  type HostKeyRoutingOptions,
 } from "./hostKeyRouting";
 export { installConsoleLogPipe } from "./consoleLogPipe";

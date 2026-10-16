@@ -1,16 +1,11 @@
 import type { WracFrontendRuntime } from "./runtime";
 
+// Internal building blocks of `installHostKeyRouting`. Only the editable
+// predicate is public, so that a GUI can extend it; focus restoration is
+// obtained from `installHostKeyRouting` to keep a single entry point.
+
 export type HostFocusRestorer = (target?: EventTarget | null) => void;
 export type EditableElementPredicate = (target: EventTarget | null) => boolean;
-
-export type HostFocusRestorerOptions = {
-  /**
-   * Decides which focused elements keep keyboard input in the GUI. Defaults to
-   * `defaultIsEditableElement`. A GUI that owns keys outside text fields (e.g.
-   * Delete in a custom editor) extends the default instead of replacing it.
-   */
-  isEditableElement?: EditableElementPredicate;
-};
 
 // Input types that are operated like buttons or sliders rather than typed into.
 // Once the pointer gesture or value change ends, keyboard input can go back to the host.
@@ -59,10 +54,8 @@ export function defaultIsEditableElement(target: EventTarget | null): boolean {
 
 export function createHostFocusRestorer(
   runtime: WracFrontendRuntime,
-  options: HostFocusRestorerOptions = {},
+  isEditableElement: EditableElementPredicate,
 ): HostFocusRestorer {
-  const isEditableElement =
-    options.isEditableElement ?? defaultIsEditableElement;
   return (target?: EventTarget | null) => {
     if (
       isEditableElement(target ?? null) ||
