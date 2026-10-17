@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+// The audio thread drains this queue, so lock and unlock must finish with plain atomic operations.
+// A general mutex may wake a parked waiter (a syscall) when the audio thread unlocks it.
+use try_lock::TryLock;
 use wrac_clap_adapter::interface::{
     HostParams, InputEvents, OutputEvent, OutputEvents, ParamFlags, ParamGestureEvent, ParamInfo,
     ParamValueEvent, PluginError, PluginParamsQuery, PluginResult,
@@ -163,15 +165,18 @@ impl PluginParamsQuery for WracGainParamsExtension {
 ///
 /// CLAP output event queues only exist during `process` and `flush_params`, so GUI
 /// commands store typed CLAP events here and ask the host for a params flush.
+///
+/// Writers (control threads) retry until they get the lock; the audio thread tries once and
+/// leaves the events for the next drain when the queue is busy.
 pub(crate) struct WracGainParamOutputQueue {
-    pending: Mutex<VecDeque<OutputEvent>>,
+    pending: TryLock<VecDeque<OutputEvent>>,
     flush_requester: Arc<dyn HostParams>,
 }
 
 impl WracGainParamOutputQueue {
     pub(crate) fn new(flush_requester: Arc<dyn HostParams>) -> Self {
         Self {
-            pending: Mutex::new(VecDeque::new()),
+            pending: TryLock::new(VecDeque::new()),
             flush_requester,
         }
     }
@@ -217,7 +222,15 @@ impl WracGainParamOutputQueue {
     }
 
     fn push(&self, event: OutputEvent) {
-        self.pending.lock().push_back(event);
+        // The audio thread only moves a few events while holding the lock, so the wait is short.
+        // `TryLock` has no blocking acquire, so the control thread yields and retries.
+        loop {
+            if let Some(mut pending) = self.pending.try_lock() {
+                pending.push_back(event);
+                break;
+            }
+            std::thread::yield_now();
+        }
         self.flush_requester.request_flush();
     }
 }
