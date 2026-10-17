@@ -388,7 +388,7 @@ int main(int argc, char **argv)
         {
           cppf << "AUV2_Type::aumi_noteeffect";
         }
-        else if (u.type == "aufx")
+        else if (u.type == "aufx" || u.type == "aumf")
         {
           cppf << "AUV2_Type::aufx_effect";
         }
@@ -401,11 +401,17 @@ int main(int argc, char **argv)
         }
         cppf << "," << args << ", ci) {}"
              << "};\n";
-        // MIDI-capable AUv2 types need the MusicDevice selector surface. JUCE uses
-        // the same factory boundary for MIDI effects, and auval initializes `aumi`
-        // components through these selectors.
-        if (u.type == "aumu" || u.type == "aumi")
+        if (u.type == "aumf")
         {
+          // MIDI effects retain audio-effect properties, but AUBaseFactory omits
+          // the MIDI selectors and makes MusicDeviceMIDIEvent return unimpErr.
+          cppf << "AUSDK_COMPONENT_ENTRY(ausdk::AUMIDIEffectFactory, " << on << ");\n";
+        }
+        else if (u.type == "aumu" || u.type == "aumi")
+        {
+          // Instruments and MIDI processors need the MusicDevice selector
+          // surface. JUCE uses the same factory boundary for MIDI effects, and
+          // auval initializes `aumi` components through these selectors.
           cppf << "AUSDK_COMPONENT_ENTRY(ausdk::AUMusicDeviceFactory, " << on << ");\n";
         }
         else

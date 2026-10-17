@@ -19,6 +19,7 @@ serde_json = "1.0"
 url = "2"
 wrac_clap_adapter = { workspace = true }
 wrac_host_context = { workspace = true }
+wrac_log = { workspace = true }
 wxp = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]

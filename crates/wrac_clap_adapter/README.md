@@ -1,7 +1,6 @@
 # wrac_clap_adapter
 
-Defines the traits that each product crate must implement,
-and provides an adapter that maps those trait implementations to the CLAP ABI so they can be used as plugins.
+Maps the product contracts defined by `wrac_clap_adapter::interface` to the CLAP ABI.
 
 Conversion to VST3 / AU / AAX is the responsibility of `clap-wrapper`. This crate focuses solely on implementing CLAP plugins and CLAP extensions on the Rust side.
 
@@ -23,21 +22,21 @@ This crate, on the other hand, also targets VST3/AU/AAX hosts via `clap-wrapper`
 
 ## Public API
 
-- `PluginEntry`: DSO-level lifecycle and typed factory provider
-- `PluginFactory`: CLAP `clap.plugin-factory`
-- `PluginCore`: instance lifecycle and declaration of supported extensions
-- `PluginAudioPortsExtension`: CLAP `audio-ports`
-- `PluginConfigurableAudioPortsExtension`: CLAP `configurable-audio-ports`
-- `PluginNotePortsExtension`: CLAP `note-ports`
-- `PluginParamsExtension`: CLAP `params`
-- `PluginStateExtension`: CLAP `state`
-- `PluginGuiExtension`: CLAP `gui`
-- `PluginRenderExtension`: CLAP `render`
-- `PluginTailExtension`: CLAP `tail`
-- `PluginLatencyExtension`: CLAP `latency`
-- `export_clap_entry!`: exports the CLAP entry point
+`export_clap_entry!` exports the CLAP entry point. Product implementations use the traits and
+related types from `wrac_clap_adapter::interface`; the remaining modules own the ABI callbacks,
+registration storage, and concrete host proxy implementations.
 
-Each trait is a thin Rust representation of the corresponding CLAP C ABI. This crate is not designed as a general plugin framework.
+## Internal boundaries
+
+- `interface`: the complete product-facing contract
+- `abi`: CLAP callbacks that invoke product implementations
+- `host_proxy`: private concrete proxies used by products to invoke CLAP host callbacks
+
+## Instance lifecycle
+
+`clap.plugin-factory.create_plugin` creates only the CLAP ABI shell. Product instance construction is deferred until `plugin.init`, where CLAP and clap-wrapper initialize the plugin-facing lifecycle. Capability objects such as ports, parameters, state, GUI, latency, and tail are frozen during `plugin.init` so later host callbacks can answer without taking the product lifecycle lock.
+
+Calls that arrive before capability freeze do not wait for initialization to complete. They fail fast, return `null`/`false`/`0`, or no-op depending on the CLAP callback shape. Product-held host extension proxies also remain inert until capability freeze is complete, preventing init-time host callbacks from observing half-initialized plugin capabilities. Teardown callbacks are the exception: `deactivate` and `destroy` wait for in-flight processing access to finish so the adapter can reclaim processors before the host releases the instance.
 
 ## Limitations
 
@@ -45,9 +44,8 @@ This crate is provided as part of an implementation example, not as a general-pu
 
 Additionally, full CLAP ABI coverage is not yet complete. Known limitations:
 
-- `audio-ports`: exposes current port metadata only; dynamic port rescan notifications are not supported
 - `configurable-audio-ports`: only layout negotiation while inactive is supported
-- `params`: value rescan after state restore is supported, but a dynamic rescan API for the parameter schema itself is not provided
+- Host callback proxies are thin wrappers and do not marshal calls to a different thread
 - Output event batching helpers are minimal (sample-accurate event ordering is the product's responsibility)
 - The `audio-ports-activation` extension is not implemented
 - Typed factories other than plugin factory and AUv2 wrapper info are not implemented yet

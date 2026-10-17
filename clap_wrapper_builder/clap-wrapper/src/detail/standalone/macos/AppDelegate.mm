@@ -1,6 +1,8 @@
 #import "AppDelegate.h"
 
+#if CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
 #include <AVFoundation/AVFoundation.h>
+#endif
 
 #include <map>
 
@@ -96,7 +98,9 @@
   std::string pid{PLUGIN_ID};
   int pindex{PLUGIN_INDEX};
 
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 101400 && CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
+  // A standalone built without physical input must not ask for access merely because the plugin
+  // exposes an audio bus to DAW hosts.
   switch ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio])
   {
     case AVAuthorizationStatusNotDetermined:

@@ -73,7 +73,11 @@ void StandaloneHost::setAudioApi(RtAudio::Api api)
 std::tuple<unsigned int, unsigned int, int32_t> StandaloneHost::getDefaultAudioInOutSampleRate()
 {
   guaranteeRtAudioDAC();
+#if CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
   auto iid = rtaDac->getDefaultInputDevice();
+#else
+  unsigned int iid = 0;
+#endif
   auto oid = rtaDac->getDefaultOutputDevice();
   auto outInfo = rtaDac->getDeviceInfo(oid);
   auto sr = outInfo.currentSampleRate;
@@ -131,8 +135,12 @@ std::vector<RtAudio::Api> StandaloneHost::getCompiledApi()
 
 std::vector<RtAudio::DeviceInfo> StandaloneHost::getInputAudioDevices()
 {
+#if !CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
+  return {};
+#else
   guaranteeRtAudioDAC();
   return filterDevicesBy(rtaDac, [](auto &a) { return a.inputChannels > 0; });
+#endif
 }
 
 std::vector<RtAudio::DeviceInfo> StandaloneHost::getOutputAudioDevices()
@@ -170,6 +178,11 @@ void StandaloneHost::startAudioThreadOn(unsigned int inputDeviceID, uint32_t inp
                                         bool useInput, unsigned int outputDeviceID,
                                         uint32_t outputChannels, bool useOutput, int32_t reqSampleRate)
 {
+#if !CLAP_WRAPPER_STANDALONE_AUDIO_INPUT
+  // Keep every entry point output-only so settings UI or restored state cannot regain a capability
+  // that the embedding build intentionally removed.
+  useInput = false;
+#endif
   guaranteeRtAudioDAC();
 
   if (rtaDac->isStreamRunning())
