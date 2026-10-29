@@ -2,28 +2,30 @@
  * WRAC Gain Plugin — Frontend (JavaScript side)
  *
  * The GUI of a wxp plugin is implemented as a regular web application.
- * Communication with the Rust side uses invoke() and Channel
- * provided by @novonotes/webview-bridge.
+ * Communication with the Rust side uses the WRAC frontend runtime facade.
  *
- * invoke(command, args):
- *   Calls a command registered in the Rust-side WxpCommandHandler (RPC).
- *   The return value is a Promise.
- *
- * Channel:
- *   A bidirectional channel for receiving push notifications from Rust → JS.
- *   Pass a callback to the constructor; it is called each time
- *   the Rust side calls Channel::send().
+ * Product command names and payloads remain owned by this plugin and are forwarded
+ * unchanged through runtime.invoke(). Channels are opaque transport handles: create them
+ * from this runtime and pass the same object back in the subscription command.
  */
-import { Channel, invoke } from "@novonotes/webview-bridge";
 import {
-  type FrontendRuntimeContext,
+  createWracFrontendRuntime,
+  installConsoleLogPipe,
+  installHostKeyRouting,
   installNativeCursorBridge,
   installResizeBridge,
-} from "./wracRuntime";
-import { installConsoleLogPipe } from "./nativeLog";
+} from "@novonotes/wrac-frontend-runtime";
 import "./style.css";
 
-installConsoleLogPipe();
+const runtime = createWracFrontendRuntime();
+// One runtime must own both channels and commands because transport handles are not
+// interchangeable across runtime instances with different transport implementations.
+installConsoleLogPipe(runtime.writeToLog);
+// Installed before any other key listener so that keys such as Space go back to
+// the host after GUI operations. The returned restorer covers operations that end
+// without a pointerup, such as wheel gestures and closing the text field.
+const { restoreHostFocus: restoreHostFocusIfNeeded } =
+  installHostKeyRouting(runtime);
 
 type PluginMetadata = {
   pluginId: string;
@@ -43,11 +45,22 @@ type ParameterState = {
   text: string;
 };
 
-type EditorPage = "controls" | "about";
+type EditorPage = "controls" | "about" | "settings";
 
 type EditorPageState = {
   type: "editor-page";
   page: EditorPage;
+};
+
+/**
+ * Delay setting, matching latency_payload() on the Rust side. It is editor state
+ * rather than a host parameter: changing it changes the plugin's reported latency,
+ * which the host applies through a reactivation.
+ */
+type LatencyState = {
+  type: "latency";
+  latencyFrames: number;
+  choices: number[];
 };
 
 type SubscribeParametersResponse = {
@@ -73,6 +86,8 @@ const dbLabel = document.querySelector<HTMLButtonElement>("#gain-db");
 const gainInput = document.querySelector<HTMLInputElement>("#gain-input");
 const headerAction =
   document.querySelector<HTMLButtonElement>("#header-action");
+const headerSettings =
+  document.querySelector<HTMLButtonElement>("#header-settings");
 const pluginName = document.querySelector<HTMLButtonElement>("#plugin-name");
 const aboutTitle = document.querySelector<HTMLElement>("#about-title");
 const aboutPluginName =
@@ -87,11 +102,15 @@ const indicator = document.querySelector<HTMLDivElement>("#knob-indicator");
 const resizeGrip = document.querySelector<HTMLButtonElement>("#resize-grip");
 const pageControls = document.querySelector<HTMLElement>("#page-controls");
 const pageAbout = document.querySelector<HTMLElement>("#page-about");
+const pageSettings = document.querySelector<HTMLElement>("#page-settings");
+const latencySelect =
+  document.querySelector<HTMLSelectElement>("#latency-select");
 
 if (
   !dbLabel ||
   !gainInput ||
   !headerAction ||
+  !headerSettings ||
   !pluginName ||
   !aboutTitle ||
   !aboutPluginName ||
@@ -102,7 +121,9 @@ if (
   !indicator ||
   !resizeGrip ||
   !pageControls ||
-  !pageAbout
+  !pageAbout ||
+  !pageSettings ||
+  !latencySelect
 ) {
   throw new Error("required elements not found");
 }
@@ -119,31 +140,8 @@ let dragStartGain = gain;
 let gestureActive = false;
 let parameterSubscriptionId: number | undefined;
 let editorPageSubscriptionId: number | undefined;
+let latencySubscriptionId: number | undefined;
 let pluginMetadata: PluginMetadata | undefined;
-
-function isEditableElement(target: EventTarget | null): boolean {
-  return (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
-}
-
-function restoreHostFocusIfNeeded(target?: EventTarget | null): void {
-  if (
-    isEditableElement(target ?? null) ||
-    isEditableElement(document.activeElement)
-  ) {
-    return;
-  }
-  window.setTimeout(() => {
-    if (isEditableElement(document.activeElement)) {
-      return;
-    }
-    void invoke("focus_host_window");
-  }, 0);
-}
 
 function editableText(source: string): string {
   const match = source.match(/[-+]?\d*\.?\d+/);
@@ -179,33 +177,42 @@ if (import.meta.env.PROD) {
 // -----------------------------------------------------------------------
 // Create a Channel and register it with the Rust side as the target for parameter change
 // notifications. When the host changes the gain via automation, this callback updates the UI.
-const channel = new Channel<ParameterState>((message) => {
+const channel = runtime.createChannel<ParameterState>((message) => {
   if (message && message.type === "parameter-value") {
     render(message);
   }
 });
 
-const editorPageChannel = new Channel<EditorPageState>((message) => {
+const editorPageChannel = runtime.createChannel<EditorPageState>((message) => {
   if (message && message.type === "editor-page") {
     renderEditorPage(message.page);
   }
 });
 
+// A state restore can replace the delay setting while the GUI is open.
+const latencyChannel = runtime.createChannel<LatencyState>((message) => {
+  if (message && message.type === "latency") {
+    renderLatency(message);
+  }
+});
+
 // Initialization: fetch the current gain state, render the UI, and subscribe to changes.
 void (async () => {
-  pluginMetadata = await invoke<PluginMetadata>("get_plugin_metadata");
+  pluginMetadata = await runtime.invoke<PluginMetadata>("get_plugin_metadata");
   renderPluginMetadata(pluginMetadata);
 
   gain = clamp(GAIN_PARAMETER.defaultValue);
-  // Call the Rust "get_parameter_state" command via invoke().
-  const initialState = await invoke<ParameterState>("get_parameter_state", {
-    parameterId: GAIN_PARAMETER.id,
-  });
+  const initialState = await runtime.invoke<ParameterState>(
+    "get_parameter_state",
+    {
+      parameterId: GAIN_PARAMETER.id,
+    },
+  );
   render(initialState);
   // Register the Channel on the Rust side and remember the returned subscriptionId.
   // Passing that id back on unsubscribe guarantees we tear down only our own
   // subscription, even if a remount created another one in the meantime.
-  const subscription = await invoke<SubscribeParametersResponse>(
+  const subscription = await runtime.invoke<SubscribeParametersResponse>(
     "subscribe_parameters",
     {
       channel,
@@ -213,20 +220,30 @@ void (async () => {
   );
   parameterSubscriptionId = subscription.subscriptionId;
 
-  const initialPage = await invoke<EditorPageState>("get_editor_page");
+  const initialPage = await runtime.invoke<EditorPageState>("get_editor_page");
   renderEditorPage(initialPage.page);
-  const editorPageSubscription = await invoke<SubscribeParametersResponse>(
-    "subscribe_editor_page",
-    {
+  const editorPageSubscription =
+    await runtime.invoke<SubscribeParametersResponse>("subscribe_editor_page", {
       channel: editorPageChannel,
+    });
+  editorPageSubscriptionId = editorPageSubscription.subscriptionId;
+
+  renderLatency(await runtime.invoke<LatencyState>("get_latency"));
+  const latencySubscription = await runtime.invoke<SubscribeParametersResponse>(
+    "subscribe_latency",
+    {
+      channel: latencyChannel,
     },
   );
-  editorPageSubscriptionId = editorPageSubscription.subscriptionId;
+  latencySubscriptionId = latencySubscription.subscriptionId;
   console.info("GUI initialization completed");
-  const runtimeContext = await invoke<FrontendRuntimeContext>(
-    "get_frontend_runtime_context",
-  ).catch(() => ({}));
-  installNativeCursorBridge(runtimeContext);
+  const runtimeContext = await runtime
+    .getFrontendRuntimeContext()
+    .catch(() => ({}));
+  installNativeCursorBridge({
+    runtime,
+    context: runtimeContext,
+  });
 })();
 
 function clamp(value: number): number {
@@ -273,10 +290,16 @@ function renderPluginMetadata(metadata: PluginMetadata): void {
 
 function renderEditorPage(page: EditorPage): void {
   const showControls = page === "controls";
-  pageControls.hidden = !showControls;
-  pageAbout.hidden = showControls;
-  pageControls.classList.toggle("is-active", showControls);
-  pageAbout.classList.toggle("is-active", !showControls);
+  for (const [element, elementPage] of [
+    [pageControls, "controls"],
+    [pageAbout, "about"],
+    [pageSettings, "settings"],
+  ] as const) {
+    element.hidden = elementPage !== page;
+    element.classList.toggle("is-active", elementPage === page);
+  }
+  // Settings open from the controls page only; the other pages close back to it.
+  headerSettings.hidden = !showControls;
   pluginName.setAttribute(
     "aria-label",
     showControls ? "Show about page" : "Show controls",
@@ -288,13 +311,29 @@ function renderEditorPage(page: EditorPage): void {
   headerAction.classList.toggle("is-close", !showControls);
   headerAction.setAttribute(
     "aria-label",
-    showControls ? "Plugin version" : "Close about page",
+    showControls ? "Plugin version" : "Close page",
   );
+}
+
+function renderLatency(state: LatencyState): void {
+  // The choices come from Rust so the GUI never offers a delay the plugin rejects.
+  if (latencySelect.options.length !== state.choices.length) {
+    latencySelect.replaceChildren(
+      ...state.choices.map((frames) => {
+        const option = document.createElement("option");
+        option.value = String(frames);
+        option.textContent = `${frames} samples`;
+        return option;
+      }),
+    );
+  }
+  latencySelect.value = String(state.latencyFrames);
 }
 
 function setEditorPage(page: EditorPage): void {
   renderEditorPage(page);
-  void invoke<EditorPageState>("set_editor_page", { page })
+  void runtime
+    .invoke<EditorPageState>("set_editor_page", { page })
     .then((state) => renderEditorPage(state.page))
     .catch(() => undefined);
 }
@@ -311,9 +350,9 @@ function beginGesture(): void {
     return;
   }
   gestureActive = true;
-  // Call the Rust begin_parameter_gesture command via invoke().
-  // void = fire-and-forget (do not await the result).
-  void invoke("begin_parameter_gesture", {
+  // Parameter edits must not delay pointer handling while the host records the gesture;
+  // the native command queue preserves ordering with the following value updates.
+  void runtime.invoke("begin_parameter_gesture", {
     parameterId: GAIN_PARAMETER.id,
   });
 }
@@ -323,7 +362,7 @@ function endGesture(): void {
     return;
   }
   gestureActive = false;
-  void invoke("end_parameter_gesture", {
+  void runtime.invoke("end_parameter_gesture", {
     parameterId: GAIN_PARAMETER.id,
   });
 }
@@ -338,8 +377,7 @@ function applyGain(nextGain: number): void {
     value,
     text: value <= 0 ? "-inf dB" : `${(20 * Math.log10(value)).toFixed(1)} dB`,
   });
-  // Update the parameter via the Rust "set_parameter_value" command.
-  void invoke("set_parameter_value", {
+  void runtime.invoke("set_parameter_value", {
     parameterId: GAIN_PARAMETER.id,
     value,
   });
@@ -365,7 +403,7 @@ function commitTextInput(): void {
   gainInput.hidden = true;
   dbLabel.hidden = false;
   renderResponse(
-    invoke<ParameterState>("set_parameter_text", {
+    runtime.invoke<ParameterState>("set_parameter_text", {
       parameterId: GAIN_PARAMETER.id,
       text,
     }),
@@ -422,7 +460,7 @@ knob.addEventListener("pointercancel", finishDrag);
 knob.addEventListener("dblclick", (event) => {
   event.preventDefault();
   renderResponse(
-    invoke<ParameterState>("reset_parameter_to_default", {
+    runtime.invoke<ParameterState>("reset_parameter_to_default", {
       parameterId: GAIN_PARAMETER.id,
     }),
   );
@@ -474,6 +512,13 @@ gainInput.addEventListener("keydown", (event) => {
 });
 gainInput.addEventListener("pointerdown", (event) => event.stopPropagation());
 
+// Rarely changed settings (the delay setting) live behind this button so they stay off the
+// main controls and are not changed by accident during a session.
+headerSettings.addEventListener("click", (event) => {
+  setEditorPage("settings");
+  restoreHostFocusIfNeeded(event.target);
+});
+
 // About is a detail view of plugin identity rather than a settings screen, so the plugin name
 // itself is used as the entry point/toggle instead of a permanent tab, to avoid an extra
 // segmented control on the main controls surface.
@@ -490,7 +535,18 @@ headerAction.addEventListener("click", (event) => {
   restoreHostFocusIfNeeded(event.target);
 });
 
+latencySelect.addEventListener("change", (event) => {
+  void runtime
+    .invoke<LatencyState>("set_latency", {
+      latencyFrames: Number(latencySelect.value),
+    })
+    .then(renderLatency)
+    .catch(() => undefined);
+  restoreHostFocusIfNeeded(event.target);
+});
+
 installResizeBridge({
+  runtime,
   resizeGrip,
   restoreHostFocus: restoreHostFocusIfNeeded,
 });
@@ -502,13 +558,18 @@ installResizeBridge({
 window.addEventListener("beforeunload", () => {
   endGesture();
   if (parameterSubscriptionId !== undefined) {
-    void invoke("unsubscribe_gui_subscription", {
+    void runtime.invoke("unsubscribe_gui_subscription", {
       subscriptionId: parameterSubscriptionId,
     });
   }
   if (editorPageSubscriptionId !== undefined) {
-    void invoke("unsubscribe_gui_subscription", {
+    void runtime.invoke("unsubscribe_gui_subscription", {
       subscriptionId: editorPageSubscriptionId,
+    });
+  }
+  if (latencySubscriptionId !== undefined) {
+    void runtime.invoke("unsubscribe_gui_subscription", {
+      subscriptionId: latencySubscriptionId,
     });
   }
 });

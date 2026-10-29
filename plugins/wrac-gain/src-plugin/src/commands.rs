@@ -9,16 +9,19 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::{
-    HostContext, HostFamily, HostGuiResizeRequester, HostParamsEditNotifier, PluginDescriptor,
-};
+use wrac_clap_adapter::interface::{HostContext, HostFamily, HostGui, HostState, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };
-use wxp::{Channel, WxpCommandHandler};
+use wxp::WxpCommandHandler;
 
-use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload};
-use crate::plugin::{parameter_default_value, parameter_host_value, parameter_text_value};
+use crate::gui::{
+    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, latency_payload, parameter_payload,
+};
+use crate::plugin::{
+    LatencyStore, WracGainParamOutputQueue, is_latency_frame_choice, parameter_default_value,
+    parameter_host_value, parameter_text_value,
+};
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
 #[derive(Debug, Deserialize)]
@@ -42,10 +45,12 @@ struct FrontendLogEntry {
 pub(crate) struct CommandRegistrationDependencies {
     pub(crate) project_state: Arc<ProjectStateStore>,
     pub(crate) shared: Arc<SharedState>,
+    pub(crate) latency: Arc<LatencyStore>,
     pub(crate) gui_notifier: Arc<GuiStateNotifier>,
     pub(crate) descriptor: PluginDescriptor,
-    pub(crate) host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
-    pub(crate) host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
+    pub(crate) param_output_queue: Arc<WracGainParamOutputQueue>,
+    pub(crate) host_gui: Arc<dyn HostGui>,
+    pub(crate) host_state: Arc<dyn HostState>,
     pub(crate) gui_resize_handle: WxpGuiResizeHandle,
     pub(crate) host_context: HostContext,
 }
@@ -61,10 +66,12 @@ pub(crate) fn register_commands(
     let CommandRegistrationDependencies {
         project_state,
         shared,
+        latency,
         gui_notifier,
         descriptor,
-        host_parameter_edit_notifier,
-        host_gui_resize_requester,
+        param_output_queue,
+        host_gui,
+        host_state,
         gui_resize_handle,
         host_context,
     } = dependencies;
@@ -118,6 +125,29 @@ pub(crate) fn register_commands(
         });
     }
 
+    // The delay setting is editor state, not a host parameter: a latency change makes the
+    // host recompute its delay compensation, which hosts do not expect from automation.
+    // Selecting it here changes the audio at once and asks the host for the reactivation
+    // that updates the reported latency.
+    {
+        let latency = latency.clone();
+        command_handler.register_sync("get_latency", move |_| {
+            Ok::<_, String>(latency_payload(latency.selected_frames()))
+        });
+    }
+
+    {
+        let latency = latency.clone();
+        let gui_notifier = gui_notifier.clone();
+        command_handler.register_sync("set_latency", move |ctx| {
+            let latency_frames = ctx.arg::<u32>("latencyFrames").map_err(|e| e.to_string())?;
+            select_latency_from_gui(&latency, host_state.as_ref(), latency_frames)
+                .map_err(str::to_string)?;
+            gui_notifier.notify_latency(latency_frames);
+            Ok::<_, String>(latency_payload(latency_frames))
+        });
+    }
+
     // Returns the current parameter value. Used for initial display when the GUI launches.
     {
         let shared = shared.clone();
@@ -134,22 +164,22 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("set_parameter_text", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let text = ctx.arg::<String>("text").map_err(|e| e.to_string())?;
             let value = parameter_text_value(parameter_id, &text).map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             let applied = shared
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
             );
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(parameter_payload(parameter_id, applied))
         });
     }
@@ -158,31 +188,31 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("reset_parameter_to_default", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let value = parameter_default_value(parameter_id).map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             let applied = shared
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
             );
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(parameter_payload(parameter_id, applied))
         });
     }
 
     // Called when the user first touches a control. Signals the start of an undo unit to the host.
     {
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("begin_parameter_gesture", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.begin_edit(parameter_id);
+            param_output_queue.begin_edit(parameter_id);
             Ok::<_, String>(json!({ "ok": true }))
         });
     }
@@ -191,7 +221,7 @@ pub(crate) fn register_commands(
     {
         let shared = shared.clone();
         let gui_notifier = gui_notifier.clone();
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("set_parameter_value", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
             let value = ctx.arg::<f64>("value").map_err(|e| e.to_string())?;
@@ -199,7 +229,7 @@ pub(crate) fn register_commands(
                 .set_parameter_value(parameter_id, value)
                 .ok_or_else(|| "invalid parameter id".to_string())?;
             gui_notifier.notify_parameter(parameter_id, applied);
-            host_parameter_edit_notifier.update_edit(
+            param_output_queue.update_edit(
                 parameter_id,
                 parameter_host_value(parameter_id, applied)
                     .map_err(|_| "invalid parameter id".to_string())?,
@@ -210,10 +240,10 @@ pub(crate) fn register_commands(
 
     // Called when the user releases the control. Signals the end of the undo unit to the host.
     {
-        let host_parameter_edit_notifier = host_parameter_edit_notifier.clone();
+        let param_output_queue = param_output_queue.clone();
         command_handler.register_sync("end_parameter_gesture", move |ctx| {
             let parameter_id = ctx.arg::<u32>("parameterId").map_err(|e| e.to_string())?;
-            host_parameter_edit_notifier.end_edit(parameter_id);
+            param_output_queue.end_edit(parameter_id);
             Ok::<_, String>(json!({ "ok": true }))
         });
     }
@@ -226,7 +256,7 @@ pub(crate) fn register_commands(
     {
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("subscribe_parameters", move |ctx| {
-            let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
             let subscription_id = gui_notifier.subscribe_parameters(channel);
             Ok::<_, String>(json!({
                 "ok": true,
@@ -238,8 +268,20 @@ pub(crate) fn register_commands(
     {
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("subscribe_editor_page", move |ctx| {
-            let channel = ctx.arg::<Channel>("channel").map_err(|e| e.to_string())?;
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
             let subscription_id = gui_notifier.subscribe_editor_page(channel);
+            Ok::<_, String>(json!({
+                "ok": true,
+                "subscriptionId": subscription_id.get(),
+            }))
+        });
+    }
+
+    {
+        let gui_notifier = gui_notifier.clone();
+        command_handler.register_sync("subscribe_latency", move |ctx| {
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
+            let subscription_id = gui_notifier.subscribe_latency(channel);
             Ok::<_, String>(json!({
                 "ok": true,
                 "subscriptionId": subscription_id.get(),
@@ -270,12 +312,26 @@ pub(crate) fn register_commands(
 
     // Window-management commands are shared wxp GUI plumbing, not WRAC Gain product state.
     // Register them here so the product command list stays the single Rust/TS rendezvous point.
-    register_resize_commands(
-        &command_handler,
-        host_gui_resize_requester,
-        gui_resize_handle,
-    );
+    register_resize_commands(&command_handler, host_gui, gui_resize_handle);
     register_native_cursor_bridge_commands(&command_handler);
+}
+
+/// Applies a delay chosen in the GUI and, when it changes the selection, marks the
+/// project as modified. The delay is editor state rather than a host parameter, so
+/// without this the host would not offer to save the change. `[main-thread]`
+pub(crate) fn select_latency_from_gui(
+    latency: &LatencyStore,
+    host_state: &dyn HostState,
+    frames: u32,
+) -> Result<(), &'static str> {
+    if !is_latency_frame_choice(frames) {
+        return Err("invalid latency");
+    }
+    if latency.select(frames) {
+        // Restoring state uses LatencyStore::select directly and must not dirty the project.
+        host_state.mark_dirty();
+    }
+    Ok(())
 }
 
 fn write_frontend_log(entry: FrontendLogEntry) {

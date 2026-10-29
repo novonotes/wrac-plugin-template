@@ -5,17 +5,19 @@ use std::thread::ThreadId;
 
 use novonotes_run_loop::{RunLoop, RunLoopGuard, RunLoopLocal};
 use parking_lot::Mutex;
-use wrac_clap_adapter::{GuiConfig, GuiSize, PluginError, PluginResult};
+use wrac_clap_adapter::interface::{GuiConfig, GuiSize, PluginError, PluginResult};
 
 use crate::window::ParentWindowHandle;
 
 thread_local! {
     // Native GUI objects such as WebViews are typically bound to the thread that created them.
-    // `WxpGuiController` lives inside a Send/Sync `PluginCore`, so runtimes are confined to TLS.
+    // `WxpGuiController` lives inside a Send/Sync `PluginInstance`, so runtimes are confined to TLS.
     static GUI_RUNTIMES: RefCell<HashMap<u64, GuiRuntimeEntry>> = RefCell::new(HashMap::new());
     // Keep the `!Send` run-loop guard on the GUI thread. `GuiThreadLease` is only a
     // cross-thread token; it releases this guard by dispatching back to the owner thread.
-    static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const { RefCell::new(None) };
+    static GUI_RUN_LOOP_GUARD: RefCell<Option<RunLoopGuard>> = const {
+        RefCell::new(None)
+    };
 }
 
 static NEXT_GUI_ID: AtomicU64 = AtomicU64::new(1);
@@ -44,9 +46,8 @@ struct GuiRuntimeEntry {
 /// RAII token representing a reference to the GUI thread's run loop.
 ///
 /// The token is `Send + Sync` because `WxpGuiController` is shared with host callbacks,
-/// but the `!Send` [`RunLoopGuard`] itself stays in GUI-thread TLS. Dropping this token
-/// from another host thread blocks until the reference has been released on the owning
-/// GUI thread.
+/// but the `!Send` run-loop guard itself stays in GUI-thread TLS. Dropping this token
+/// from another host thread posts the release back to the owning GUI thread.
 pub(crate) struct GuiThreadLease {
     owner: ThreadId,
     is_active: bool,
@@ -70,7 +71,7 @@ pub trait WxpGuiRuntime: 'static {
 
 /// Factory that creates a product-specific GUI runtime.
 ///
-/// The factory itself is `Send + Sync` because it is held inside `PluginCore`, but the
+/// The factory itself is `Send + Sync` because it is held inside `PluginInstance`, but the
 /// runtime it returns does not need to be `Send` — it lives in the UI thread's TLS.
 /// Runtime creation may allocate and touch native GUI APIs; it is not realtime-safe.
 pub trait WxpGuiFactory: Send + Sync + 'static {
@@ -135,7 +136,7 @@ impl GuiRuntimeHandle {
     pub(crate) fn destroy(self) {
         let id = self.id;
         log::debug!("wxp runtime {id}: destroy requested");
-        let _ = RunLoop::call(move |_| {
+        let _ = RunLoop::post(move |_| {
             log::debug!("wxp runtime {id}: removing runtime from GUI thread");
             GUI_RUNTIMES.with(|runtimes| {
                 runtimes.borrow_mut().remove(&id);
@@ -148,16 +149,29 @@ impl GuiRuntimeHandle {
     pub(crate) fn set_scale(&self, scale: f64) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: set_scale requested: scale={scale}");
-        RunLoop::call(move |_| {
-            GUI_RUNTIMES.with(|runtimes| {
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
                 let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
                 let result = entry.runtime.set_scale(scale);
                 log::debug!("wxp runtime {id}: set_scale completed: result={result:?}");
                 result
-            })
+            });
+        }
+        // Host GUI callbacks are synchronous ABI calls; post into the GUI thread so they never
+        // wait on the run loop while still preserving GUI-thread affinity for the runtime.
+        RunLoop::post(move |_| {
+            GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let Some(entry) = runtimes.get_mut(&id) else {
+                    log::debug!("wxp runtime {id}: set_scale skipped missing runtime");
+                    return;
+                };
+                let result = entry.runtime.set_scale(scale);
+                log::debug!("wxp runtime {id}: set_scale completed: result={result:?}");
+            });
         })
-        .map_err(|_| PluginError::InvalidState)?
+        .map_err(|_| PluginError::InvalidState)
     }
 
     pub(crate) fn set_size(&self, size: GuiSize) -> PluginResult<()> {
@@ -167,16 +181,27 @@ impl GuiRuntimeHandle {
             size.width,
             size.height
         );
-        RunLoop::call(move |_| {
-            GUI_RUNTIMES.with(|runtimes| {
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
                 let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
                 let result = entry.runtime.set_size(size);
                 log::debug!("wxp runtime {id}: set_size completed: result={result:?}");
                 result
-            })
+            });
+        }
+        RunLoop::post(move |_| {
+            GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let Some(entry) = runtimes.get_mut(&id) else {
+                    log::debug!("wxp runtime {id}: set_size skipped missing runtime");
+                    return;
+                };
+                let result = entry.runtime.set_size(size);
+                log::debug!("wxp runtime {id}: set_size completed: result={result:?}");
+            });
         })
-        .map_err(|_| PluginError::InvalidState)?
+        .map_err(|_| PluginError::InvalidState)
     }
 
     pub(crate) fn post_set_size(&self, size: GuiSize) -> PluginResult<()> {
@@ -206,31 +231,57 @@ impl GuiRuntimeHandle {
     pub(crate) fn show(&self) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: show requested");
-        RunLoop::call(move |run_loop| {
+        if is_gui_thread() {
+            // RunLoop::call is immediate on the GUI thread; this preserves show/hide ordering.
+            return RunLoop::call(move |run_loop| {
+                GUI_RUNTIMES.with(|runtimes| {
+                    let mut runtimes = runtimes.borrow_mut();
+                    let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                    let result = entry.runtime.show(run_loop);
+                    log::debug!("wxp runtime {id}: show completed: result={result:?}");
+                    result
+                })
+            })
+            .map_err(|_| PluginError::InvalidState)?;
+        }
+        RunLoop::post(move |run_loop| {
             GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
-                let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
+                let Some(entry) = runtimes.get_mut(&id) else {
+                    log::debug!("wxp runtime {id}: show skipped missing runtime");
+                    return;
+                };
                 let result = entry.runtime.show(run_loop);
                 log::debug!("wxp runtime {id}: show completed: result={result:?}");
-                result
-            })
+            });
         })
-        .map_err(|_| PluginError::InvalidState)?
+        .map_err(|_| PluginError::InvalidState)
     }
 
     pub(crate) fn hide(&self) -> PluginResult<()> {
         let id = self.id;
         log::debug!("wxp runtime {id}: hide requested");
-        RunLoop::call(move |_| {
-            GUI_RUNTIMES.with(|runtimes| {
+        if is_gui_thread() {
+            return GUI_RUNTIMES.with(|runtimes| {
                 let mut runtimes = runtimes.borrow_mut();
                 let entry = runtimes.get_mut(&id).ok_or(PluginError::InvalidState)?;
                 let result = entry.runtime.hide();
                 log::debug!("wxp runtime {id}: hide completed: result={result:?}");
                 result
-            })
+            });
+        }
+        RunLoop::post(move |_| {
+            GUI_RUNTIMES.with(|runtimes| {
+                let mut runtimes = runtimes.borrow_mut();
+                let Some(entry) = runtimes.get_mut(&id) else {
+                    log::debug!("wxp runtime {id}: hide skipped missing runtime");
+                    return;
+                };
+                let result = entry.runtime.hide();
+                log::debug!("wxp runtime {id}: hide completed: result={result:?}");
+            });
         })
-        .map_err(|_| PluginError::InvalidState)?
+        .map_err(|_| PluginError::InvalidState)
     }
 }
 
@@ -305,7 +356,7 @@ impl Drop for GuiThreadLease {
                 "wxp GUI thread lease: dispatching release from thread {current_thread:?} to owner {:?}",
                 self.owner
             );
-            if RunLoop::call(move |_| release_gui_thread_lease()).is_err() {
+            if RunLoop::post(move |_| release_gui_thread_lease()).is_err() {
                 log::error!("wxp GUI thread lease: failed to release on owner thread");
             }
         }

@@ -21,21 +21,32 @@ function(target_add_wclap_configuration)
         set(TCLP_OUTPUT_NAME TCLP_TARGET)
     endif()
 
-    set_target_properties(${TCLP_TARGET}
-            PROPERTIES
-            OUTPUT_NAME "${TCLP_OUTPUT_NAME}"
-            SUFFIX ".wclap/module.wasm"
-            PREFIX ""
-    )
-    # Make sure directory exists
-    add_custom_command(TARGET ${TCLP_TARGET} PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${TCLP_TARGET}>"
-    )
+    # If a resource directory is defined, make a WCLAP bundle
+    if(TCLP_RESOURCE_DIRECTORY AND NOT TCLP_RESOURCE_DIRECTORY STREQUAL "")
+        set_target_properties(${TCLP_TARGET}
+                PROPERTIES
+                OUTPUT_NAME "${TCLP_OUTPUT_NAME}"
+                SUFFIX ".wclap/module.wasm"
+                PREFIX ""
+        )
+        # Make sure directory exists
+        add_custom_command(TARGET ${TCLP_TARGET} PRE_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${TCLP_TARGET}>"
+        )
 
-    # Copy resource directory, if defined
-    if(NOT TCLP_RESOURCE_DIRECTORY STREQUAL "")
         add_custom_command(TARGET ${TCLP_TARGET} PRE_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory "${TCLP_RESOURCE_DIRECTORY}" "$<TARGET_FILE_DIR:${TCLP_TARGET}>"
+        )
+	# .tar.gz bundle of the directory
+        add_custom_command(TARGET ${TCLP_TARGET} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E tar cz "$<TARGET_FILE_DIR:${TCLP_TARGET}>.tar.gz" "$<TARGET_FILE_DIR:${TCLP_TARGET}>"
+        )
+    else()
+        set_target_properties(${TCLP_TARGET}
+                PROPERTIES
+                OUTPUT_NAME "${TCLP_OUTPUT_NAME}"
+                SUFFIX ".wclap.wasm"
+                PREFIX ""
         )
     endif()
 

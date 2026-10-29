@@ -17,7 +17,8 @@ defaults:
     shell: bash
 
 env:
-  MACOSX_DEPLOYMENT_TARGET: "11.0"
+  # macOS deployment target comes from the build tool's default so this
+  # workflow cannot silently pin an older minimum than the code.
   WRY_OBJC_SUFFIX: WracGainPlugin
 
 jobs:
@@ -37,6 +38,9 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      - name: Run static quality checks
+        run: cargo xtask quality
 
   rust-test:
     name: Rust lint and test (${{ matrix.os }})
@@ -162,6 +166,18 @@ jobs:
 
       - name: Verify plugin and standalone artifacts
         run: ${{ matrix.verify }}
+
+      - name: Run AU regression tests
+        if: runner.os == 'macOS'
+        # A state-recall regression can deadlock, so bound the whole test step.
+        timeout-minutes: 1
+        run: |
+          for test in au_state_recall au_latency_restart; do
+            xcrun clang++ -std=c++17 -Wall -Wextra -Werror \
+              -framework AudioToolbox -framework CoreFoundation \
+              "clap_wrapper_builder/tests/${test}.cpp" -o "$RUNNER_TEMP/$test"
+            "$RUNNER_TEMP/$test" "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.component"
+          done
 
   aax-validation:
     name: AAX Validator

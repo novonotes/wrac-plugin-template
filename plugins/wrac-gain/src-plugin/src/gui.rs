@@ -16,21 +16,20 @@ mod notifier;
 mod runtime;
 
 pub(crate) use notifier::{
-    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload,
+    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, latency_payload, parameter_payload,
 };
 
 use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::{
-    GuiConfig, GuiSize, HostContext, HostGuiResizeRequester, HostParamsEditNotifier, PluginResult,
-};
+use wrac_clap_adapter::interface::{GuiConfig, GuiSize, PluginInstanceContext, PluginResult};
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
     WxpGuiRuntime,
 };
 
+use crate::plugin::{LatencyStore, WracGainParamOutputQueue};
 use crate::state::{ProjectStateStore, SharedState};
 
 pub(crate) struct GuiIntegration {
@@ -64,12 +63,12 @@ impl WxpGuiFactory for WracGainGuiFactory {
 /// Assembles the complete GUI extension set used by the plugin core.
 /// Entry point that keeps GUI-specific details out of `plugin.rs`.
 pub(crate) fn create_gui_integration(
-    descriptor: wrac_clap_adapter::PluginDescriptor,
+    descriptor: wrac_clap_adapter::interface::PluginDescriptor,
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
-    host_parameter_edit_notifier: Arc<dyn HostParamsEditNotifier>,
-    host_gui_resize_requester: Arc<dyn HostGuiResizeRequester>,
-    host_context: HostContext,
+    latency: Arc<LatencyStore>,
+    param_output_queue: Arc<WracGainParamOutputQueue>,
+    context: &PluginInstanceContext,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());
     let resize_handle = WxpGuiResizeHandle::new(
@@ -83,18 +82,20 @@ pub(crate) fn create_gui_integration(
         descriptor,
         project_state,
         shared,
+        latency,
         gui_notifier: notifier.clone(),
-        host_parameter_edit_notifier,
-        host_gui_resize_requester,
+        param_output_queue,
+        host_gui: context.host_gui.clone(),
+        host_state: context.host_state.clone(),
         resize_handle: resize_handle.clone(),
-        host_context: host_context.clone(),
+        host_context: context.host_context.clone(),
     };
     let controller = Arc::new(WxpGuiController::new_with_resize_handle(
         WracGainGuiFactory {
             dependencies: runtime_dependencies,
         },
         resize_handle,
-        host_context,
+        context.host_context.clone(),
     ));
 
     GuiIntegration {

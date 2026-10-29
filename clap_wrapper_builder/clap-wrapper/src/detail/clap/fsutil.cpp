@@ -109,14 +109,15 @@ std::vector<fs::path> getValidCLAPSearchPaths()
   }
   auto sep = ':';
 
-  if (cp.empty())
+  if (!cp.empty())
   {
     size_t pos;
     while ((pos = cp.find(sep)) != std::string::npos)
     {
       auto item = cp.substr(0, pos);
       cp = cp.substr(pos + 1);
-      res.emplace_back(item);
+      // an empty entry ("a::b", a trailing ':') names no directory, not the current one
+      if (!item.empty()) res.emplace_back(item);
     }
     if (!cp.empty()) res.emplace_back(cp);
   }
@@ -239,6 +240,18 @@ const clap_plugin_info_as_vst3_t *Library::get_vst3_info(uint32_t index) const
   return nullptr;
 }
 
+// getting the compatibility information for the VST3 IPluginCompatibility interface
+const char *Library::get_vst3_compatibility() const
+{
+  // get_vst3_compatibility is only part of the factory struct since version 1
+  if (_pluginFactoryVst3Info && _pluginFactoryVst3InfoIsV1 &&
+      _pluginFactoryVst3Info->get_vst3_compatibility)
+  {
+    return _pluginFactoryVst3Info->get_vst3_compatibility(_pluginFactoryVst3Info);
+  }
+  return nullptr;
+}
+
 // getting the information for a AAX plugin at given index
 const clap_plugin_info_as_aax_t *Library::get_aax_info(uint32_t index) const
 {
@@ -264,6 +277,21 @@ bool Library::getEntryFunction(HMODULE handle, const char *path)
 }
 #endif
 
+void Library::useStaticEntry(const clap_plugin_entry_t *entry, const char *path)
+{
+  if (!entry) return;
+  // This is called against a process-wide Library on every plugin
+  // instantiation (and the constructor may already have wired the same
+  // entry under STATICALLY_LINKED_CLAP_ENTRY). clap_entry->init() must only
+  // run once per deinit and the descriptor list must not accumulate
+  // duplicates, so a repeated call with an already-initialized entry is a
+  // no-op. _pluginFactory is only set after a successful init.
+  if (_pluginEntry == entry && _pluginFactory) return;
+  _pluginEntry = entry;
+  _selfcontained = true;
+  setupPluginsFromPluginEntry(path ? path : "");
+}
+
 void Library::setupPluginsFromPluginEntry(const char *path)
 {
   if (clap_version_is_compatible(_pluginEntry->clap_version))
@@ -272,10 +300,19 @@ void Library::setupPluginsFromPluginEntry(const char *path)
     {
       _pluginFactory =
           static_cast<const clap_plugin_factory *>(_pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+      // prefer the newer version of the vst3 factory info, fall back to version 0
       _pluginFactoryVst3Info = static_cast<decltype(_pluginFactoryVst3Info)>(
-          _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_VST3));
+          _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_VST3_V1));
+      _pluginFactoryVst3InfoIsV1 = (_pluginFactoryVst3Info != nullptr);
+      if (!_pluginFactoryVst3Info)
+      {
+        _pluginFactoryVst3Info = static_cast<decltype(_pluginFactoryVst3Info)>(
+            _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_VST3));
+      }
       _pluginFactoryAUv2Info = static_cast<decltype(_pluginFactoryAUv2Info)>(
           _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AUV2));
+      _pluginFactoryAUv2Legacy = static_cast<decltype(_pluginFactoryAUv2Legacy)>(
+          _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AUV2_LEGACY));
       _pluginFactoryAAXInfo = static_cast<decltype(_pluginFactoryAAXInfo)>(
           _pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_INFO_AAX));
       _pluginFactoryARAInfo =
@@ -283,13 +320,24 @@ void Library::setupPluginsFromPluginEntry(const char *path)
       _wracMainThreadHook = static_cast<decltype(_wracMainThreadHook)>(
           _pluginEntry->get_factory(WRAC_PLUGIN_MAIN_THREAD_HOOK));
 
+      _pluginFactoryPresetDiscovery = static_cast<const clap_preset_discovery_factory_t *>(
+          _pluginEntry->get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID));
+      if (!_pluginFactoryPresetDiscovery)
+      {
+        _pluginFactoryPresetDiscovery = static_cast<const clap_preset_discovery_factory_t *>(
+            _pluginEntry->get_factory(CLAP_PRESET_DISCOVERY_FACTORY_ID_COMPAT));
+      }
+
       // detect plugins that do not check the CLAP_PLUGIN_FACTORY_ID
       if ((void *)_pluginFactory == (void *)_pluginFactoryVst3Info)
       {
         // in this case, don't trust anything from there
         _pluginFactoryVst3Info = nullptr;
+        _pluginFactoryVst3InfoIsV1 = false;
         _pluginFactoryAUv2Info = nullptr;
+        _pluginFactoryAUv2Legacy = nullptr;
         _pluginFactoryARAInfo = nullptr;
+        _pluginFactoryPresetDiscovery = nullptr;
         _wracMainThreadHook = nullptr;
       }
 

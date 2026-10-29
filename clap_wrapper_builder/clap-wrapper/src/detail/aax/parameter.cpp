@@ -47,8 +47,7 @@ bool AAX_ClapParamDisplayDelegate::StringToValue(const AAX_CString &valueString,
   if (!i || !i->_plugin || !i->_ext_params || !i->_ext_params->text_to_value || !value) return false;
 
   double clapValue = 0.0;
-  if (!i->_ext_params->text_to_value(i->_plugin, i->_clap_param_info.id, valueString.Get(),
-                                     &clapValue))
+  if (!i->_ext_params->text_to_value(i->_plugin, i->_clap_param_info.id, valueString.Get(), &clapValue))
   {
     return false;
   }

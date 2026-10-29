@@ -49,6 +49,10 @@ class Parameter
   {
     return _flags;
   }
+  AudioUnitParameterUnit AudioUnitUnit() const
+  {
+    return _unit;
+  }
 
   void updateInfo(const clap_plugin_t *plugin, const clap_plugin_params_t *clap_param_ext,
                   const clap_param_info_t &i);
@@ -57,6 +61,7 @@ class Parameter
   clap_param_info_t _info;
   CFStringRef _cfstring = nullptr;
   AudioUnitParameterOptions _flags;
+  AudioUnitParameterUnit _unit = kAudioUnitParameterUnit_Generic;
 };
 
 }  // namespace Clap::AUv2

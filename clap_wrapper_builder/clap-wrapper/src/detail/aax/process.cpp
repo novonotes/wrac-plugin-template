@@ -5,6 +5,44 @@
 #include "AAX_MIDIUtilities.h"
 #include <cstring>
 
+#include "../shared/midi_translation.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+namespace
+{
+// MIDI 1.0 channel-voice message length from the status byte: program change
+// (0xC0) and channel pressure (0xD0) are 2 bytes, everything else 3.
+uint32_t midi1CVLength(uint8_t status)
+{
+  const uint8_t hi = status & 0xF0;
+  return (hi == 0xC0 || hi == 0xD0) ? 2 : 3;
+}
+
+// Pro Tools only routes a fixed set of channel-voice messages out of a plug-in
+// (per AAX_IMIDINode::PostMIDIPacket docs): note on/off, poly & channel pressure,
+// pitch bend, program change, and bank-select (controller #0). Everything else
+// (other CCs, system messages, realtime) is dropped before it reaches the node.
+bool proToolsAcceptsMidi1(uint8_t status, uint8_t data1)
+{
+  switch (status & 0xF0)
+  {
+    case 0x80:  // note off
+    case 0x90:  // note on
+    case 0xA0:  // poly key pressure
+    case 0xC0:  // program change (no bank)
+    case 0xD0:  // channel pressure
+    case 0xE0:  // pitch bend
+      return true;
+    case 0xB0:  // control change: PT only accepts bank select (CC #0)
+      return data1 == 0;
+    default:
+      return false;
+  }
+}
+}  // namespace
+
 void AAX_CALLBACK AAXWrapper_AlgorithmProcessProc(
     SAAX_Wrapper_AlgorithmicContext *const inInstancesBegin[], const void *inInstancesEnd)
 {
@@ -22,11 +60,79 @@ void AAX_CALLBACK AAXWrapper_AlgorithmProcessProc(
 
 void ClapAsAAX::process(SAAX_Wrapper_AlgorithmicContext *context)
 {
+  // try_lock, not lock: a restart holds this only to open or close the restart
+  // window, and the render thread must not wait on another thread. A block that
+  // would have had to wait renders silence instead, as does every block while
+  // the plugin is being torn down and reactivated underneath this instance.
+  std::unique_lock<ClapWrapper::detail::shared::SpinLock> processGuard(_processLock, std::try_to_lock);
+  if (!processGuard.owns_lock() || _restarting)
+  {
+    silenceAllOutputs(context);
+    return;
+  }
+
+  if (!_processAdapter) return;
+
+  // CLAP forbids process() on a plugin that is not processing, which is where a
+  // start_processing() that returned false leaves this wrapper. Pro Tools does
+  // not clear the algorithm's output buffers between renders, so hand it silence
+  // rather than whatever they happened to hold. The flush request stays pending:
+  // no render is going to carry those events, so onIdle() still owes them.
+  if (!_processing)
+  {
+    _processAdapter->silenceOutputs(context);
+    return;
+  }
+
   // abort any flush request
   _flushRequested.store(false);
 
   // process
   _processAdapter->process(context);
+}
+
+uint32_t AAXProcessAdapter::outputChannelCount() const
+{
+  // Matches what process() and silenceOutputs() write: the CLAP output ports in
+  // order, or the placeholder stem of a pure-MIDI plugin.
+  uint32_t channels = 0;
+  for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i) channels += _output_ports[i].channel_count;
+  return channels > 0 ? channels : _placeholderOutChannels;
+}
+
+void ClapAsAAX::silenceAllOutputs(SAAX_Wrapper_AlgorithmicContext *context) const
+{
+  if (!context->mAudioOutputs || !context->mNumSamples) return;
+  const size_t bytes = sizeof(float) * (size_t)*(context->mNumSamples);
+  const auto channels = _outputChannelCount.load();
+  for (uint32_t c = 0; c < channels; ++c)
+  {
+    if (context->mAudioOutputs[c]) memset(context->mAudioOutputs[c], 0, bytes);
+  }
+}
+
+void AAXProcessAdapter::silenceOutputs(SAAX_Wrapper_AlgorithmicContext *context)
+{
+  if (!context->mAudioOutputs || !context->mNumSamples) return;
+  const size_t bytes = sizeof(float) * (size_t)*(context->mNumSamples);
+
+  // The CLAP's own output ports, walked across the AAX channel array in the
+  // same order process() distributes the pointers.
+  uint32_t channel = 0;
+  for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i)
+  {
+    for (uint32_t c = 0; c < _output_ports[i].channel_count; ++c, ++channel)
+    {
+      if (context->mAudioOutputs[channel]) memset(context->mAudioOutputs[channel], 0, bytes);
+    }
+  }
+
+  // A pure-MIDI CLAP has no audio ports at all, but the AAX component still
+  // carries a placeholder stem which process() writes from channel 0.
+  for (uint32_t c = 0; c < _placeholderOutChannels; ++c)
+  {
+    if (context->mAudioOutputs[c]) memset(context->mAudioOutputs[c], 0, bytes);
+  }
 }
 
 inline clap_beattime doubleToBeatTime(double t)
@@ -56,14 +162,12 @@ void AAXProcessAdapter::applyBusSetting(const clap_plugin_t *plugin, const char 
     // (2) apply setup to plugin
   }
 }
-void AAXProcessAdapter::setupProcessing(const clap_plugin_t *plugin, double samplerate,
-                                        const clap_plugin_params_t *ext_param,
-                                        const clap_plugin_audio_ports *ext_audio,
-                                        Clap::IAutomation *automation,
-                                        std::vector<clap_id> &gesturedparameters,
-                                        ParamChangeQueue &inqueue,
-                                        std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
-                                        uint32_t midiportid, bool preferMIDI)
+void AAXProcessAdapter::setupProcessing(
+    const clap_plugin_t *plugin, double samplerate, const clap_plugin_params_t *ext_param,
+    const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
+    std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
+    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid, bool preferMIDI,
+    uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
   _ext_param = ext_param;
@@ -75,6 +179,9 @@ void AAXProcessAdapter::setupProcessing(const clap_plugin_t *plugin, double samp
 
   _midi_first_portid = midiportid;
   _midi_prefer_mididialect = preferMIDI;
+
+  _placeholderInChannels = placeholderInChannels;
+  _placeholderOutChannels = placeholderOutChannels;
 
   // other needed references like buffers, MIDINodes etc. are passed
   // via the SAAX_Wrapper_AlgorithmicContext to the process function
@@ -161,6 +268,11 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
 {
   // transport
   auto aax_transport = context->mTransportNode->GetTransport();
+
+  // capture the MIDI output node for this cycle. enqueueOutputEvent() posts to
+  // it directly while the plugin is inside _plugin->process() (the CLAP event
+  // buffers are only guaranteed valid during that call). Reset afterwards.
+  _outputNode = context->mOutputNode;
 
   // this clears the vectors (which do not resize to smaller)
   this->_events.clear();
@@ -310,8 +422,8 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
     // AAX owns master bypass as a host data port. Forward state changes as
     // CLAP parameter events so the plugin's bypass state remains authoritative.
     clap_multi_event_t n;
-    n.header = {sizeof(clap_event_param_value_t), 0, CLAP_CORE_EVENT_SPACE_ID,
-                CLAP_EVENT_PARAM_VALUE, 0};
+    n.header = {sizeof(clap_event_param_value_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+                0};
     n.param.param_id = _bypassParameter->_clap_param_info.id;
     n.param.cookie = _bypassParameter->_clap_param_info.cookie;
     n.param.note_id = -1;
@@ -364,6 +476,10 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
           std::memset(output, 0, sizeof(float) * _proc.frames_count);
       }
     }
+    // The plugin is skipped, but the cycle still has to end the same way as a
+    // processed one: placeholder stems need their passthrough and the output
+    // node must not outlive this call.
+    finishProcessCycle(context);
     return;
   }
 
@@ -397,12 +513,33 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
       break;
   }
 
-  // no support for outgoing MIDI at this time
-  //if (context->mOutputNode)
-  //{
-  //  auto midiOutputStream = context->mOutputNode->GetNodeBuffer();
-  //  // do MIDI out
-  //}
+  finishProcessCycle(context);
+}
+
+void AAXProcessAdapter::finishProcessCycle(SAAX_Wrapper_AlgorithmicContext *context)
+{
+  // Placeholder-stem passthrough: for a pure-MIDI CLAP the component still
+  // carries an AAX audio bus but the CLAP has no audio ports, so it never wrote
+  // the output. Copy the AAX input straight to the output (silence if there is
+  // no matching input channel) so the MIDI-effect insert is audio-transparent,
+  // matching the AAX SDK's DemoMIDI_Transpose.
+  if (_placeholderOutChannels > 0)
+  {
+    const int32_t numSamples = *(context->mNumSamples);
+    for (uint32_t ch = 0; ch < _placeholderOutChannels; ++ch)
+    {
+      float *out = context->mAudioOutputs ? context->mAudioOutputs[ch] : nullptr;
+      if (!out) continue;
+      if (ch < _placeholderInChannels && context->mAudioInputs && context->mAudioInputs[ch])
+        memcpy(out, context->mAudioInputs[ch], sizeof(float) * (size_t)numSamples);
+      else
+        memset(out, 0, sizeof(float) * (size_t)numSamples);
+    }
+  }
+
+  // Outgoing MIDI was already posted to _outputNode from enqueueOutputEvent()
+  // during _plugin->process(). Drop the node so it can never be used stale.
+  _outputNode = nullptr;
 }
 
 void AAXProcessAdapter::flush()
@@ -442,41 +579,18 @@ bool AAXProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
   {
     case CLAP_EVENT_NOTE_ON:
     {
-      // auto nevt = reinterpret_cast<const clap_event_note*>(event);
-
-      /*
-      Steinberg::Vst::Event oe{};
-      oe.type = Steinberg::Vst::Event::kNoteOnEvent;
-      oe.noteOn.channel = nevt->channel;
-      oe.noteOn.pitch = nevt->key;
-      oe.noteOn.velocity = nevt->velocity;
-      oe.noteOn.length = 0;
-      oe.noteOn.tuning = 0.0f;
-      oe.noteOn.noteId = nevt->note_id;
-      oe.busIndex = 0;  // FIXME - multi-out midi still needs work
-      oe.sampleOffset = nevt->header.time;
-
-      if (_vstdata && _vstdata->outputEvents) _vstdata->outputEvents->addEvent(oe);
-      */
+      auto nevt = reinterpret_cast<const clap_event_note *>(event);
+      uint8_t bytes[3] = {(uint8_t)(0x90 | (nevt->channel & 0x0F)), (uint8_t)(nevt->key & 0x7F),
+                          (uint8_t)(std::lround(nevt->velocity * 127.0) & 0x7F)};
+      postMIDI1(nevt->header.time, bytes, 3);
     }
       return true;
     case CLAP_EVENT_NOTE_OFF:
     {
-      // auto nevt = reinterpret_cast<const clap_event_note*>(event);
-      /*
-      Steinberg::Vst::Event oe{};
-      oe.type = Steinberg::Vst::Event::kNoteOffEvent;
-      oe.noteOff.channel = nevt->channel;
-      oe.noteOff.pitch = nevt->key;
-      oe.noteOff.velocity = nevt->velocity;
-      oe.noteOn.length = 0;
-      oe.noteOff.tuning = 0.0f;
-      oe.noteOff.noteId = nevt->note_id;
-      oe.busIndex = 0;  // FIXME - multi-out midi still needs work
-      oe.sampleOffset = nevt->header.time;
-
-      if (_vstdata && _vstdata->outputEvents) _vstdata->outputEvents->addEvent(oe);
-      */
+      auto nevt = reinterpret_cast<const clap_event_note *>(event);
+      uint8_t bytes[3] = {(uint8_t)(0x80 | (nevt->channel & 0x0F)), (uint8_t)(nevt->key & 0x7F),
+                          (uint8_t)(std::lround(nevt->velocity * 127.0) & 0x7F)};
+      postMIDI1(nevt->header.time, bytes, 3);
     }
       return true;
     case CLAP_EVENT_NOTE_END:
@@ -515,8 +629,42 @@ bool AAXProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
       break;
 
     case CLAP_EVENT_MIDI:
+    {
+      auto mevt = reinterpret_cast<const clap_event_midi *>(event);
+      postMIDI1(mevt->header.time, mevt->data, midi1CVLength(mevt->data[0]));
+    }
+      return true;
+      break;
     case CLAP_EVENT_MIDI_SYSEX:
+    {
+      auto sevt = reinterpret_cast<const clap_event_midi_sysex *>(event);
+      postSysEx(sevt->header.time, sevt->buffer, sevt->size);
+    }
+      return true;
+      break;
     case CLAP_EVENT_MIDI2:
+    {
+      // AAX is a MIDI 1.0 wire, so down-convert. Only channel-voice UMP
+      // messages have a MIDI 1.0 equivalent: MT 0x4 (MIDI 2.0 CV) via the
+      // shared kernel, MT 0x2 (a MIDI 1.0 CV already wrapped in a UMP) by
+      // unpacking the three bytes. SysEx7 (MT 0x3) and utility messages are
+      // dropped (Pro Tools would not route them anyway).
+      auto m2evt = reinterpret_cast<const clap_event_midi2 *>(event);
+      const uint32_t messageType = (m2evt->data[0] >> 28) & 0xFu;
+      if (messageType == 0x4u)
+      {
+        uint8_t out[3];
+        int n = ClapWrapper::detail::shared::midi2ChannelVoiceToMidi1(m2evt->data, out);
+        if (n > 0) postMIDI1(m2evt->header.time, out, (uint32_t)n);
+      }
+      else if (messageType == 0x2u)
+      {
+        const uint8_t status = (uint8_t)((m2evt->data[0] >> 16) & 0xFFu);
+        uint8_t out[3] = {status, (uint8_t)((m2evt->data[0] >> 8) & 0xFFu),
+                          (uint8_t)(m2evt->data[0] & 0xFFu)};
+        postMIDI1(m2evt->header.time, out, midi1CVLength(status));
+      }
+    }
       return true;
       break;
     default:
@@ -551,6 +699,45 @@ void AAXProcessAdapter::removeFromActiveNotes(const clap_event_note *note)
     {
       i.used = false;
     }
+  }
+}
+
+void AAXProcessAdapter::postMIDI1(uint32_t timestamp, const uint8_t *bytes, uint32_t length)
+{
+  // No output node when the plugin declares no MIDI out (the descriptor
+  // installs a private-data placeholder instead) or outside a process() call.
+  if (!_outputNode || length == 0) return;
+  if (length > 4) length = 4;  // AAX_CMidiPacket carries at most 4 bytes
+
+  // Drop anything Pro Tools won't route out of a plug-in.
+  if (!proToolsAcceptsMidi1(bytes[0], length > 1 ? bytes[1] : 0)) return;
+
+  AAX_CMidiPacket packet;
+  packet.mTimestamp = timestamp;
+  packet.mLength = length;
+  packet.mIsImmediate = false;
+  for (uint32_t i = 0; i < 4; ++i) packet.mData[i] = (i < length) ? bytes[i] : 0;
+
+  _outputNode->PostMIDIPacket(&packet);
+}
+
+void AAXProcessAdapter::postSysEx(uint32_t timestamp, const uint8_t *data, uint32_t size)
+{
+  // AAX carries SysEx as a series of AAX_CMidiPackets of up to 4 bytes each,
+  // sharing one timestamp; the host reassembles them. The 0xF0/0xF7 framing is
+  // kept intact. Note: Pro Tools does not list SysEx among the MIDI messages it
+  // routes out of a plug-in, so this is best-effort for hosts that do.
+  if (!_outputNode || !data || size == 0) return;
+
+  for (uint32_t offset = 0; offset < size; offset += 4)
+  {
+    const uint32_t chunk = std::min<uint32_t>(4, size - offset);
+    AAX_CMidiPacket packet;
+    packet.mTimestamp = timestamp;
+    packet.mLength = chunk;
+    packet.mIsImmediate = false;
+    for (uint32_t i = 0; i < 4; ++i) packet.mData[i] = (i < chunk) ? data[offset + i] : 0;
+    _outputNode->PostMIDIPacket(&packet);
   }
 }
 

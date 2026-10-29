@@ -30,6 +30,8 @@ Other developers should not have to repeat the same trial and error. With this t
 The code in this repository implements a simple plugin called WRAC Gain.
 It is also structured so it can be used as a template.
 
+Main dependencies:
+
 - CLAP plugin implementation in Rust using [clap-sys](https://github.com/micahrj/clap-sys)
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
 - VST3 / AU / AAX plugin builds and a development standalone app via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
@@ -46,7 +48,6 @@ git clone https://github.com/novonotes/wrac-plugin-template.git
 cd wrac-plugin-template
 
 # Build and install CLAP only for the minimal first run.
-# Run `cargo xtask install` to install every format declared in supported_formats.
 cargo xtask install --target=clap
 
 # Debug builds load the GUI from the Vite dev server, so start it before launching your DAW
@@ -63,7 +64,7 @@ To build your own plugin based on this template, see [Setup](docs/setup.md).
 
 ### Why WebView instead of a GPU-native UI stack?
 
-For production plugins, predictability was the main reason. The web platform is mature, widely understood, and already has a known set of tradeoffs in desktop and plugin UI contexts. GPU-native UI stacks such as wgpu are promising, but there is still less production evidence to rely on inside DAW-hosted plugin environments.
+For production plugins, reducing uncertainty was the main reason. The situation we most want to avoid is encountering a DAW-specific issue just before a product release without knowing whether it can be solved technically. The web platform is mature, and its benefits and limitations are relatively well understood in both desktop applications and audio plugin UIs. GPU-native UI stacks such as wgpu are promising, but there is still less evidence to rely on for commercial use in DAW-hosted plugin environments.
 
 ### Is this a framework?
 
@@ -75,7 +76,7 @@ Yes. This repository is licensed under the MIT License, which permits commercial
 
 ### What about AAX and AUv3 support?
 
-AAX is supported as an explicit build/install/validate target on macOS and Windows. See [AAX Build and Validation](docs/aax.md).
+AAX is supported. See [AAX Build and Validation](docs/aax.md).
 AUv3 support is still ongoing.
 
 ## Build
@@ -91,22 +92,15 @@ cargo xtask build --release
 cargo xtask build --target=vst3
 # Release build for AU
 cargo xtask build --target=au --release
+# Debug build with Cargo features enabled on the plugin crate
+cargo xtask build --features my-feature
 # Build and validate plugins
 cargo xtask validate
 # Build and install plugins
 cargo xtask install
-```
-
-`cargo xtask validate` runs WRAC production-readiness checks before external format validators.
-For the check list and disable format, see [Production-Readiness Checks](docs/production-readiness-checks.md).
-
-Build and launch the development standalone app:
-
-```bash
+# Build and launch the development standalone app
 cargo xtask launch
 ```
-
-The standalone app is a lightweight development and smoke-test host. It is not a release plugin format or a shipping artifact.
 
 Supported plugin formats:
 
@@ -115,11 +109,6 @@ Supported plugin formats:
 | macOS | CLAP / VST3 / AU / AAX |
 | Windows | CLAP / VST3 / AAX |
 | Linux | CLAP / VST3 |
-
-Default build, install, and validate targets come from `package.metadata.wrac.supported_formats`.
-Use `--target` to request a specific subset; explicit plugin-format targets must be listed in `supported_formats`.
-`cargo xtask build` also builds the development standalone app by default, and the build command accepts `standalone` as a development-only target.
-Use `--dry-run` on build/install/validate commands to inspect the task graph before running it.
 
 For detailed usage:
 
@@ -135,5 +124,3 @@ cargo xtask build --help
 For known DAW compatibility status, see the [DAW Compatibility Matrix](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix).
 
 For usage of the wxp crate, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).
-
-For additional plugin examples built from this template, see [wrac-examples](https://github.com/novonotes/wrac-examples).

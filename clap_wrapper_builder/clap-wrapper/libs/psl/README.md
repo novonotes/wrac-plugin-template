@@ -1,5 +1,7 @@
 # Gain Reduction Extension
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 Original source: 
 
 	https://github.com/fenderdigital/presonus-plugin-extension

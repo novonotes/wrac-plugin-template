@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 uint32_t fnv1a_keogh(const char *input);
 

@@ -52,17 +52,11 @@ AAX builds additionally require the private AAX SDK. Put local AAX paths in `.en
 
 ### 2. Configure Plugin Identity
 
-Plugin identity is centralized in the plugin package manifest, initially `plugins/wrac-gain/src-plugin/Cargo.toml`.
-Edit the commented `[package.metadata.wrac]` and `[[package.metadata.wrac.plugins]]` sections there instead of copying a separate manifest sample from this guide.
+Plugin identity is centralized in `plugins/wrac-gain/src-plugin/wrac-plugin.toml`.
+Edit that manifest instead of duplicating host-visible IDs in Rust code or Cargo metadata.
 
-> **Important:** The plugin ID must be globally unique. It cannot be changed once published.
-> AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
-> `clap_features` must match the plugin's real audio/MIDI behavior because CLAP hosts read it directly.
-> `supported_formats` is the product policy used by default `xtask` build/install/validate commands.
-> `vst3_subcategories` controls VST3 host browser categories; use Steinberg-style `|`-separated values such as `Fx|Dynamics`.
-> `vst3_component_id` must be a stable UUID. Generate it once before release and never change it for the same product.
-> `aax_manufacturer_id`, `aax_product_id`, and each AAX stem config `plugin_id` must be stable 4-byte ASCII IDs.
-> AAX stem configs should list only the channel layouts the product actually supports.
+Keep each plugin's manifests at `<plugin-root>/src-plugin/Cargo.toml` and `<plugin-root>/src-plugin/wrac-plugin.toml`; xtask and CI reject missing or differently placed WRAC manifests.
+See the [wrac_manifest README](../crates/wrac_manifest/README.md) for the fields and their requirements.
 
 ### 3. Bulk Replace Remaining Identifiers
 
@@ -77,25 +71,20 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
-The repository URL points to this template by default. After generating a new project, update it to your own repository if you publish the crate metadata.
-
-**Steps:**
-
-Check the target files and remaining count.
-
-Example using rg:
+For example, find remaining template names and repository URLs with:
 
 ```sh
-rg --hidden "wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin" \
-    --glob '!node_modules' --glob '!dist' --glob '!*.lock' \
-    --glob '!package-lock.json' --glob '!*.zip' \
-    --glob '!docs/setup.md' --glob '!docs/setup-ja.md'
-
-rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' --glob 'Cargo.toml'
+rg --hidden 'wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin' \
+  --glob '!.git/**' --glob '!node_modules/**' --glob '!dist/**' \
+  --glob '!target/**' --glob '!clap_wrapper_builder/clap-wrapper/**' \
+  --glob '!*.lock' --glob '!docs/setup*.md'
+rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' \
+  --glob '!.git/**' --glob 'Cargo.toml'
 ```
 
-Once confirmed, **replace all occurrences** according to the table above.
-Re-run the same commands after replacing and verify the output is zero matches.
+Review the matches, replace the identifiers that belong to your plugin, and run
+the searches again to check for anything missed. Some matches may be references
+to the template rather than plugin identifiers.
 
 ### 4. Build & Install
 
@@ -106,23 +95,13 @@ cd /path/to/my_plugin
 cargo xtask install
 ```
 
-`cargo xtask install` expands the selected plugin formats into a task graph before installing them.
-Use `-p/--package` with the Cargo package name when the workspace contains multiple WRAC plugin packages.
-Default plugin formats come from `package.metadata.wrac.supported_formats`.
-`cargo xtask build` uses the same plugin-format defaults and also builds the development standalone app.
-`cargo xtask validate` uses the same plugin-format defaults and builds any artifacts required by the selected validators.
-`cargo xtask install --scope=default` installs CLAP/VST3/AU to user-local paths and AAX to the system-wide Avid plugin folder.
-Use `cargo xtask install --scope=system` for hosts that only scan system-wide plugin folders.
-The `--target` option accepts `clap`, `vst3`, `au`, and `aax` as comma-separated values.
-Explicit targets must be listed in `supported_formats`.
-Use `--dry-run` to inspect the task graph and dependency order without building or installing.
+`cargo xtask install` builds and installs the selected plugin formats.
+For detailed usage of each xtask command, see `cargo xtask --help`.
 
 ### 5. Verify
 
 Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).
 Before launching the plugin in your DAW, start the dev server with the following commands.
-If the WebView cannot connect to the configured URL, the plugin shows a low-level load error
-instead of a blank editor so you can see the failed URL and socket error directly.
 
 ```sh
 cd /path/to/my_plugin/plugins/wrac-gain/src-gui
@@ -134,16 +113,12 @@ For release builds, `src-plugin/build.rs` zips the sibling `src-gui/dist` and em
 
 Launch your DAW and try inserting the plugin.
 Some DAWs may require a plugin rescan.
-The GUI supports hot reload — try editing the HTML files.
+The GUI supports hot reload.
 
 ### 6. Debug
 
 Attaching a debugger to a DAW can be difficult, so we recommend debugging with the development standalone app first.
 In VS Code, select the "Debug gain plugin standalone" configuration and run it.
-
-The standalone app is a lightweight development host, not a release plugin format or shipping artifact.
-`cargo xtask launch` builds only the standalone target and its dependencies before opening the app.
-If the package exposes multiple plugin products, pass `--plugin-id`; invalid plugin IDs fail before building.
 
 > **Note:** Audio feedback is present in standalone mode. **Use headphones.**
 
@@ -151,3 +126,4 @@ If the package exposes multiple plugin products, pass `--plugin-id`; invalid plu
 
 Debug build logs are written to `.log/<plugin_name> Latest.log`.
 To follow the log, use `tail -f ".log/<plugin_name> Latest.log"` on macOS/Linux, or `Get-Content ".log\<plugin_name> Latest.log" -Wait` in Windows PowerShell.
+For details about logging, see the `crates/wrac_log` directory.

@@ -4,8 +4,9 @@ use std::ptr;
 use clap_sys::factory::plugin_factory::clap_plugin_factory;
 use clap_sys::plugin::clap_plugin;
 
-use crate::descriptor::{AaxStemConfig, ClapDescriptorStorage};
+use crate::descriptor::ClapDescriptorStorage;
 use crate::entry::EntryRegistration;
+use crate::interface::AaxStemConfig;
 
 pub(crate) struct PluginRegistrationStorage {
     pub clap_factory: ClapFactoryState,

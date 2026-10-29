@@ -1,3 +1,7 @@
+// Must precede every include: moduleinit.h below resolves
+// std::numeric_limits<>::max(), which the windows.h `max` macro breaks.
+#define NOMINMAX 1
+
 /*
     CLAP AS VST3 - Entrypoint
 
@@ -47,7 +51,10 @@
 #include "detail/shared/sha1.h"
 #include "wrapasvst3.h"
 #include "public.sdk/source/main/pluginfactory.h"
+#include "public.sdk/source/main/moduleinit.h"
+#include "pluginterfaces/base/iplugincompatibility.h"
 #include <array>
+#include <string>
 
 using namespace Steinberg::Vst;
 
@@ -59,6 +66,7 @@ using namespace Steinberg::Vst;
 //------------------------------------------------------------------------
 
 #include "detail/clap/fsutil.h"
+#include "detail/clap/preset_discovery.h"
 #include "detail/vst3/categories.h"
 #include "clap_proxy.h"
 
@@ -68,6 +76,42 @@ struct CreationContext
   int index = 0;
   PClassInfo2 classinfo;
 };
+
+// The hosted CLAP outlives static destruction on purpose.
+//
+// A CLAP is a separate binary that dyld loaded after this one, so at process
+// exit it is finalized *first*. Releasing the library from a static destructor
+// therefore calls clap_entry.deinit() into a plugin whose own statics are
+// already gone - locking a std::mutex that has been through
+// pthread_mutex_destroy throws std::system_error out of a noexcept destructor
+// and the host aborts after it has already done its work.
+//
+// Instead the library is leaked at exit (the OS reclaims it anyway) and
+// released from a VST3 module terminator, which the SDK runs from
+// DeinitModule() on a genuine module unload - a plugin rescan, say - while
+// every image involved is still alive.
+namespace
+{
+Clap::Library *gHostedClapLibrary = nullptr;
+
+Clap::Library &hostedClapLibrary()
+{
+  if (!gHostedClapLibrary) gHostedClapLibrary = new Clap::Library();
+  return *gHostedClapLibrary;
+}
+
+static Steinberg::ModuleTerminator gReleaseHostedClapLibrary(
+    []()
+    {
+      // First: the crawl thread runs inside the hosted .clap and must be joined
+      // before it is deinit()ed and unmapped. And here rather than at static
+      // destruction - the host calls ExitDll(), so no loader lock is held.
+      Clap::PresetIndex::resetCache();
+
+      delete gHostedClapLibrary;
+      gHostedClapLibrary = nullptr;
+    });
+}  // namespace
 
 bool findPlugin(Clap::Library &lib, const std::string &pluginfilename)
 {
@@ -119,6 +163,27 @@ bool findPlugin(Clap::Library &lib, const std::string &pluginfilename)
   return false;
 }
 
+/*
+    The Steinberg APIs retain 'COM compatibility' by flipping the first pair of ints
+    in the UID. That results in CIDs which are not compatible across platforms and so
+    mac won't load a win session etc.
+
+    We apply that flip on MAC and LIN to every CID the wrapper derives. The flip is:
+    the first 8 bit endian, and then the pair of 4 bit endians.
+*/
+static void makeCIDComCompatible(TUID &lcid)
+{
+#if !COM_COMPATIBLE
+  std::swap(lcid[0], lcid[3]);
+  std::swap(lcid[1], lcid[2]);
+
+  std::swap(lcid[4], lcid[5]);
+  std::swap(lcid[6], lcid[7]);
+#else
+  (void)lcid;
+#endif
+}
+
 IPluginFactory *GetPluginFactoryEntryPoint()
 {
 #if _DEBUG
@@ -130,7 +195,8 @@ IPluginFactory *GetPluginFactoryEntryPoint()
 #endif
 
   // static IPtr<Steinberg::CPluginFactory> gPluginFactory = nullptr;
-  static Clap::Library gClapLibrary;
+  // Never destroyed by static destruction - see gHostedClapLibrary.
+  auto &gClapLibrary = hostedClapLibrary();
 
   static std::vector<std::shared_ptr<CreationContext>> gCreationContexts;
 
@@ -184,7 +250,9 @@ IPluginFactory *GetPluginFactoryEntryPoint()
     // override for VST3 specifics
     if (gClapLibrary._pluginFactoryVst3Info)
     {
-      LOGDETAIL("detected extension `{}`", CLAP_PLUGIN_FACTORY_INFO_VST3);
+      LOGDETAIL("detected extension `{}`", gClapLibrary._pluginFactoryVst3InfoIsV1
+                                               ? CLAP_PLUGIN_FACTORY_INFO_VST3_V1
+                                               : CLAP_PLUGIN_FACTORY_INFO_VST3);
       auto &v3 = gClapLibrary._pluginFactoryVst3Info;
       if (v3->vendor) factoryvendor = v3->vendor;
       if (v3->vendor_url) vendor_url = v3->vendor_url;
@@ -251,23 +319,7 @@ IPluginFactory *GetPluginFactoryEntryPoint()
         }
 
         memcpy(&lcid, &g, sizeof(TUID));
-
-#if !COM_COMPATIBLE
-        /*
-         * The steinberg APIs retain 'com compatability' by flipping the first pair of ints
-         * in the UID. That results in CID which are not compatbile across platforms and so
-         * mac won't load a win session etc.
-         *
-         * We apply that flip on MAC and LIN also in the wrapper here. The flip is: The first
-         * 8 bits endian, and then the pair of 4 bit endians
-         */
-
-        std::swap(lcid[0], lcid[3]);
-        std::swap(lcid[1], lcid[2]);
-
-        std::swap(lcid[4], lcid[5]);
-        std::swap(lcid[6], lcid[7]);
-#endif
+        makeCIDComCompatible(lcid);
       }
 
       // features ----------------------------------------
@@ -309,6 +361,29 @@ IPluginFactory *GetPluginFactoryEntryPoint()
                                     gCreationContexts.back().get());
     }
 
+    // if the CLAP provides compatibility information for the VST3 IPluginCompatibility
+    // interface, add a class of category kPluginCompatibilityClass to the factory
+    auto *compatibilityJSON = gClapLibrary.get_vst3_compatibility();
+    if (compatibilityJSON && *compatibilityJSON)
+    {
+      LOGDETAIL("registering IPluginCompatibility class");
+
+      std::string compat_id(gClapLibrary.plugins[0]->id);
+      compat_id.append("-compatibility");
+      auto g = Crypto::create_sha1_guid_from_name(compat_id.c_str(), compat_id.size());
+      TUID lcid;
+      memcpy(&lcid, &g, sizeof(TUID));
+      makeCIDComCompatible(lcid);
+
+      auto ptr = std::make_shared<CreationContext>();
+      *ptr = {&gClapLibrary, 0,
+              PClassInfo2(lcid, PClassInfo::kManyInstances, kPluginCompatibilityClass, "Compatibility",
+                          0, "", factoryvendor, "", kVstVersionString)};
+      gCreationContexts.push_back(ptr);
+      gPluginFactory->registerClass(&gCreationContexts.back()->classinfo, ClapAsVst3::createInstance,
+                                    gCreationContexts.back().get());
+    }
+
     if (gClapLibrary._pluginFactoryARAInfo)
     {
       LOGINFO("creating ARA companion factories");
@@ -328,6 +403,7 @@ IPluginFactory *GetPluginFactoryEntryPoint()
             auto g = Crypto::create_sha1_guid_from_name(extended_id.c_str(), extended_id.size());
             TUID lcid;
             memcpy(&lcid, &g, sizeof(TUID));
+            makeCIDComCompatible(lcid);
 
             std::string n(clapdescr->name);
 #ifdef _DEBUG
@@ -387,6 +463,43 @@ IMPLEMENT_FUNKNOWN_METHODS(ARAMainFactory, ARA::IMainFactory, ARA::IMainFactory:
 DEF_CLASS_IID(ARA::IMainFactory)
 
 /*
+    forwards the compatibility JSON provided by the CLAP through the
+    clap_plugin_factory_as_vst3 (version 1) extension to the host
+*/
+class PluginCompatibility : public Steinberg::IPluginCompatibility
+{
+ public:
+  PluginCompatibility(const char *json) : _json(json)
+  {
+    FUNKNOWN_CTOR
+  }
+  virtual ~PluginCompatibility()
+  {
+    FUNKNOWN_DTOR;
+  }
+  Steinberg::tresult PLUGIN_API getCompatibilityJSON(Steinberg::IBStream *stream) override
+  {
+    // the JSON5 string is written UTF-8 encoded and without a terminating zero
+    Steinberg::int32 numBytesWritten = 0;
+    auto len = static_cast<Steinberg::int32>(_json.size());
+    auto result = stream->write(const_cast<char *>(_json.data()), len, &numBytesWritten);
+    if (result != Steinberg::kResultOk || numBytesWritten != len)
+    {
+      return Steinberg::kResultFalse;
+    }
+    return Steinberg::kResultTrue;
+  }
+  //---Interface--------------------------------------------------------------------------
+  DECLARE_FUNKNOWN_METHODS
+
+ private:
+  std::string _json;
+};
+
+IMPLEMENT_FUNKNOWN_METHODS(PluginCompatibility, Steinberg::IPluginCompatibility,
+                           Steinberg::IPluginCompatibility::iid)
+
+/*
     creates an Instance from the creationContext.
     actually, there is always a valid entrypoint, otherwise no factory would have been provided.
 */
@@ -416,6 +529,16 @@ FUnknown *ClapAsVst3::createInstance(void *context)
       const auto ara_factory = ctx->lib->_pluginFactoryARAInfo;
       return static_cast<FUnknown *>(new ARAMainFactory(
           ara_factory->get_ara_factory(ara_factory, ctx->index), Steinberg::FUID(ctx->classinfo.cid)));
+    }
+  }
+
+  if (!strcmp(ctx->classinfo.category, kPluginCompatibilityClass))
+  {
+    LOGINFO("creating PluginCompatibility {} (#{})", ctx->classinfo.name, ctx->index);
+    auto json = ctx->lib->get_vst3_compatibility();
+    if (json)
+    {
+      return static_cast<FUnknown *>(new PluginCompatibility(json));
     }
   }
 

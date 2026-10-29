@@ -2,6 +2,8 @@
 
 # The clap-wrapper Project
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 The `clap-wrapper` project allows you to wrap your CLAP plugin
 into other plugin or standalone executable formats, letting your
 plugin run in hosts which don't support the CLAP format and 
@@ -14,6 +16,7 @@ Currently the `clap-wrapper` supports projecting a CLAP into
 
 - VST3
 - Audio Unit v2 (AUv2)
+- Audio Unit v3 (AUv3, on macOS and iOS)
 - AAX
 - A Simple Standalone
 
@@ -30,7 +33,7 @@ will load your CLAP using a variety of techniques.
 or standalone executable which implements the format to the host
 or OS, but uses that host to load your clap.
 
-And with that, voila, your CLAP can appear in a VST3 or AUv2
+And with that, voila, your CLAP can appear in a VST3, AUv2 or AUv3
 host or can appear to be a self contained standalone executable.
 Available features in CLAP are transposed to equivalent features
 in the target format.
@@ -49,17 +52,96 @@ simple CMake command
 ```bash
 git clone https://github.com/free-audio/clap-wrapper.git
 mkdir build
-cmake -B build \ 
+cmake -B build \
       -DCLAP_SDK_ROOT={path to clap sdk} \
       -DVST3_SDK_ROOT={path to vst3 sdk} \
       -DCLAP_WRAPPER_OUTPUT_NAME="The Name of your CLAP"
 ```
 If you'd like to also build for AUv2 include `-DCLAP_WRAPPER_BUILD_AUV2=ON` and the SDK in the folder `AudioUnitSDK`.
 
+To build an AUv3 app extension include `-DCLAP_WRAPPER_BUILD_AUV3=ON`.
+AUv3 builds require the Xcode generator (`-G Xcode`) — the `.appex` is
+linked as an app-extension product and signed by Xcode; other generators
+stop at configure time with an explanatory error. In the clap-first flow,
+add `AUV3` to `PLUGIN_FORMATS` instead. See the wiki for the current AUv3
+feature status.
+
+On **iOS** the AUv3 app extension is the only available format, and it
+places two requirements on your CLAP:
+
+- it must be linked **statically** into the appex (iOS app extensions
+  cannot load a `.clap` at runtime), so the clap-first layout is required
+  and one appex hosts exactly one plugin;
+- its GUI must support the `CLAP_WINDOW_API_UIKIT` (`"uikit"`) window API
+  and attach to the `UIView` it is given — there is no `NSView` on iOS.
+  That constant needs CLAP 1.2.8 or newer.
+
+The appex ships inside a containing app, and for an instrument that app
+is a complete standalone synth you can release.
+
+See [docs/ios.md](docs/ios.md) for the full iOS instructions.
+
+On **WebAssembly** nothing is wrapped at all. Rather than presenting your CLAP
+to a host as some other format, the build compiles the CLAP itself into a
+`.wclap` — a WebAssembly CLAP — so VST3, AUv2, AUv3, AAX and standalone are all
+unavailable there and `PLUGIN_FORMATS` defaults to `WCLAP` on its own. Either
+Emscripten or the WASI-SDK will do; the toolchain file you configure with picks
+one, and the build detects it from `CMAKE_SYSTEM_NAME` or a `wasm32`/`wasm64`
+processor. The module is compiled with SIMD (`-msimd128`) and exports
+`clap_entry` and `malloc` for the web host to call.
+
+The layout depends on whether you pass a `RESOURCE_DIRECTORY`. With one, you get
+a bundle — `YourPlugin.wclap/module.wasm` beside a copy of that directory, and a
+`.tar.gz` of the whole bundle for shipping. Without one, a single flat
+`YourPlugin.wclap.wasm`.
+
+## Contribution
+
+Development happens on `next`; `main` only moves at a release. Before opening an
+issue or a pull request:
+
+- Check whether the problem is already fixed on `next`. Issues are not closed
+  automatically when a fix lands, so an open issue is not proof of an unfixed bug.
+- Base pull requests on `next`, not `main`.
+- Make sure your commit is clang-formatted according to the `.clang-format` file.
+
 ## Licensing
 
 The `clap-wrapper` project is released under the MIT license.
-Please note that using the `clap-wrapper` project to wrap
-a VST3 requires either (1) you use the VST3 SDK under the GPL3
-license, and as such are open source or (2) you agree to the
-VST3 license to generate the wrapper.
+The SDKs and libraries it references remain under their respective
+licenses:
+
+| SDK / Library | Used for | License |
+|---|---|---|
+| [CLAP SDK](https://github.com/free-audio/clap) | all wrappers | MIT |
+| [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) (Steinberg) | VST3 wrapper | MIT (use of the VST trademark/logo per Steinberg's guidelines) |
+| [AudioUnitSDK](https://github.com/apple/AudioUnitSDK) (Apple) | AUv2 wrapper | Apache 2.0 |
+| AAX SDK (Avid) | AAX wrapper | GPL3 **or** commercial Avid AAX SDK License Agreement |
+| [RtAudio](https://github.com/thestk/rtaudio) | standalone audio I/O on Linux, on macOS and Windows only with `CLAP_WRAPPER_STANDALONE_RTAUDIO=ON` or (Windows) `RTAUDIO_API_ASIO=ON` | MIT-like (RtAudio license) |
+| [RtMidi](https://github.com/thestk/rtmidi) | standalone MIDI I/O on Linux, on macOS and Windows only with `CLAP_WRAPPER_STANDALONE_RTAUDIO=ON` | MIT-like (RtMidi license) |
+| [ASIO SDK](https://www.steinberg.net/developers/) (Steinberg), as bundled by RtAudio | standalone ASIO on Windows, only when built with `RTAUDIO_API_ASIO=ON` | GPL3 **or** Steinberg's proprietary ASIO SDK License Agreement |
+| [WIL](https://github.com/microsoft/wil) (Microsoft) | standalone, Windows only | MIT |
+| [gulrak/filesystem](https://github.com/gulrak/filesystem) | std::filesystem fallback on older toolchains | MIT |
+| [{fmt}](https://github.com/fmtlib/fmt) (vendored in `libs/fmt`) | string formatting | MIT |
+| [PreSonus plugin extensions](https://github.com/fenderdigital/presonus-plugin-extension) (vendored in `libs/psl`) | gain-reduction extension in VST3 | Public domain |
+
+On macOS and Windows the standalone uses the platform's own audio and MIDI APIs
+(CoreAudio and CoreMIDI, WASAPI and WinMM) and fetches neither RtAudio nor RtMidi.
+`-DCLAP_WRAPPER_STANDALONE_RTAUDIO=ON` builds it on RtAudio and RtMidi instead, as
+Linux always does. On Windows, `-DRTAUDIO_API_ASIO=ON` adds ASIO, taken from
+RtAudio, next to WASAPI; the audio/MIDI settings window then offers the selected
+driver's control panel. Like AAX below, ASIO is
+dual-licensed: a standalone built with it is either released under the GPL3 or
+covered by Steinberg's ASIO SDK License Agreement.
+
+The AUv3 wrapper uses only Apple system frameworks (AudioToolbox,
+AVFoundation, CoreAudioKit) and needs no additional SDK.
+
+Please note that AAX is dual-licensed: the Avid AAX SDK is available
+either under the GPL3 or under the commercial
+[Avid AAX SDK License Agreement](https://developer.avid.com/aax). So
+to wrap an AAX plugin you must either release it under the GPL3 or
+agree to Avid's SDK license — and joining the Avid developer program
+is required in practice anyway, since AAX binaries must be signed
+with Avid/PACE tooling to load in commercial Pro Tools releases.
+
