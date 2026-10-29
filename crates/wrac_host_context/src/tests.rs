@@ -1,4 +1,6 @@
 use super::*;
+// Only the macOS host tables exercise wrapper-reported host names.
+#[cfg(target_os = "macos")]
 use crate::identity::host_from_wrapper_if_needed;
 
 #[test]
