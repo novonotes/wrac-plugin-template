@@ -316,8 +316,7 @@ tresult PLUGIN_API ClapAsVst3::canProcessSampleSize(int32 symbolicSampleSize)
   {
     return kResultOk;
   }
-  if (symbolicSampleSize != Steinberg::Vst::kSample64 || !_plugin ||
-      !_plugin->_ext._audioports)
+  if (symbolicSampleSize != Steinberg::Vst::kSample64 || !_plugin || !_plugin->_ext._audioports)
   {
     return kResultFalse;
   }

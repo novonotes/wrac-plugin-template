@@ -217,8 +217,8 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
         transportNodeID, sizeof(float),
         AAX_ePrivateDataOptions_DefaultOptions);  //Just here to fill the port.  Not used.
 
-  err = outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mBypass),
-                               sizeof(int32_t));
+  err =
+      outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mBypass), sizeof(int32_t));
 
   //Add pointer to the data model instance and other interesting information.
   err =
@@ -758,8 +758,7 @@ AAX_Result ClapAsAAX::GetParameterValueFromString(AAX_CParamID iParameterID, dou
 {
   if (!_aaxMasterBypassID.empty() && _aaxMasterBypassID == iParameterID)
   {
-    return AAX_CEffectParameters::GetParameterValueFromString(iParameterID, oValuePtr,
-                                                              iValueString);
+    return AAX_CEffectParameters::GetParameterValueFromString(iParameterID, oValuePtr, iValueString);
   }
 
   auto n = this->_parameterMap.find(iParameterID);
@@ -772,8 +771,8 @@ AAX_Result ClapAsAAX::GetParameterValueFromString(AAX_CParamID iParameterID, dou
     }
 
     double clapValue = 0.0;
-    if (ext_params->text_to_value(_plugin->_plugin, n->second->_clap_param_info.id,
-                                  iValueString.Get(), &clapValue))
+    if (ext_params->text_to_value(_plugin->_plugin, n->second->_clap_param_info.id, iValueString.Get(),
+                                  &clapValue))
     {
       // AAX expects normalized parameter values; CLAP text_to_value returns
       // the parameter-domain value.
@@ -1102,9 +1101,8 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
         // handler writes a compatible value for the process context.
         auto p = new AAX_CParameter<bool>(
             wrappedParam->_aax_identifier.c_str(), AAX_CString(paramname),
-            wrappedParam->asAAXValue(info.default_value) >= 0.5,
-            AAX_CBinaryTaperDelegate<bool>(), AAX_CBinaryDisplayDelegate<bool>("off", "on"),
-            info.flags & CLAP_PARAM_IS_AUTOMATABLE);
+            wrappedParam->asAAXValue(info.default_value) >= 0.5, AAX_CBinaryTaperDelegate<bool>(),
+            AAX_CBinaryDisplayDelegate<bool>("off", "on"), info.flags & CLAP_PARAM_IS_AUTOMATABLE);
         p->SetNumberOfSteps(2);
         p->SetType(AAX_eParameterType_Discrete);
         mParameterManager.AddParameter(p);
@@ -1130,9 +1128,9 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
     // Keep AAX master bypass usable even for CLAP plugins without an explicit
     // bypass parameter; the process adapter handles this as wrapper bypass.
     _aaxMasterBypassID = kAAXMasterBypassID;
-    auto bypass = new AAX_CParameter<bool>(
-        _aaxMasterBypassID.c_str(), AAX_CString("Master Bypass"), false,
-        AAX_CBinaryTaperDelegate<bool>(), AAX_CBinaryDisplayDelegate<bool>("off", "on"), true);
+    auto bypass = new AAX_CParameter<bool>(_aaxMasterBypassID.c_str(), AAX_CString("Master Bypass"),
+                                           false, AAX_CBinaryTaperDelegate<bool>(),
+                                           AAX_CBinaryDisplayDelegate<bool>("off", "on"), true);
     bypass->SetNumberOfSteps(2);
     bypass->SetType(AAX_eParameterType_Discrete);
     mParameterManager.AddParameter(bypass);
@@ -1372,11 +1370,10 @@ bool ClapAsAAX::activatePlugin()
     }
 
     _processAdapter = std::make_unique<AAXProcessAdapter>();
-    _processAdapter->setupProcessing(_plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params,
-                                     _plugin->_ext._audioports, this, _gesturedparameters,
-                                     _paramsToProcess, _bypassParameter, _midi_first_portid,
-                                     _midi_prefer_mididialect, placeholderInChannels,
-                                     placeholderOutChannels);
+    _processAdapter->setupProcessing(
+        _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
+        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
+        _midi_prefer_mididialect, placeholderInChannels, placeholderOutChannels);
 
     // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()
     // on a plugin that never activated, and _activated is what deactivatePlugin()

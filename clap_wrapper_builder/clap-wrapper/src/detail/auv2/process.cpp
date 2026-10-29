@@ -363,8 +363,9 @@ void ProcessAdapter::process(ProcessData &data)
   {
     // The render consumed only non-parameter events. Retain pending edits and
     // track the original boundary after MIDI compaction without allocating.
-    _preRecallEventCount = std::count_if(_events.begin(), _events.begin() + _preRecallEventCount,
-                                         [](const auto &event) { return isParameterEvent(event.header.type); });
+    _preRecallEventCount =
+        std::count_if(_events.begin(), _events.begin() + _preRecallEventCount,
+                      [](const auto &event) { return isParameterEvent(event.header.type); });
     _events.erase(std::remove_if(_events.begin(), _events.end(),
                                  [](const auto &event) { return !isParameterEvent(event.header.type); }),
                   _events.end());

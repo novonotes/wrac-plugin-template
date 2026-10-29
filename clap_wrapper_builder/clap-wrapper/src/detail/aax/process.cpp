@@ -131,15 +131,12 @@ void AAXProcessAdapter::applyBusSetting(const clap_plugin_t *plugin, const char 
     // (2) apply setup to plugin
   }
 }
-void AAXProcessAdapter::setupProcessing(const clap_plugin_t *plugin, double samplerate,
-                                        const clap_plugin_params_t *ext_param,
-                                        const clap_plugin_audio_ports *ext_audio,
-                                        Clap::IAutomation *automation,
-                                        std::vector<clap_id> &gesturedparameters,
-                                        ParamChangeQueue &inqueue,
-                                        std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
-                                        uint32_t midiportid, bool preferMIDI,
-                                        uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
+void AAXProcessAdapter::setupProcessing(
+    const clap_plugin_t *plugin, double samplerate, const clap_plugin_params_t *ext_param,
+    const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
+    std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
+    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid, bool preferMIDI,
+    uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
   _ext_param = ext_param;
@@ -394,8 +391,8 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
     // AAX owns master bypass as a host data port. Forward state changes as
     // CLAP parameter events so the plugin's bypass state remains authoritative.
     clap_multi_event_t n;
-    n.header = {sizeof(clap_event_param_value_t), 0, CLAP_CORE_EVENT_SPACE_ID,
-                CLAP_EVENT_PARAM_VALUE, 0};
+    n.header = {sizeof(clap_event_param_value_t), 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE,
+                0};
     n.param.param_id = _bypassParameter->_clap_param_info.id;
     n.param.cookie = _bypassParameter->_clap_param_info.cookie;
     n.param.note_id = -1;

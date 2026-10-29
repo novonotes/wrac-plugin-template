@@ -83,9 +83,8 @@ class AAXProcessAdapter
                        const clap_plugin_params_t *ext_param, const clap_plugin_audio_ports *ext_audio,
                        Clap::IAutomation *automation, std::vector<clap_id> &gesturedParameters,
                        ParamChangeQueue &inqueue,
-                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
-                       uint32_t midiportid, bool preferMIDI,
-                       uint32_t placeholderInChannels, uint32_t placeholderOutChannels);
+                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid,
+                       bool preferMIDI, uint32_t placeholderInChannels, uint32_t placeholderOutChannels);
   void process(SAAX_Wrapper_AlgorithmicContext *context);
   // Zero every output channel of this render context. Used in place of
   // process() when CLAP does not allow the plugin to be rendered.
