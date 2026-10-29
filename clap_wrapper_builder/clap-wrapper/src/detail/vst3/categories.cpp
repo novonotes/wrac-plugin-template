@@ -67,7 +67,11 @@ static const struct _translate
   // CLAP main categories
   {   CLAP_PLUGIN_FEATURE_INSTRUMENT            , PlugType::kInstrument },
   {   CLAP_PLUGIN_FEATURE_AUDIO_EFFECT          , PlugType::kFx},
-  {   CLAP_PLUGIN_FEATURE_NOTE_EFFECT           , PlugType::kInstrumentSynth}, // it seems there is no type for a sequencer etc
+  // VST3 has no dedicated note-effect/MIDI-effect category. Ableton Live rejected
+  // note-effect plugins mapped to Instrument/Synth during validation because it
+  // treated them as instruments, so report them as Fx to allow effect-slot routing
+  // before a downstream instrument.
+  {   CLAP_PLUGIN_FEATURE_NOTE_EFFECT           , PlugType::kFx},
   {   CLAP_PLUGIN_FEATURE_DRUM                  , PlugType::kInstrumentDrum},
   // kAnalyzer alone ("Analyzer") is documented as "not selectable as insert plug-in", so a CLAP
   // analyzer would not be loadable in some hosts at all - kFxAnalyzer ("Fx|Analyzer") is the
