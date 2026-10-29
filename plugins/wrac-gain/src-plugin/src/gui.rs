@@ -23,7 +23,7 @@ use novonotes_run_loop::RunLoopLocal;
 use runtime::{
     DEFAULT_GUI_SIZE, GuiRuntimeDependencies, MAX_GUI_SIZE, MIN_GUI_SIZE, WracGainGuiRuntime,
 };
-use wrac_clap_adapter::interface::{GuiConfig, GuiSize, HostContext, HostGui, PluginResult};
+use wrac_clap_adapter::interface::{GuiConfig, GuiSize, PluginInstanceContext, PluginResult};
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpGuiController, WxpGuiFactory, WxpGuiResizeHandle,
     WxpGuiRuntime,
@@ -68,8 +68,7 @@ pub(crate) fn create_gui_integration(
     shared: Arc<SharedState>,
     latency: Arc<LatencyStore>,
     param_output_queue: Arc<WracGainParamOutputQueue>,
-    host_gui: Arc<dyn HostGui>,
-    host_context: HostContext,
+    context: &PluginInstanceContext,
 ) -> GuiIntegration {
     let notifier = Arc::new(GuiStateNotifier::new());
     let resize_handle = WxpGuiResizeHandle::new(
@@ -86,16 +85,17 @@ pub(crate) fn create_gui_integration(
         latency,
         gui_notifier: notifier.clone(),
         param_output_queue,
-        host_gui,
+        host_gui: context.host_gui.clone(),
+        host_state: context.host_state.clone(),
         resize_handle: resize_handle.clone(),
-        host_context: host_context.clone(),
+        host_context: context.host_context.clone(),
     };
     let controller = Arc::new(WxpGuiController::new_with_resize_handle(
         WracGainGuiFactory {
             dependencies: runtime_dependencies,
         },
         resize_handle,
-        host_context,
+        context.host_context.clone(),
     ));
 
     GuiIntegration {

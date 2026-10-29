@@ -5,7 +5,8 @@ use std::time::Duration;
 use novonotes_run_loop::RunLoopLocal;
 use run_loop_timer::Timer;
 use wrac_clap_adapter::interface::{
-    GuiConfig, GuiSize, HostContext, HostGui, PluginDescriptor, PluginError, PluginResult,
+    GuiConfig, GuiSize, HostContext, HostGui, HostState, PluginDescriptor, PluginError,
+    PluginResult,
 };
 use wrac_wxp_gui::{
     GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
@@ -45,6 +46,7 @@ pub(super) struct GuiRuntimeDependencies {
     pub(super) gui_notifier: Arc<GuiStateNotifier>,
     pub(super) param_output_queue: Arc<WracGainParamOutputQueue>,
     pub(super) host_gui: Arc<dyn HostGui>,
+    pub(super) host_state: Arc<dyn HostState>,
     pub(super) resize_handle: WxpGuiResizeHandle,
     pub(super) host_context: HostContext,
 }
@@ -94,6 +96,7 @@ impl WracGainGuiRuntime {
                 descriptor: dependencies.descriptor,
                 param_output_queue: dependencies.param_output_queue,
                 host_gui: dependencies.host_gui,
+                host_state: dependencies.host_state,
                 gui_resize_handle: dependencies.resize_handle,
                 host_context: dependencies.host_context,
             },

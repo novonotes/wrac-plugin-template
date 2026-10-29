@@ -51,7 +51,7 @@ enum GuiSubscriptionKind {
 }
 
 impl GuiStateNotifier {
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             next_subscription_id: AtomicU64::new(1),
             subscriptions: Mutex::new(HashMap::new()),

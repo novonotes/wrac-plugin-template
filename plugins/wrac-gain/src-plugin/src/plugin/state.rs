@@ -100,7 +100,57 @@ impl PluginStateExtension for WracGainStateExtension {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use wrac_clap_adapter::interface::{HostLifecycle, HostState};
+
     use super::*;
+    use crate::commands::select_latency_from_gui;
+
+    struct TestHostLifecycle;
+
+    impl HostLifecycle for TestHostLifecycle {
+        fn request_restart(&self) {}
+        fn request_process(&self) {}
+        fn request_callback(&self) {}
+    }
+
+    #[derive(Default)]
+    struct TestHostState(AtomicUsize);
+
+    impl HostState for TestHostState {
+        fn mark_dirty(&self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn latency_edit_marks_host_dirty_but_restore_does_not() {
+        let latency = Arc::new(LatencyStore::new(Arc::new(TestHostLifecycle)));
+        let host = TestHostState::default();
+        let state = WracGainStateExtension::new(
+            Arc::new(ProjectStateStore::new()),
+            Arc::new(SharedState::new()),
+            latency.clone(),
+            Arc::new(GuiStateNotifier::new()),
+        );
+
+        select_latency_from_gui(&latency, &host, 0).unwrap();
+        assert_eq!(host.0.load(Ordering::Relaxed), 0);
+        select_latency_from_gui(&latency, &host, 64).unwrap();
+        assert_eq!(host.0.load(Ordering::Relaxed), 1);
+        let saved = state.save_state().unwrap().state;
+        select_latency_from_gui(&latency, &host, 64).unwrap();
+        assert!(select_latency_from_gui(&latency, &host, 65).is_err());
+        assert_eq!(latency.selected_frames(), 64);
+        assert_eq!(host.0.load(Ordering::Relaxed), 1);
+
+        select_latency_from_gui(&latency, &host, 256).unwrap();
+        assert_eq!(host.0.load(Ordering::Relaxed), 2);
+        state.restore_state(saved).unwrap();
+        assert_eq!(latency.selected_frames(), 64);
+        assert_eq!(host.0.load(Ordering::Relaxed), 2);
+    }
 
     #[test]
     fn saved_state_accepts_legacy_gain_only_payload() {

@@ -145,8 +145,7 @@ impl WracGainPlugin {
             shared.clone(),
             latency_store.clone(),
             param_output_queue.clone(),
-            context.host_gui,
-            context.host_context,
+            &context,
         );
         let state_extension = Arc::new(WracGainStateExtension::new(
             project_state,
