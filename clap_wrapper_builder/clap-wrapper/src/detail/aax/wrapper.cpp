@@ -493,6 +493,10 @@ ClapAsAAX::ClapAsAAX()
   , os::IPlugObject()
   , _os_attached([this] { os::attach(this); }, [this] { os::detach(this); })
 {
+  _library = CLAPAAX::guarantee_clap();
+  // AAX creates an empty parameters shell first; CLAP plugin creation stays in
+  // EffectInit(). Attach here so product code sees the AAX create-proc thread.
+  _mainThreadAttachment.attach(_library);
   ClapAsAAXRegistry::Register(this);
   _activated = false;
 }
@@ -506,6 +510,10 @@ ClapAsAAX::ClapAsAAX(const char *effectid, int busconfig)
   , _predetermined_effectid(effectid)
   , _predetermined_busconfig(busconfig)
 {
+  _library = CLAPAAX::guarantee_clap();
+  // Keep the explicit-config shell on the same main-thread hook path as the normal
+  // AAX create proc while preserving EffectInit() as the CLAP creation point.
+  _mainThreadAttachment.attach(_library);
   ClapAsAAXRegistry::Register(this);
   _activated = false;
 }

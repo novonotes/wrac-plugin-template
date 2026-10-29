@@ -471,6 +471,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   // or os::idleSourceChanged() while holding this.
   std::recursive_mutex _mainThreadLock;
   bool _missedLatencyRequest = false;
+  Clap::MainThreadAttachment _mainThreadAttachment;
 
   std::thread::id _main_thread_id{};
   static const uint32_t _gui_invalid_size = 0xffffffff;

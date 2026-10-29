@@ -21,6 +21,7 @@
 #include "clapwrapper/auv2.h"
 #include "clapwrapper/aax.h"
 #include "clapwrapper/wrapper_host.h"
+#include "clapwrapper/wrac.h"
 #include "../ara/ara.h"
 #include "detail/os/fs.h"
 
@@ -57,11 +58,14 @@ class Library
   // AUv2 host will ever ask for it, so the wrapper has to be the indexer
   // itself - see detail/clap/preset_discovery.h.
   const clap_preset_discovery_factory_t *_pluginFactoryPresetDiscovery = nullptr;
+  const wrac_plugin_main_thread_hook_t *_wracMainThreadHook = nullptr;
   std::vector<const clap_plugin_descriptor_t *> plugins;
 
   const clap_plugin_info_as_vst3_t *get_vst3_info(uint32_t index) const;
   const char *get_vst3_compatibility() const;
   const clap_plugin_info_as_aax_t *get_aax_info(uint32_t index) const;
+  void attachMainThread() const;
+  void detachMainThread() const;
 
 #if MAC
   CFBundleRef getBundleRef()
@@ -108,6 +112,23 @@ class Library
 
   void setupPluginsFromPluginEntry(const char *p);
   bool _selfcontained = false;
+};
+
+class MainThreadAttachment
+{
+ public:
+  // Keeps WRAC's main-thread hook paired without teaching each wrapper format about
+  // hook state. This keeps wrapper-format diffs small when rebasing the vendored
+  // clap-wrapper subtree.
+  MainThreadAttachment() = default;
+  MainThreadAttachment(const MainThreadAttachment &) = delete;
+  MainThreadAttachment &operator=(const MainThreadAttachment &) = delete;
+  void attach(const Library *library);
+  void detach();
+  ~MainThreadAttachment();
+
+ private:
+  const Library *_library = nullptr;
 };
 
 }  // namespace Clap
