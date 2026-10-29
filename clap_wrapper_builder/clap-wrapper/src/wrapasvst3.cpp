@@ -1243,7 +1243,12 @@ Vst::UnitID ClapAsVst3::getOrCreateUnitInfo(const char *modulename)
 
 void ClapAsVst3::setupWrapperSpecifics(const clap_plugin_t *plugin)
 {
-  _useIMidiMapping = checkMIDIDialectSupport();
+  // IMidiMapping is useful only when the wrapper can publish the mapped MIDI CC
+  // entries as VST3 parameters.  A CLAP plugin may support MIDI note ports
+  // without implementing CLAP params; in that case returning IMidiMapping would
+  // make getMidiControllerAssignment() report ParamIDs that are not visible to
+  // the VST3 host.
+  _useIMidiMapping = _plugin->_ext._params && checkMIDIDialectSupport();
 
   _vst3specifics = (clap_plugin_as_vst3_t *)plugin->get_extension(plugin, CLAP_PLUGIN_AS_VST3);
   if (_vst3specifics)
