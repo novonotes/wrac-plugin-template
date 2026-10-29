@@ -210,14 +210,17 @@ void ProcessAdapter::flush()
 {
   if (!_ext_params) return;
 
-  _eventindices.clear();
-  for (size_t i = 0; i < _events.size(); ++i)
-  {
-    if (isParameterEvent(_events[i].header.type)) _eventindices.emplace_back(i);
-  }
-  sortEventIndices();
+  selectDeliverableEvents(true);
 
   _ext_params->flush(_plugin, _processData.in_events, _processData.out_events);
+
+  if (_stateRecallPending)
+  {
+    // Parameter events were held back from this flush (see
+    // selectDeliverableEvents), so they are all still pending.
+    resetEventIndices();
+    return;
+  }
 
   // What was just delivered is gone; whatever is left keeps waiting, so both the
   // queue and the index list are rebuilt over the events that remain.
@@ -248,7 +251,7 @@ void ProcessAdapter::process(ProcessData &data)
       }
     }
   }
-  sortEventIndices();
+  selectDeliverableEvents(false);
   _processData.frames_count = data.numSamples;
   _transport.flags = 0;
 
@@ -357,9 +360,82 @@ void ProcessAdapter::process(ProcessData &data)
   processOutputEvents();
 
   // clean up and prepare the events for the next cycle
-  _events.clear();
-  _eventindices.clear();
+  if (_stateRecallPending)
+  {
+    // The render consumed only non-parameter events. Retain pending edits and
+    // track the original boundary after MIDI compaction without allocating.
+    _preRecallEventCount = std::count_if(_events.begin(), _events.begin() + _preRecallEventCount,
+                                         [](const auto &event) { return isParameterEvent(event.header.type); });
+    _events.erase(std::remove_if(_events.begin(), _events.end(),
+                                 [](const auto &event) { return !isParameterEvent(event.header.type); }),
+                  _events.end());
+  }
+  else
+  {
+    _events.clear();
+  }
+  resetEventIndices();
   _sysexBuffers.reset();
+}
+
+// Rebuilds the index list over the events handed to the plugin in this cycle.
+// While a state recall is pending parameter events stay queued: they must not
+// reach the plugin before load() finishes, or the recall would overwrite them
+// with the saved values. MIDI keeps its timeline; a render never waits for load.
+void ProcessAdapter::selectDeliverableEvents(bool parametersOnly)
+{
+  _eventindices.clear();
+  for (size_t i = 0; i < _events.size(); ++i)
+  {
+    const bool isParameter = isParameterEvent(_events[i].header.type);
+    if (isParameter ? !_stateRecallPending : !parametersOnly) _eventindices.emplace_back(i);
+  }
+  sortEventIndices();
+}
+
+// Restores the one-to-one index list the queueing functions append to.
+void ProcessAdapter::resetEventIndices()
+{
+  _eventindices.clear();
+  for (size_t i = 0; i < _events.size(); ++i) _eventindices.emplace_back(i);
+}
+
+bool ProcessAdapter::restoreState(const clap_plugin_state_t &state, const clap_istream_t *stream,
+                                  ClapWrapper::detail::shared::SpinLock &processLock)
+{
+  {
+    ClapWrapper::detail::shared::SpinLockGuard lock(processLock);
+    // A reentrant recall cannot own or commit the outer recall's pending edits.
+    if (_stateRecallPending) return false;
+    _stateRecallPending = true;
+    _preRecallEventCount = _events.size();
+  }
+  // Loading runs without the process lock: plugin code of unbounded duration
+  // must not make the render thread drop blocks, and host callbacks made from
+  // load() may need to render.
+  const bool loaded = state.load(_plugin, stream);
+  {
+    ClapWrapper::detail::shared::SpinLockGuard lock(processLock);
+    if (loaded)
+    {
+      // Only parameter values are replaced by saved state. External modulation,
+      // MIDI, and host edits queued after recall began must remain effective.
+      auto boundary = _events.begin() + _preRecallEventCount;
+      auto kept = std::remove_if(_events.begin(), boundary,
+                                 [](const auto &event)
+                                 {
+                                   return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
+                                          event.header.type == CLAP_EVENT_PARAM_VALUE;
+                                 });
+      _events.erase(kept, boundary);
+    }
+    // Failure leaves edits queued rather than turning a rejected preset into a
+    // lost user operation. This is queue rollback, not rollback of plugin state.
+    _stateRecallPending = false;
+    _preRecallEventCount = 0;
+    resetEventIndices();
+  }
+  return loaded;
 }
 
 uint32_t ProcessAdapter::input_events_size(const struct clap_input_events *list)

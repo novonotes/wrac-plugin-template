@@ -2288,6 +2288,20 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
 
   if (!IsInitialized()) return kAudioUnitErr_Uninitialized;
 
+  auto restoreClapState = [this](Clap::StateMemento &chunk) -> OSStatus
+  {
+    // The adapter owns the recall boundary so parsing and host callbacks run
+    // outside the process lock, while failed loads retain pending host edits.
+    const bool loaded =
+        _processAdapter ? _processAdapter->restoreState(*_plugin->_ext._state, chunk, _processLock)
+                        : _plugin->_ext._state->load(_plugin->_plugin, chunk);
+    // An idle flush during load may have held edits back and consumed its
+    // request. Re-arm it so retained edits also reach plugins that do not render.
+    _requestedFlush = true;
+    if (!loaded) return kAudioUnitErr_InvalidPropertyValue;
+    return noErr;
+  };
+
   CFDictionaryRef tDict = CFDictionaryRef(plist);
 
   // Find 'data' key
@@ -2322,7 +2336,7 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
       UInt8 *streamData = (UInt8 *)(CFDataGetBytePtr(juceData));
 
       chunk.setData(streamData, numBytes);
-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
+      return restoreClapState(chunk);
     }
     return noErr;
   }
@@ -2345,7 +2359,7 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
     {
       Clap::StateMemento chunk;
       chunk.setData(pData, lLen);
-      _plugin->_ext._state->load(_plugin->_plugin, chunk);
+      return restoreClapState(chunk);
     }
   }
   return noErr;
