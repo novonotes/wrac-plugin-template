@@ -159,7 +159,7 @@ class AAXProcessAdapter
                                                               uint32_t index);
 
   // MIDI
-  uint32_t _midi_first_portid = 0;
+  uint32_t _midi_first_portid = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
 
   // Local MIDI output node for the current process() call, captured from the
@@ -325,7 +325,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   std::vector<clap_audio_port_configuration_request> _configuration_requests;
 
-  uint32_t _midi_first_portid = 0;
+  uint32_t _midi_first_portid = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
 
   ParamChangeQueue _paramsToProcess;
