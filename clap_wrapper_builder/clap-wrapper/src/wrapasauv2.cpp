@@ -2485,19 +2485,27 @@ UInt32 WrapAsAUV2::SupportedNumChannels(const AUChannelInfo **outInfo)
   {
     std::set<int> inSets, outSets;
 
+    // AUChannelInfo describes the main input/output pair. Including auxiliary bus channel counts
+    // advertises main-bus configurations that ValidFormat correctly rejects for element zero.
     bool hasInMain{false};
     for (const auto &p : _inputPortCache)
     {
-      inSets.insert(p.channelCount);
-      hasInMain |= p.isMain;
+      if (p.isMain)
+      {
+        inSets.insert(p.channelCount);
+        hasInMain = true;
+      }
     }
     if (!hasInMain) inSets.insert(0);
 
     bool hasOutMain{false};
     for (const auto &p : _outputPortCache)
     {
-      outSets.insert(p.channelCount);
-      hasOutMain |= p.isMain;
+      if (p.isMain)
+      {
+        outSets.insert(p.channelCount);
+        hasOutMain = true;
+      }
     }
     if (!hasOutMain) outSets.insert(0);
 
