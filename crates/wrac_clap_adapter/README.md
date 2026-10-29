@@ -1,5 +1,7 @@
 # wrac_clap_adapter
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 Maps the product contracts defined by `wrac_clap_adapter::interface` to the CLAP ABI.
 
 Conversion to VST3 / AU / AAX is the responsibility of `clap-wrapper`. This crate focuses solely on implementing CLAP plugins and CLAP extensions on the Rust side.

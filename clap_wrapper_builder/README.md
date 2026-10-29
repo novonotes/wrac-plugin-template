@@ -1,5 +1,7 @@
 # clap_wrapper_builder
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 Reusable CMake project that wraps a prebuilt CLAP plugin **static library**
 into VST3 / AUv2 / AAX / Standalone bundles.
 

@@ -10,6 +10,8 @@ helper と、package ごとの task ID helper もこの crate から提供しま
 実行 dispatch を引き続き所有します。この境界により、標準 package step の後に生成 asset を同梱する
 ような製品固有 task を WRAC operation layer の外側に保てます。
 
+GUI パッケージがない場合の GUI ビルドや、最新の CMake configure のように意図的に作業を省略できる操作は `TaskOutcome` を返し、リポジトリの workflow が具体的なスキップ理由をタスク結果として表示できるようにします。
+
 標準の `wrac-plugin.toml` スキーマは
 [`wrac_manifest`](../wrac_manifest/README_JA.md) に定義されています。
 

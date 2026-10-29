@@ -1,5 +1,7 @@
 # How to use the clap-wrapper on iOS
 
+> 日本語版: [ios-ja.md](ios-ja.md)
+
 On iOS the wrapper produces exactly one plugin format: an **AUv3 app
 extension** (`.appex`), together with the **app that contains it**. That
 containing app is not just a test harness - for an instrument it is a

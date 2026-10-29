@@ -2,6 +2,8 @@
 
 # The clap-wrapper Project
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 The `clap-wrapper` project allows you to wrap your CLAP plugin
 into other plugin or standalone executable formats, letting your
 plugin run in hosts which don't support the CLAP format and 

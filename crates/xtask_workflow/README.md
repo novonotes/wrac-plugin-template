@@ -1,5 +1,7 @@
 # xtask_workflow
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 `xtask_workflow` provides dependency-ordered workflow primitives for
 repository-local `cargo xtask` crates.
 
