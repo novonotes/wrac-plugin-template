@@ -20,7 +20,7 @@
 #include "clapwrapper/vst3.h"
 #include "clapwrapper/auv2.h"
 #include "clapwrapper/aax.h"
-#include "clapwrapper/wrac.h"
+#include "clapwrapper/wrapper_host.h"
 #include "../ara/ara.h"
 #include "detail/os/fs.h"
 
@@ -45,16 +45,23 @@ class Library
   const clap_plugin_entry_t *_pluginEntry = nullptr;
   const clap_plugin_factory_t *_pluginFactory = nullptr;
   const clap_plugin_factory_as_vst3 *_pluginFactoryVst3Info = nullptr;
+  bool _pluginFactoryVst3InfoIsV1 = false;
   const clap_plugin_factory_as_auv2 *_pluginFactoryAUv2Info = nullptr;
+  // Optional and independent of the one above. \see CLAP_PLUGIN_FACTORY_INFO_AUV2_LEGACY
+  const clap_plugin_factory_auv2_legacy *_pluginFactoryAUv2Legacy = nullptr;
   const clap_plugin_factory_as_aax_t *_pluginFactoryAAXInfo = nullptr;
   const clap_ara_factory_t *_pluginFactoryARAInfo = nullptr;
-  const wrac_plugin_main_thread_hook_t *_wracMainThreadHook = nullptr;
+  // The plugin's CLAP preset-discovery factory, when it has one. Unlike the
+  // *_Info factories above this is not wrapper metadata: it is the plugin
+  // telling a host where its presets live and what they contain. No VST3 or
+  // AUv2 host will ever ask for it, so the wrapper has to be the indexer
+  // itself - see detail/clap/preset_discovery.h.
+  const clap_preset_discovery_factory_t *_pluginFactoryPresetDiscovery = nullptr;
   std::vector<const clap_plugin_descriptor_t *> plugins;
 
   const clap_plugin_info_as_vst3_t *get_vst3_info(uint32_t index) const;
+  const char *get_vst3_compatibility() const;
   const clap_plugin_info_as_aax_t *get_aax_info(uint32_t index) const;
-  void attachMainThread() const;
-  void detachMainThread() const;
 
 #if MAC
   CFBundleRef getBundleRef()
@@ -78,6 +85,13 @@ class Library
 #endif
   }
 
+  // Wire up a statically-linked clap_entry. Intended for targets where the
+  // CLAP's clap_entry global is in the same binary as the wrapper (iOS
+  // AUv3, clap-first standalones). The caller supplies the entry pointer
+  // directly, bypassing any filesystem / dlopen search. Safe to call once
+  // after construction.
+  void useStaticEntry(const clap_plugin_entry_t *entry, const char *path);
+
  private:
 #if MAC
   CFBundleRef _bundle{nullptr};
@@ -94,23 +108,6 @@ class Library
 
   void setupPluginsFromPluginEntry(const char *p);
   bool _selfcontained = false;
-};
-
-class MainThreadAttachment
-{
- public:
-  // Keeps WRAC's main-thread hook paired without teaching each wrapper format about
-  // hook state. This keeps wrapper-format diffs small when rebasing the vendored
-  // clap-wrapper subtree.
-  MainThreadAttachment() = default;
-  MainThreadAttachment(const MainThreadAttachment &) = delete;
-  MainThreadAttachment &operator=(const MainThreadAttachment &) = delete;
-  void attach(const Library *library);
-  void detach();
-  ~MainThreadAttachment();
-
- private:
-  const Library *_library = nullptr;
 };
 
 }  // namespace Clap

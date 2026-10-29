@@ -16,14 +16,15 @@ void Parameter::updateInfo(const clap_plugin_t *plugin, const clap_plugin_params
   if (_cfstring)
   {
     CFRelease(_cfstring);
-    _cfstring = nullptr;
   }
   _info = i;
-  const char *name = _info.name[0] != '\0' ? _info.name : "Parameter";
-  _cfstring = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
-  if (!_cfstring)
+  _cfstring = CFStringCreateWithCString(NULL, _info.name, kCFStringEncodingUTF8);
+  if (_cfstring == nullptr)
   {
-    _cfstring = CFStringCreateWithCString(NULL, "Parameter", kCFStringEncodingUTF8);
+    // A name that is not valid UTF-8 fails the conversion, and the wrapper hands
+    // this string to the host with a CFRetain and releases it in the destructor:
+    // neither survives a null. Latin-1 accepts any byte, so it always answers.
+    _cfstring = CFStringCreateWithCString(NULL, _info.name, kCFStringEncodingISOLatin1);
   }
 
   const auto &info = _info;
@@ -39,12 +40,15 @@ void Parameter::updateInfo(const clap_plugin_t *plugin, const clap_plugin_params
     else
       flags |= kAudioUnitParameterFlag_IsReadable | kAudioUnitParameterFlag_IsWritable;
   }
+  // the unit is a value, not a bitfield, and must not be mixed into the flags
+  _unit = kAudioUnitParameterUnit_Generic;
   if (info.flags & CLAP_PARAM_IS_STEPPED)
   {
-    if (info.max_value == 1 && info.min_value == 0)
-      flags |= kAudioUnitParameterUnit_Boolean;
+    // an enum always has named values, so report it as Indexed even for a two-value range
+    if (info.max_value == 1 && info.min_value == 0 && !(info.flags & CLAP_PARAM_IS_ENUM))
+      _unit = kAudioUnitParameterUnit_Boolean;
     else
-      flags |= kAudioUnitParameterUnit_Indexed;
+      _unit = kAudioUnitParameterUnit_Indexed;
   }
 
   // we need this, otherwise hosts may quantize the parameter to 100 steps

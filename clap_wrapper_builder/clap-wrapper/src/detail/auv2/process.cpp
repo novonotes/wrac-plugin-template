@@ -1,8 +1,10 @@
 #include "process.h"
+#include "detail/shared/midi_translation.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cassert>
+#include <cstring>
 
 namespace Clap::AUv2
 {
@@ -15,6 +17,12 @@ inline clap_beattime doubleToBeatTime(double t)
 inline clap_sectime doubleToSecTime(double t)
 {
   return round(t * CLAP_SECTIME_FACTOR);
+}
+
+// the only event types a parameter flush may carry, per clap/ext/params.h
+inline bool isParameterEvent(uint16_t type)
+{
+  return type == CLAP_EVENT_PARAM_VALUE || type == CLAP_EVENT_PARAM_MOD;
 }
 
 ProcessAdapter::~ProcessAdapter()
@@ -43,14 +51,17 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
                                      const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                                      Clap::IAutomation *automationInterface, ParameterTree *parameters,
                                      IMIDIOutputs *midiouts, uint32_t numMaxSamples,
-                                     uint32_t preferredMIDIDialect)
+                                     uint32_t preferredMIDIDialect, uint32_t supportedMIDIDialects,
+                                     uint32_t clapAudioInputs, uint32_t clapAudioOutputs)
 {
   _plugin = plugin;
   _ext_params = ext_params;
   _automation = automationInterface;
   _parameters = parameters;
 
-  _preferred_midi_dialect = preferredMIDIDialect;
+  _supported_midi_dialects = supportedMIDIDialects;
+  _preferred_midi_dialect =
+      ClapWrapper::detail::shared::chooseInputDialect(preferredMIDIDialect, supportedMIDIDialects);
 
   _midiouts = midiouts;
 
@@ -62,16 +73,27 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
   if (numMaxSamples > 0)
   {
     delete[] _silent_input;
-    _silent_input = new float[numMaxSamples];
+    _silent_input = new float[numMaxSamples]{};
 
     delete[] _silent_output;
-    _silent_output = new float[numMaxSamples];
+    _silent_output = new float[numMaxSamples]{};
   }
 
   _numInputs = _audioInputScope->GetNumberOfElements();
   _numOutputs = _audioOutputScope->GetNumberOfElements();
 
-  _processData.audio_inputs_count = _numInputs;
+  // Never hand the plugin more ports than _input_ports/_output_ports have
+  // elements: the AU element counts were fixed at PostConstructor, while the
+  // CLAP counts are re-queried on every (re)activation — a plugin that rescans
+  // its audio ports while deactivated could otherwise make process() index past
+  // the allocation, or receive a null pointer with a non-zero count.
+  _clapNumInputs = std::min(clapAudioInputs, _numInputs);
+  _clapNumOutputs = std::min(clapAudioOutputs, _numOutputs);
+
+  // The plugin is handed its own declared port counts, which may be fewer than
+  // the AU-scope element counts (a note-only plugin gets a placeholder silent AU
+  // output bus but zero CLAP audio ports).
+  _processData.audio_inputs_count = _clapNumInputs;
   delete[] _input_ports;
   _input_ports = nullptr;
 
@@ -97,7 +119,7 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
     _processData.audio_inputs = nullptr;
   }
 
-  _processData.audio_outputs_count = _numOutputs;
+  _processData.audio_outputs_count = _clapNumOutputs;
   delete[] _output_ports;
   _output_ports = nullptr;
 
@@ -145,6 +167,7 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
   _events.reserve(8192);
   _eventindices.clear();
   _eventindices.reserve(_events.capacity());
+  _sysexBuffers.prepare(16);
 
   _out_events.ctx = this;
 
@@ -153,30 +176,8 @@ void ProcessAdapter::setupProcessing(ausdk::AUScope &audioInputs, ausdk::AUScope
   _activeNotes.reserve(32);
 }
 
-namespace
-{
-bool isParameterEvent(const clap_multi_event_t &event)
-{
-  return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
-         (event.header.type == CLAP_EVENT_PARAM_VALUE || event.header.type == CLAP_EVENT_PARAM_MOD);
-}
-}  // namespace
-
-void ProcessAdapter::prepareInputEvents()
-{
-  // Keep parameter edits pending while load runs, including edits arriving
-  // during recall. MIDI continues on its timeline; render never waits for load.
-  if (_stateRecallPending || _eventindices.size() != _events.size())
-  {
-    _eventindices.clear();
-    for (size_t i = 0; i < _events.size(); ++i)
-      if (!_stateRecallPending || !isParameterEvent(_events[i])) _eventindices.emplace_back(i);
-  }
-}
-
 void ProcessAdapter::sortEventIndices()
 {
-  prepareInputEvents();
   // just sorting the index
   // an item must be sorted to front of
   // if the timestamp if event[a] is earlier than
@@ -192,8 +193,61 @@ void ProcessAdapter::sortEventIndices()
             });
 }
 
+// Parameter-only round trip, for when no render is running to carry the events.
+// Two things are due when process() is not coming: the parameter events queued
+// since the last cycle -- host automation, arriving through SetParameter -- have
+// to reach the plugin, and the plugin has to be given somewhere to push its own
+// output events, which in CLAP it can only do from inside process() or flush().
+//
+// clap_plugin_params.flush() is [main-thread] while the plugin is deactivated and
+// [audio-thread] while it is active; the caller decides which of the two it is
+// and serializes this against Render() accordingly.
+//
+// Only parameter events are legal in a flush, so the index list is narrowed to
+// those. Anything else queued -- MIDI the host handed us outside a render --
+// keeps its place in _events and waits for the next process() cycle.
+void ProcessAdapter::flush()
+{
+  if (!_ext_params) return;
+
+  _eventindices.clear();
+  for (size_t i = 0; i < _events.size(); ++i)
+  {
+    if (isParameterEvent(_events[i].header.type)) _eventindices.emplace_back(i);
+  }
+  sortEventIndices();
+
+  _ext_params->flush(_plugin, _processData.in_events, _processData.out_events);
+
+  // What was just delivered is gone; whatever is left keeps waiting, so both the
+  // queue and the index list are rebuilt over the events that remain.
+  size_t kept = 0;
+  for (size_t i = 0; i < _events.size(); ++i)
+  {
+    if (!isParameterEvent(_events[i].header.type)) _events[kept++] = _events[i];
+  }
+  _events.resize(kept);
+
+  _eventindices.clear();
+  for (size_t i = 0; i < kept; ++i) _eventindices.emplace_back(i);
+}
+
 void ProcessAdapter::process(ProcessData &data)
 {
+  // CLAP requires event times within [0, frames_count); a host stamping
+  // MIDIEventList packets with out-of-range timestamps (e.g. mach host time
+  // instead of sample offsets) would otherwise make plugins that index their
+  // buffers by event time read out of bounds — clamp into the block.
+  if (data.numSamples > 0)
+  {
+    for (auto &e : _events)
+    {
+      if (e.header.time >= data.numSamples)
+      {
+        e.header.time = data.numSamples - 1;
+      }
+    }
+  }
   sortEventIndices();
   _processData.frames_count = data.numSamples;
   _transport.flags = 0;
@@ -238,7 +292,9 @@ void ProcessAdapter::process(ProcessData &data)
     for (uint32_t i = 0; i < _numInputs; ++i)
     {
       auto &m = static_cast<ausdk::AUInputElement &>(*_audioInputScope->SafeGetElement(i));
-      if (m.PullInput(data.flags, data.timestamp, i, data.numSamples) == noErr)
+      // Silence reported by one input must not describe another input or the plugin output.
+      auto inputFlags = data.flags & ~kAudioUnitRenderAction_OutputIsSilence;
+      if (m.PullInput(inputFlags, data.timestamp, i, data.numSamples) == noErr)
       {
         AudioBufferList &myInBuffers = m.GetBufferList();
         auto num = myInBuffers.mNumberBuffers;
@@ -287,88 +343,33 @@ void ProcessAdapter::process(ProcessData &data)
     {
       assert(myOutBuffers.mBuffers[j].mNumberChannels == 1);
       this->_output_ports[i].data32[j] = (float *)myOutBuffers.mBuffers[j].mData;
+      // placeholder AU output busses beyond the plugin's declared CLAP ports are
+      // not written by the plugin, so emit silence rather than leaving them stale.
+      if (i >= _clapNumOutputs)
+      {
+        std::memset(this->_output_ports[i].data32[j], 0, sizeof(float) * data.numSamples);
+      }
     }
   }
 #endif
 
   _plugin->process(_plugin, &_processData);
-
   processOutputEvents();
 
-  finishInputEvents();
-}
-
-bool ProcessAdapter::restoreState(const clap_plugin_state_t &state, const clap_istream_t *stream,
-                                  ClapWrapper::detail::shared::SpinLock &processOrFlushLock)
-{
-  {
-    ClapWrapper::detail::shared::SpinLockGuard lock(processOrFlushLock);
-    // A reentrant recall cannot own or commit the outer recall's pending edits.
-    if (_stateRecallPending) return false;
-    _stateRecallPending = true;
-    _preRecallEventCount = _events.size();
-  }
-  const bool loaded = state.load(_plugin, stream);
-  {
-    ClapWrapper::detail::shared::SpinLockGuard lock(processOrFlushLock);
-    if (loaded)
-    {
-      // Only parameter values are replaced by saved state. External modulation,
-      // MIDI, and host edits queued after recall began must remain effective.
-      auto boundary = _events.begin() + _preRecallEventCount;
-      auto kept = std::remove_if(_events.begin(), boundary,
-                                 [](const auto &event)
-                                 {
-                                   return event.header.space_id == CLAP_CORE_EVENT_SPACE_ID &&
-                                          event.header.type == CLAP_EVENT_PARAM_VALUE;
-                                 });
-      _events.erase(kept, boundary);
-    }
-    // Failure leaves edits queued rather than turning a rejected preset into a
-    // lost user operation. This is queue rollback, not rollback of plugin state.
-    // Queue compaction and edits arriving after the last render invalidate the
-    // old index mapping even when its length happens to match the new queue.
-    _eventindices.clear();
-    _stateRecallPending = false;
-    _preRecallEventCount = 0;
-  }
-  return loaded;
-}
-
-void ProcessAdapter::finishInputEvents()
-{
-  if (_stateRecallPending)
-  {
-    // Render/flush consumed only non-parameter events. Retain pending edits and
-    // track the original boundary after MIDI compaction without allocating.
-    _preRecallEventCount =
-        std::count_if(_events.begin(), _events.begin() + _preRecallEventCount, isParameterEvent);
-    _events.erase(std::remove_if(_events.begin(), _events.end(),
-                                 [](const auto &event) { return !isParameterEvent(event); }),
-                  _events.end());
-  }
-  else
-    _events.clear();
+  // clean up and prepare the events for the next cycle
+  _events.clear();
   _eventindices.clear();
-}
-
-void ProcessAdapter::flush()
-{
-  prepareInputEvents();
-  if (_plugin && _ext_params)
-  {
-    _ext_params->flush(_plugin, &_in_events, &_out_events);
-    processOutputEvents();
-  }
-  finishInputEvents();
+  _sysexBuffers.reset();
 }
 
 uint32_t ProcessAdapter::input_events_size(const struct clap_input_events *list)
 {
   auto self = static_cast<ProcessAdapter *>(list->ctx);
+  // the index list, not the event list: the two match one to one for a process()
+  // cycle, but a flush narrows the indices to the parameter events and leaves the
+  // rest of the queue in place.
   auto k = (uint32_t)self->_eventindices.size();
   return k;
-  // return self->_vstdata->inputEvents->getEventCount();
 }
 
 // returns the pointer to an event in the list. The index accessed is not the position in the event list itself
@@ -398,12 +399,6 @@ bool ProcessAdapter::output_events_try_push(const struct clap_output_events *lis
 
 bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
 {
-#if 0
-  clap_multi_event e;
-  memcpy(&e, event, event->size);
-  _outevents.emplace_back(e);
-#endif
-
   switch (event->type)
   {
     case CLAP_EVENT_NOTE_ON:
@@ -420,50 +415,16 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
       return true;
       break;
     case CLAP_EVENT_NOTE_EXPRESSION:
+    {
+      auto nevt = reinterpret_cast<const clap_multi_event_t *>(event);
+      _midiouts->send(*nevt);
       return true;
-      break;
+    }
+    break;
     case CLAP_EVENT_PARAM_VALUE:
     {
       auto ev = (clap_event_param_value *)event;
       _automation->onPerformEdit(ev);
-
-      // auto param = this->_gesturedParameters
-#if 0
-      auto param = (Vst3Parameter*)this->parameters->getParameter(ev->param_id & 0x7FFFFFFF);
-      if (param)
-      {
-        auto param_id = param->getInfo().id;
-
-        // if the parameter is marked as being edited in the UI, pass the value
-        // to the queue so it can be given to the IComponentHandler
-        if (std::find(_gesturedParameters.begin(), _gesturedParameters.end(), param_id) !=
-            _gesturedParameters.end())
-        {
-          _automation->onPerformEdit(ev);
-        }
-
-        // it also needs to be communicated to the audio thread,otherwise the parameter jumps back to the original value
-        Steinberg::int32 index = 0;
-        // addParameterData() does check if there is already a queue and returns it,
-        // actually, it should be called getParameterQueue()
-
-        // the vst3 validator from the VST3 SDK does not provide always an object to output parameters, probably other hosts won't to that, too
-        // therefore we are cautious.
-        if (_vstdata->outputParameterChanges)
-        {
-          auto list = _vstdata->outputParameterChanges->addParameterData(param_id, index);
-
-          // the implementation of addParameterData() in the SDK always returns a queue, but Cubase 12 (perhaps others, too)
-          // sometimes don't return a queue object during the first bunch of process calls. I (df) haven't figured out, why.
-          // therefore we have to check if there is an output queue at all
-          if (list)
-          {
-            Steinberg::int32 index2 = 0;
-            list->addPoint(ev->header.time, param->asVst3Value(ev->value), index2);
-          }
-        }
-      }
-#endif
     }
 
       return true;
@@ -498,9 +459,19 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
       break;
 
     case CLAP_EVENT_MIDI_SYSEX:
-    case CLAP_EVENT_MIDI2:
+    {
+      auto nevt = reinterpret_cast<const clap_multi_event_t *>(event);
+      _midiouts->send(*nevt);
       return true;
-      break;
+    }
+    break;
+    case CLAP_EVENT_MIDI2:
+    {
+      auto nevt = reinterpret_cast<const clap_multi_event_t *>(event);
+      _midiouts->send(*nevt);
+      return true;
+    }
+    break;
     default:
       break;
   }
@@ -571,45 +542,67 @@ void ProcessAdapter::addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData
       // no running status
       break;
     case 8:  // note off
-
-      if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
-      {
-        n.header.type = CLAP_EVENT_NOTE_OFF;
-        n.header.size = sizeof(clap_event_note_t);
-
-        n.note.port_index = 0;
-        n.note.note_id = -1;
-        n.note.key = (inData1 & 0x7F);
-        n.note.velocity = 1.f * (inData2 & 0x7F) / 127.f;
-        n.note.channel = channel;
-      }
-      else
-      {
-        n.header.type = CLAP_EVENT_MIDI;
-        n.header.size = sizeof(clap_event_midi_t);
-
-        n.midi.port_index = 0;
-        n.midi.data[0] = inStatus;
-        n.midi.data[1] = inData1;
-        n.midi.data[2] = inData2;
-      }
-      this->_eventindices.emplace_back((this->_events.size()));
-      this->_events.emplace_back(n);
-      removeFromActiveNotes(&n.note);
-      this->output_events_try_push(&this->_out_events, &n.header);
-      break;
     case 9:  // note on
+    {
+      // MIDI 1.0 running-status convention: a note-on with velocity 0 is a note-off
+      const bool noteOn = (strippedStatus == 9) && ((inData2 & 0x7F) != 0);
+      switch (_preferred_midi_dialect)
+      {
+        case CLAP_NOTE_DIALECT_CLAP:
+          n.header.type = noteOn ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF;
+          n.header.size = sizeof(clap_event_note_t);
 
+          n.note.port_index = 0;
+          n.note.note_id = -1;
+          n.note.key = (inData1 & 0x7F);
+          n.note.velocity = 1.f * (inData2 & 0x7F) / 127.f;
+          n.note.channel = channel;
+          break;
+        case CLAP_NOTE_DIALECT_MIDI:
+        case CLAP_NOTE_DIALECT_MIDI_MPE:
+        case CLAP_NOTE_DIALECT_MIDI2:
+        default:
+          // A legacy MIDI1 source note maps to raw MIDI for every non-CLAP
+          // dialect. (Synthesising MIDI2/UMP from a MIDI1 source, when a plugin
+          // prefers MIDI2, is handled on the UMP path, not here.)
+          n.header.type = CLAP_EVENT_MIDI;
+          n.header.size = sizeof(clap_event_midi_t);
+
+          n.midi.port_index = 0;
+          n.midi.data[0] = inStatus;
+          n.midi.data[1] = inData1;
+          n.midi.data[2] = inData2;
+          break;
+      }
+      this->_eventindices.emplace_back((this->_events.size()));
+      this->_events.emplace_back(n);
+      // Active-note bookkeeping backs note-expression translation and is only
+      // meaningful for typed CLAP notes; the n.note union fields are only valid
+      // when the CLAP branch above populated them.
       if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
       {
-        n.header.type = CLAP_EVENT_NOTE_ON;
-        n.header.size = sizeof(clap_event_note_t);
+        if (noteOn)
+          addToActiveNotes(&n.note);
+        else
+          removeFromActiveNotes(&n.note);
+      }
+      break;
+    }
+    case 0xA:  // polyphonic (per-key) pressure / aftertouch
+      if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
+      {
+        // translate to a per-note pressure expression. note_id is a wildcard
+        // (-1) because notes created on the MIDI input path have no id; the
+        // key+channel identify the target note.
+        n.header.type = CLAP_EVENT_NOTE_EXPRESSION;
+        n.header.size = sizeof(clap_event_note_expression_t);
 
-        n.note.port_index = 0;
-        n.note.note_id = -1;
-        n.note.key = (inData1 & 0x7F);
-        n.note.velocity = 1.f * (inData2 & 0x7F) / 127.f;
-        n.note.channel = channel;
+        n.noteexpression.expression_id = CLAP_NOTE_EXPRESSION_PRESSURE;
+        n.noteexpression.note_id = -1;
+        n.noteexpression.port_index = 0;
+        n.noteexpression.channel = channel;
+        n.noteexpression.key = (inData1 & 0x7F);
+        n.noteexpression.value = 1.0 * (inData2 & 0x7F) / 127.0;  // range 0..1
       }
       else
       {
@@ -621,19 +614,61 @@ void ProcessAdapter::addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData
         n.midi.data[1] = inData1;
         n.midi.data[2] = inData2;
       }
-
       this->_eventindices.emplace_back((this->_events.size()));
       this->_events.emplace_back(n);
-      addToActiveNotes(&n.note);
-
-      this->output_events_try_push(&this->_out_events, &n.header);
-
       break;
-    case 0xA:  // any other MIDI message with 1 or 2 data bytes
-    case 0xB:
-    case 0xC:
-    case 0xD:
-    case 0xE:
+    case 0xD:  // channel pressure (2 bytes) -> channel-wide pressure expression
+      if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
+      {
+        n.header.type = CLAP_EVENT_NOTE_EXPRESSION;
+        n.header.size = sizeof(clap_event_note_expression_t);
+        n.noteexpression.expression_id = CLAP_NOTE_EXPRESSION_PRESSURE;
+        n.noteexpression.note_id = -1;
+        n.noteexpression.port_index = 0;
+        n.noteexpression.channel = channel;
+        n.noteexpression.key = -1;                                // channel-wide (wildcard key)
+        n.noteexpression.value = 1.0 * (inData1 & 0x7F) / 127.0;  // range 0..1
+      }
+      else
+      {
+        n.header.type = CLAP_EVENT_MIDI;
+        n.header.size = sizeof(clap_event_midi_t);
+        n.midi.port_index = 0;
+        n.midi.data[0] = inStatus;
+        n.midi.data[1] = inData1;
+        n.midi.data[2] = inData2;
+      }
+      this->_eventindices.emplace_back((this->_events.size()));
+      this->_events.emplace_back(n);
+      break;
+    case 0xE:  // pitch bend -> channel-wide tuning expression (+/- 2 semitones)
+      if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
+      {
+        const int bend14 = ((inData2 & 0x7F) << 7) | (inData1 & 0x7F);
+        n.header.type = CLAP_EVENT_NOTE_EXPRESSION;
+        n.header.size = sizeof(clap_event_note_expression_t);
+        n.noteexpression.expression_id = CLAP_NOTE_EXPRESSION_TUNING;
+        n.noteexpression.note_id = -1;
+        n.noteexpression.port_index = 0;
+        n.noteexpression.channel = channel;
+        n.noteexpression.key = -1;                                // channel-wide (wildcard key)
+        n.noteexpression.value = (bend14 - 8192) / 8192.0 * 2.0;  // semitones
+      }
+      else
+      {
+        n.header.type = CLAP_EVENT_MIDI;
+        n.header.size = sizeof(clap_event_midi_t);
+        n.midi.port_index = 0;
+        n.midi.data[0] = inStatus;
+        n.midi.data[1] = inData1;
+        n.midi.data[2] = inData2;
+      }
+      this->_eventindices.emplace_back((this->_events.size()));
+      this->_events.emplace_back(n);
+      break;
+    case 0xB:  // control change
+    case 0xC:  // program change (2 bytes)
+      // CLAP has no generic typed event for these; forward as raw MIDI.
       n.header.type = CLAP_EVENT_MIDI;
       n.header.size = sizeof(clap_event_midi_t);
 
@@ -647,6 +682,153 @@ void ProcessAdapter::addMIDIEvent(UInt32 inStatus, UInt32 inData1, UInt32 inData
       break;
     case 0xF:
       break;
+  }
+}
+
+void ProcessAdapter::addMIDI2Event(const uint32_t *words, uint32_t nWords, UInt32 inOffsetSampleFrame)
+{
+  if (!words || nWords == 0) return;
+
+  auto deltaFrames = inOffsetSampleFrame & kMusicDeviceSampleFrameMask_SampleOffset;
+  bool live = (inOffsetSampleFrame & kMusicDeviceSampleFrameMask_IsScheduled) != 0;
+
+  clap_multi_event n;
+  n.header.time = deltaFrames;
+  n.header.type = CLAP_EVENT_MIDI2;
+  n.header.size = sizeof(clap_event_midi2_t);
+  n.header.flags = 0 + (live ? CLAP_EVENT_IS_LIVE : 0);
+  n.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+
+  n.midi2.port_index = 0;
+  n.midi2.data[0] = words[0];
+  n.midi2.data[1] = (nWords > 1) ? words[1] : 0;
+  n.midi2.data[2] = (nWords > 2) ? words[2] : 0;
+  n.midi2.data[3] = (nWords > 3) ? words[3] : 0;
+
+  this->_eventindices.emplace_back(this->_events.size());
+  this->_events.emplace_back(n);
+}
+
+void ProcessAdapter::addSysExEvent(const uint8_t *data, uint32_t length, UInt32 inOffsetSampleFrame)
+{
+  if (!data || length == 0) return;
+
+  auto deltaFrames = inOffsetSampleFrame & kMusicDeviceSampleFrameMask_SampleOffset;
+  bool live = (inOffsetSampleFrame & kMusicDeviceSampleFrameMask_IsScheduled) != 0;
+
+  // keep the payload alive until the plugin consumes it during process()
+  const auto &owned = _sysexBuffers.acquire(data, length);
+
+  clap_multi_event n;
+  n.header.time = deltaFrames;
+  n.header.type = CLAP_EVENT_MIDI_SYSEX;
+  n.header.size = sizeof(clap_event_midi_sysex_t);
+  n.header.flags = 0 + (live ? CLAP_EVENT_IS_LIVE : 0);
+  n.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+
+  n.sysex.port_index = 0;
+  n.sysex.buffer = owned.data();
+  n.sysex.size = static_cast<uint32_t>(owned.size());
+
+  this->_eventindices.emplace_back(this->_events.size());
+  this->_events.emplace_back(n);
+}
+
+void ProcessAdapter::startNote(int32_t note_id, int16_t channel, float pitch, float velocity,
+                               UInt32 inOffsetSampleFrame)
+{
+  auto deltaFrames = inOffsetSampleFrame & kMusicDeviceSampleFrameMask_SampleOffset;
+  bool live = (inOffsetSampleFrame & kMusicDeviceSampleFrameMask_IsScheduled) != 0;
+  const int16_t key = static_cast<int16_t>(note_id & 0x7F);
+
+  clap_multi_event n;
+  n.header.time = deltaFrames;
+  n.header.flags = 0 + (live ? CLAP_EVENT_IS_LIVE : 0);
+  n.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+
+  if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
+  {
+    n.header.type = CLAP_EVENT_NOTE_ON;
+    n.header.size = sizeof(clap_event_note_t);
+    n.note.port_index = 0;
+    n.note.note_id = note_id;
+    n.note.channel = channel;
+    n.note.key = key;
+    n.note.velocity = velocity / 127.0;
+    this->_eventindices.emplace_back(this->_events.size());
+    this->_events.emplace_back(n);
+    addToActiveNotes(&n.note);
+
+    // carry the fractional part of the pitch as a per-note tuning expression
+    const double frac = static_cast<double>(pitch) - static_cast<double>(key);
+    if (frac != 0.0)
+    {
+      clap_multi_event t;
+      t.header.time = deltaFrames;
+      t.header.flags = n.header.flags;
+      t.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+      t.header.type = CLAP_EVENT_NOTE_EXPRESSION;
+      t.header.size = sizeof(clap_event_note_expression_t);
+      t.noteexpression.expression_id = CLAP_NOTE_EXPRESSION_TUNING;  // semitones
+      t.noteexpression.note_id = note_id;
+      t.noteexpression.port_index = 0;
+      t.noteexpression.channel = channel;
+      t.noteexpression.key = key;
+      t.noteexpression.value = frac;
+      this->_eventindices.emplace_back(this->_events.size());
+      this->_events.emplace_back(t);
+    }
+  }
+  else
+  {
+    float v = velocity;
+    if (v < 0.f) v = 0.f;
+    if (v > 127.f) v = 127.f;
+    n.header.type = CLAP_EVENT_MIDI;
+    n.header.size = sizeof(clap_event_midi_t);
+    n.midi.port_index = 0;
+    n.midi.data[0] = static_cast<uint8_t>(0x90u | (channel & 0x0F));
+    n.midi.data[1] = static_cast<uint8_t>(key & 0x7F);
+    n.midi.data[2] = static_cast<uint8_t>(v);
+    this->_eventindices.emplace_back(this->_events.size());
+    this->_events.emplace_back(n);
+  }
+}
+
+void ProcessAdapter::stopNote(int32_t note_id, int16_t channel, UInt32 inOffsetSampleFrame)
+{
+  auto deltaFrames = inOffsetSampleFrame & kMusicDeviceSampleFrameMask_SampleOffset;
+  bool live = (inOffsetSampleFrame & kMusicDeviceSampleFrameMask_IsScheduled) != 0;
+  const int16_t key = static_cast<int16_t>(note_id & 0x7F);
+
+  clap_multi_event n;
+  n.header.time = deltaFrames;
+  n.header.flags = 0 + (live ? CLAP_EVENT_IS_LIVE : 0);
+  n.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+
+  if (_preferred_midi_dialect == CLAP_NOTE_DIALECT_CLAP)
+  {
+    n.header.type = CLAP_EVENT_NOTE_OFF;
+    n.header.size = sizeof(clap_event_note_t);
+    n.note.port_index = 0;
+    n.note.note_id = note_id;
+    n.note.channel = channel;
+    n.note.key = key;
+    n.note.velocity = 0.0;
+    this->_eventindices.emplace_back(this->_events.size());
+    this->_events.emplace_back(n);
+    removeFromActiveNotes(&n.note);
+  }
+  else
+  {
+    n.header.type = CLAP_EVENT_MIDI;
+    n.header.size = sizeof(clap_event_midi_t);
+    n.midi.port_index = 0;
+    n.midi.data[0] = static_cast<uint8_t>(0x80u | (channel & 0x0F));
+    n.midi.data[1] = static_cast<uint8_t>(key & 0x7F);
+    n.midi.data[2] = 0;
+    this->_eventindices.emplace_back(this->_events.size());
+    this->_events.emplace_back(n);
   }
 }
 
@@ -670,5 +852,56 @@ void ProcessAdapter::addParameterEvent(const clap_param_info_t &info, double val
 
   this->_eventindices.emplace_back(this->_events.size());
   this->_events.emplace_back(n);
+}
+
+// Moves the queued parameter events onto another adapter. This exists for one
+// moment: deactivateCLAP() drops the process adapter, and anything the host set
+// since the last render or flush is still sitting in it. Those values are as
+// real as any other -- a host that sets a parameter and then deactivates the
+// unit (a restart, a format change, a project close-and-reopen) has been told
+// nothing went wrong -- so they move to the adapter the deactivated state
+// flushes from rather than dying with this one.
+//
+// Only parameter events move. Everything else queued here belongs to a render
+// that is not going to happen now, and a flush may not carry it anyway.
+//
+// The offsets go with the block they were offsets into, and dropping them is
+// not tidiness: sortEventIndices() sorts on time first, and only breaks ties on
+// the insertion index. Left as they were, an event stamped into some earlier
+// block would sort *after* a value the deactivated state queues later at time
+// 0 -- the stale value applied last, which is the inversion this transfer
+// exists to avoid. At 0 they all tie, and the tiebreak then orders them the way
+// they arrived: these first, anything queued afterwards over the top.
+//
+// Order follows position in _events, because flush() rebuilds _eventindices
+// over it before sorting. Keeping the index list in step here is for a
+// process() that never comes on the adapter these are going to.
+size_t ProcessAdapter::transferPendingParametersTo(ProcessAdapter &other)
+{
+  if (&other == this) return 0;
+
+  size_t moved = 0;
+  size_t kept = 0;
+  for (size_t i = 0; i < _events.size(); ++i)
+  {
+    if (isParameterEvent(_events[i].header.type))
+    {
+      clap_multi_event_t n = _events[i];
+      n.header.time = 0;
+      other._eventindices.emplace_back(other._events.size());
+      other._events.emplace_back(n);
+      ++moved;
+    }
+    else
+    {
+      _events[kept++] = _events[i];
+    }
+  }
+
+  _events.resize(kept);
+  _eventindices.clear();
+  for (size_t i = 0; i < kept; ++i) _eventindices.emplace_back(i);
+
+  return moved;
 }
 }  // namespace Clap::AUv2
