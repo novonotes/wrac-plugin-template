@@ -82,7 +82,9 @@ class AAXProcessAdapter
   void setupProcessing(const clap_plugin_t *plugin, double samplerate,
                        const clap_plugin_params_t *ext_param, const clap_plugin_audio_ports *ext_audio,
                        Clap::IAutomation *automation, std::vector<clap_id> &gesturedParameters,
-                       ParamChangeQueue &inqueue, uint32_t midiportid, bool preferMIDI,
+                       ParamChangeQueue &inqueue,
+                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
+                       uint32_t midiportid, bool preferMIDI,
                        uint32_t placeholderInChannels, uint32_t placeholderOutChannels);
   void process(SAAX_Wrapper_AlgorithmicContext *context);
   // Zero every output channel of this render context. Used in place of
@@ -125,8 +127,13 @@ class AAXProcessAdapter
   float *_silent_output = nullptr;
 
   ParamChangeQueue *_inqueue;
+  std::shared_ptr<AAXWrappedParameterInfo_t> _bypassParameter;
+  int _lastBypassState = -1;
 
   void sortEventIndices();
+  // Ends a process() cycle whether or not the plugin ran: placeholder-stem
+  // passthrough and releasing the per-cycle MIDI output node.
+  void finishProcessCycle(SAAX_Wrapper_AlgorithmicContext *context);
 
   static bool output_events_try_push(const struct clap_output_events *list,
                                      const clap_event_header_t *event);
@@ -291,6 +298,8 @@ class ClapAsAAX : public AAX_CEffectParameters,
   // _parameterMap maps the AAX CParamID to the wrapped parameter
   std::map<std::string, std::shared_ptr<AAXWrappedParameterInfo_t>> _parameterMap;
   std::map<uint32_t, std::shared_ptr<AAXWrappedParameterInfo_t>> _parameterMapCLAP;
+  std::shared_ptr<AAXWrappedParameterInfo_t> _bypassParameter;
+  std::string _aaxMasterBypassID;
 
   Wrapped_AAX_GUI *_aax_view = nullptr;
 
