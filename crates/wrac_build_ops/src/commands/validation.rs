@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::{ensure_vst3_sdk_input, env_path};
+use super::{config_path, ensure_vst3_sdk_input};
 use crate::Result;
 use crate::context::Context;
 use crate::profile::BuildProfile;
@@ -692,13 +692,12 @@ fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
 }
 
 fn aax_validator_dsh_archive(ctx: &Context) -> Result<PathBuf> {
-    let Some(archive) = env_path(ctx, "AAX_VALIDATOR_DSH_ARCHIVE")? else {
-        return Err(
-            "AAX validator/DSH archive not found. Set AAX_VALIDATOR_DSH_ARCHIVE in .env or the process environment."
-                .into(),
-        );
-    };
-    ensure_exists(&archive, "AAX validator/DSH archive")?;
+    // The caller resolves its own configuration so this operation has a single archive source.
+    let archive = config_path(ctx, ctx.aax_validator_dsh_archive.as_ref())
+        .ok_or("AAX validator/DSH archive path is not configured")?;
+    if !archive.is_file() {
+        return Err(format!("AAX validator/DSH archive not found: {}", archive.display()).into());
+    }
     Ok(archive)
 }
 

@@ -39,6 +39,8 @@ pub struct XtaskConfig {
     pub wrapper_dir: PathBuf,
     pub target_namespace: String,
     pub default_aax_sdk_root: Option<PathBuf>,
+    /// AAX validator archive chosen by the caller, relative to `root` or absolute.
+    pub aax_validator_dsh_archive: Option<PathBuf>,
     pub output_language: XtaskOutputLanguage,
 }
 

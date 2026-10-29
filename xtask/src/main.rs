@@ -5,7 +5,10 @@
 //! task enum and dependencies live here so products can extend the workflow
 //! without changing the template libraries.
 
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use wrac_build_ops::{
@@ -31,14 +34,19 @@ fn main() -> Result<()> {
         .parent()
         .expect("xtask must be a direct child of the repository root")
         .to_path_buf();
-    let config = XtaskConfig {
+    let mut config = XtaskConfig {
         wrapper_dir: root.join("clap_wrapper_builder"),
         target_namespace: "wrac-plugins".to_string(),
         default_aax_sdk_root: None,
+        aax_validator_dsh_archive: None,
         output_language: XtaskOutputLanguage::English,
         root,
     };
     load_workspace_dotenv(&config)?;
+    // The template owns its environment convention; shared build operations only receive a path.
+    config.aax_validator_dsh_archive = std::env::var_os("AAX_VALIDATOR_DSH_ARCHIVE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     let cli = Cli::parse();
     match cli.command {
         Command::Build(args) => execute_build(&config, args),
