@@ -261,6 +261,12 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Native select menus may otherwise combine a light system background with light text. */
+.latency-select option {
+  background-color: #1b252e;
+  color: #f7f1e7;
+}
+
 .resize-grip {
   position: absolute;
   right: 8px;
