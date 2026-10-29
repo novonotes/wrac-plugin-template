@@ -36,7 +36,7 @@ typedef struct ui_connection
   uint32_t *_canary = nullptr;       // a canary in the Windows class
   std::function<void(clap_window_t *, uint32_t *)> _registerWindow = nullptr;
   std::function<void()> _createWindow = nullptr;
-  std::function<void()> _destroyWindow = nullptr;
+  std::function<bool(clap_window_t *, uint32_t *, const char *)> _destroyWindow = nullptr;
 } ui_connection;
 
 // Implemented in auv2_shared.mm. Sets the Cocoa view behind `win` to a size the
