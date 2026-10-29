@@ -51,3 +51,7 @@ wrapper's idle timer can reactivate the plugin, then checks that the AU reports 
 `kAudioUnitProperty_Latency`, that latency listeners were notified, and that an impulse
 comes out delayed by exactly the reported latency. The change is driven by state rather
 than a parameter because the delay setting is not a host parameter.
+
+During concurrent rendering it also checks that every block marked silent contains zero
+samples in both channels. It reports SKIP for this check when no silent block is observed;
+the test does not guarantee that a render overlaps every restart.

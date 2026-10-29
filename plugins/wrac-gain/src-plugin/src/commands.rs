@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::interface::{HostContext, HostFamily, HostGui, PluginDescriptor};
+use wrac_clap_adapter::interface::{HostContext, HostFamily, HostGui, HostState, PluginDescriptor};
 use wrac_wxp_gui::{
     WxpGuiResizeHandle, register_native_cursor_bridge_commands, register_resize_commands,
 };
@@ -50,6 +50,7 @@ pub(crate) struct CommandRegistrationDependencies {
     pub(crate) descriptor: PluginDescriptor,
     pub(crate) param_output_queue: Arc<WracGainParamOutputQueue>,
     pub(crate) host_gui: Arc<dyn HostGui>,
+    pub(crate) host_state: Arc<dyn HostState>,
     pub(crate) gui_resize_handle: WxpGuiResizeHandle,
     pub(crate) host_context: HostContext,
 }
@@ -70,6 +71,7 @@ pub(crate) fn register_commands(
         descriptor,
         param_output_queue,
         host_gui,
+        host_state,
         gui_resize_handle,
         host_context,
     } = dependencies;
@@ -139,10 +141,8 @@ pub(crate) fn register_commands(
         let gui_notifier = gui_notifier.clone();
         command_handler.register_sync("set_latency", move |ctx| {
             let latency_frames = ctx.arg::<u32>("latencyFrames").map_err(|e| e.to_string())?;
-            if !is_latency_frame_choice(latency_frames) {
-                return Err("invalid latency".to_string());
-            }
-            latency.select(latency_frames);
+            select_latency_from_gui(&latency, host_state.as_ref(), latency_frames)
+                .map_err(str::to_string)?;
             gui_notifier.notify_latency(latency_frames);
             Ok::<_, String>(latency_payload(latency_frames))
         });
@@ -314,6 +314,24 @@ pub(crate) fn register_commands(
     // Register them here so the product command list stays the single Rust/TS rendezvous point.
     register_resize_commands(&command_handler, host_gui, gui_resize_handle);
     register_native_cursor_bridge_commands(&command_handler);
+}
+
+/// Applies a delay chosen in the GUI and, when it changes the selection, marks the
+/// project as modified. The delay is editor state rather than a host parameter, so
+/// without this the host would not offer to save the change. `[main-thread]`
+pub(crate) fn select_latency_from_gui(
+    latency: &LatencyStore,
+    host_state: &dyn HostState,
+    frames: u32,
+) -> Result<(), &'static str> {
+    if !is_latency_frame_choice(frames) {
+        return Err("invalid latency");
+    }
+    if latency.select(frames) {
+        // Restoring state uses LatencyStore::select directly and must not dirty the project.
+        host_state.mark_dirty();
+    }
+    Ok(())
 }
 
 fn write_frontend_log(entry: FrontendLogEntry) {

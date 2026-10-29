@@ -69,20 +69,22 @@ export function installHostKeyRouting(
   };
 }
 
-// Document capture guarantees one pass for every GUI operation, wherever the
-// element sits in the DOM (overlays, resize grips, portals).
+// Document capture covers GUI operations wherever the element sits in the DOM
+// (overlays, resize grips, portals). A native select can deliver pointerup
+// while its popup is still open, so returning focus here would dismiss it.
 function restoreHostFocusAfterPointerUp(
   restoreHostFocus: HostFocusRestorer,
 ): () => void {
-  const handlePointerUp = (event: PointerEvent) =>
+  const handlePointerUp = (event: PointerEvent) => {
+    if ((event.target as Element | null)?.tagName === "SELECT") return;
     restoreHostFocus(event.target);
+  };
   document.addEventListener("pointerup", handlePointerUp, true);
   return () => document.removeEventListener("pointerup", handlePointerUp, true);
 }
 
-// A native `<select>` popup consumes the mouse up, so the pointerup path above
-// may never run for it. The committed `change` is the reliable end of that
-// operation, and of keyboard changes to checkboxes and radios as well.
+// A committed `change` marks the end of a native select operation, and covers
+// keyboard changes to checkboxes and radios as well.
 function restoreHostFocusAfterChoice(
   restoreHostFocus: HostFocusRestorer,
   isEditableElement: EditableElementPredicate,

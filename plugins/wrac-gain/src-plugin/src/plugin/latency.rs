@@ -57,14 +57,15 @@ impl LatencyStore {
 
     /// Selects a delay from [`LATENCY_FRAME_CHOICES`] (a GUI choice or a restored
     /// state) and asks the host to reactivate the plugin when it differs from the
-    /// reported latency. `[non-realtime]`
-    pub(crate) fn select(&self, frames: u32) {
-        self.selected_frames.store(frames, Ordering::Release);
+    /// reported latency. Returns whether the selection changed. `[non-realtime]`
+    pub(crate) fn select(&self, frames: u32) -> bool {
+        let changed = self.selected_frames.swap(frames, Ordering::AcqRel) != frames;
         if frames != self.active_frames.load(Ordering::Acquire) {
             // Some hosts ignore a restart request while the plugin is inactive. The
             // report still catches up: activate() reads the selection every time.
             self.host_lifecycle.request_restart();
         }
+        changed
     }
 
     /// Reports the selected delay as the latency of the processor being activated.

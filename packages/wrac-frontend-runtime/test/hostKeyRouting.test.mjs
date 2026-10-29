@@ -104,12 +104,27 @@ test("returns focus to the host after GUI operations so Space reaches the host",
   const select = element("SELECT");
 
   dom.dispatch("pointerup", knob);
-  // A native popup consumes the mouse up, so the committed change also returns focus.
+  // A committed select choice also returns focus to the host.
   dom.document.activeElement = select;
   dom.dispatch("change", select);
   await nextTask();
 
   assert.deepEqual(focusCalls, ["focus_host_window", "focus_host_window"]);
+  routing.dispose();
+});
+
+test("keeps a native select open until its choice is committed", async () => {
+  const { dom, focusCalls, routing } = setup();
+  const select = element("SELECT");
+  dom.document.activeElement = select;
+
+  dom.dispatch("pointerup", select);
+  await nextTask();
+  assert.deepEqual(focusCalls, []);
+
+  dom.dispatch("change", select);
+  await nextTask();
+  assert.deepEqual(focusCalls, ["focus_host_window"]);
   routing.dispose();
 });
 
