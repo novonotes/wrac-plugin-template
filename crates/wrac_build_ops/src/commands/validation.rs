@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use super::{config_path, ensure_vst3_sdk_input, env_path};
+use super::{config_path, ensure_vst3_sdk_input};
 use crate::Result;
 use crate::context::Context;
 use crate::profile::BuildProfile;
@@ -692,22 +692,13 @@ fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
 }
 
 fn aax_validator_dsh_archive(ctx: &Context) -> Result<PathBuf> {
-    // Explicit user input must take precedence, including when it points to a missing file.
-    if let Some(archive) = env_path(ctx, "AAX_VALIDATOR_DSH_ARCHIVE")? {
-        ensure_exists(&archive, "AAX validator/DSH archive")?;
-        return Ok(archive);
+    // The caller resolves its own configuration so this operation has a single archive source.
+    let archive = config_path(ctx, ctx.aax_validator_dsh_archive.as_ref())
+        .ok_or("AAX validator/DSH archive path is not configured")?;
+    if !archive.is_file() {
+        return Err(format!("AAX validator/DSH archive not found: {}", archive.display()).into());
     }
-    if let Some(archive) = config_path(ctx, ctx.default_aax_validator_dsh_archive.as_ref()) {
-        if archive.is_file() {
-            return Ok(archive);
-        }
-        return Err(format!(
-            "AAX validator/DSH archive not found: {}\nRun `cargo xtask setup` to prepare it, then retry.",
-            archive.display()
-        )
-        .into());
-    }
-    Err("AAX validator/DSH archive not found. Set AAX_VALIDATOR_DSH_ARCHIVE in .env or the process environment.".into())
+    Ok(archive)
 }
 
 fn aax_validator_dtt_runner(root: &Path, platform: Platform) -> Result<PathBuf> {
