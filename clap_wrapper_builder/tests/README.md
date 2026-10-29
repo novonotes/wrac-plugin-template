@@ -28,3 +28,26 @@ and later edits remain queued. Failed load preserves all pending edits. This
 assumes state recall replaces saved parameter values; it does not make an
 underlying plugin's failed, partially applied load transactional, or guarantee
 uninterrupted audio processing in every plugin/host combination.
+
+# AU latency restart regression
+
+Checks the AUv2 wrapper's handling of `host.request_restart()` for a latency change,
+using the template plugin (WRAC Gain), whose saved state carries its delay setting as
+`latency_frames`. Build the AU, then compile and run:
+
+```sh
+clang++ -std=c++17 -Wall -Wextra -Werror \
+  -framework AudioToolbox -framework CoreFoundation \
+  clap_wrapper_builder/tests/au_latency_restart.cpp -o /tmp/au-latency-restart
+/tmp/au-latency-restart '/path/to/WRAC Gain.component'
+```
+
+The test restores states that select a different delay, which makes the plugin request
+a restart. Before the run loop runs, it checks that the audio already follows the new
+delay while the old latency is still reported: the plugin applies the change itself
+and only the report waits for the restart. While another thread keeps rendering, it
+runs the main run loop so the
+wrapper's idle timer can reactivate the plugin, then checks that the AU reports the new
+`kAudioUnitProperty_Latency`, that latency listeners were notified, and that an impulse
+comes out delayed by exactly the reported latency. The change is driven by state rather
+than a parameter because the delay setting is not a host parameter.

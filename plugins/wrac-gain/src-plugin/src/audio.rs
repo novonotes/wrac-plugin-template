@@ -14,8 +14,8 @@ use wrac_clap_adapter::interface::{
 };
 
 use crate::plugin::{
-    PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue, apply_param_input_events,
-    parameter_host_input_to_plain,
+    LatencyStore, MAX_LATENCY_FRAMES, PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue,
+    apply_param_input_events, parameter_host_input_to_plain,
 };
 use crate::state::SharedState;
 
@@ -36,6 +36,10 @@ pub(crate) struct WracGainAudioProcessor {
     // "snapshot layout at activate time and store it as a field."
     // In debug builds, the actual buffer is verified to match this snapshot.
     audio_channel_count: u32,
+    // Follows the selected delay every block, ahead of the latency reported for this
+    // processor until the host reactivates the plugin (see `plugin::latency`).
+    latency: Arc<LatencyStore>,
+    delay: DelayLine,
 }
 
 impl WracGainAudioProcessor {
@@ -43,11 +47,16 @@ impl WracGainAudioProcessor {
         shared: Arc<SharedState>,
         param_output_queue: Arc<WracGainParamOutputQueue>,
         audio_channel_count: u32,
+        latency: Arc<LatencyStore>,
     ) -> Self {
         Self {
             shared,
             param_output_queue,
             audio_channel_count,
+            latency,
+            // Sized for the longest delay at activation, so a new selection never makes
+            // process() allocate.
+            delay: DelayLine::new(audio_channel_count as usize, MAX_LATENCY_FRAMES as usize),
         }
     }
 }
@@ -94,6 +103,9 @@ impl WracGainAudioProcessor {
 
         self.param_output_queue.drain(&mut context.events.output);
 
+        self.delay
+            .set_delay(self.latency.selected_frames() as usize);
+
         // Gain at the start of this block; updated each time a parameter event arrives.
         let mut gain = self.shared.gain();
         let mut bypass = self.shared.bypass();
@@ -109,6 +121,7 @@ impl WracGainAudioProcessor {
                 let effective_gain = if bypass { 1.0 } else { gain };
                 process_audio_range(
                     &mut context.audio,
+                    &mut self.delay,
                     segment_start,
                     event_time,
                     effective_gain,
@@ -132,11 +145,13 @@ impl WracGainAudioProcessor {
             let effective_gain = if bypass { 1.0 } else { gain };
             process_audio_range(
                 &mut context.audio,
+                &mut self.delay,
                 segment_start,
                 frames_count,
                 effective_gain,
             )?;
         }
+        self.delay.advance(frames_count);
 
         // Signal that processing should continue for the next block unless the input is silent.
         // Returning `Quiet` lets the host use it as a hint for optimisation.
@@ -223,39 +238,155 @@ fn assert_audio_layout_matches_processor_snapshot(
     }
 }
 
-/// Applies gain to the `[start, end)` range of each port.
+/// Delays and applies gain to the `[start, end)` range of each port.
 /// The buffer passed by the host can be either `f32` or `f64`, so both are handled.
+///
+/// The delay is applied bypassed or not: the reported latency must describe the audio
+/// in every state, or the host's compensation would be wrong whenever bypass toggles.
+/// It runs in the same per-sample pass as the gain because the output of a separate
+/// pass would be overwritten when the host gives distinct input and output buffers.
 fn process_audio_range(
     audio: &mut AudioProcessBuffer<'_>,
+    delay: &mut DelayLine,
     start: usize,
     end: usize,
     gain: f32,
 ) -> PluginResult<()> {
     let len = end.saturating_sub(start);
-    for mut port_pair in audio {
+    for (port_index, mut port_pair) in audio.into_iter().enumerate() {
+        // WRAC Gain has a single main port pair (see the layout assertion above); the
+        // delay buffers belong to it.
+        let delay = if port_index == 0 {
+            Some(&mut *delay)
+        } else {
+            None
+        };
         match port_pair.channels()? {
-            AudioPortChannels::F32(channels) => process_channels_range(channels, start, len, gain),
+            AudioPortChannels::F32(channels) => {
+                process_channels_range(channels, delay, start, len, gain)
+            }
             AudioPortChannels::F64(channels) => {
-                process_channels_range(channels, start, len, gain as f64)
+                process_channels_range(channels, delay, start, len, gain as f64)
             }
         }
     }
     Ok(())
 }
 
-/// Applies gain to each sample in every channel of one port (paired in/out).
+/// Sample types the host may hand over. The delay buffers store `f64` for both.
+trait Sample: Copy + Default + std::ops::Mul<Output = Self> {
+    fn to_f64(self) -> f64;
+    fn from_f64(value: f64) -> Self;
+}
+
+impl Sample for f32 {
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
+    fn from_f64(value: f64) -> Self {
+        value as f32
+    }
+}
+
+impl Sample for f64 {
+    fn to_f64(self) -> f64 {
+        self
+    }
+    fn from_f64(value: f64) -> Self {
+        value
+    }
+}
+
+/// Delays and applies gain to each sample in every channel of one port (paired in/out).
 ///
 /// `map_samples_range` operates in-place and supports "in-place processing"
 /// where the input and output point to the same buffer.
-fn process_channels_range<T>(
+fn process_channels_range<T: Sample>(
     channels: AudioPairedChannels<'_, T>,
+    mut delay: Option<&mut DelayLine>,
     start: usize,
     len: usize,
     gain: T,
-) where
-    T: Copy + Default + std::ops::Mul<Output = T>,
-{
-    for mut channel in channels {
-        channel.map_samples_range(start, len, |sample| sample * gain);
+) {
+    for (channel_index, mut channel) in channels.into_iter().enumerate() {
+        let mut channel_delay = delay
+            .as_deref_mut()
+            .and_then(|delay| delay.channel(channel_index, start));
+        channel.map_samples_range(start, len, |sample| {
+            let sample = match channel_delay.as_mut() {
+                Some(channel_delay) => T::from_f64(channel_delay.push(sample.to_f64())),
+                None => sample,
+            };
+            sample * gain
+        });
+    }
+}
+
+/// Delays every channel by a selectable number of samples.
+///
+/// One ring buffer per channel, sized for the longest delay. Each sample is written at
+/// the write position and the one written `delay` samples earlier is read back, so a
+/// new delay takes effect from the next block without reallocating. All channels advance
+/// together, so the write position at the start of the block is common to them.
+struct DelayLine {
+    buffers: Vec<Vec<f64>>,
+    block_write: usize,
+    delay: usize,
+}
+
+/// One channel's view of the delay line, starting at a frame within the block.
+struct ChannelDelay<'a> {
+    buffer: &'a mut [f64],
+    write: usize,
+    delay: usize,
+}
+
+impl ChannelDelay<'_> {
+    /// Stores `sample` and returns the one stored `delay` samples earlier.
+    fn push(&mut self, sample: f64) -> f64 {
+        let len = self.buffer.len();
+        self.buffer[self.write] = sample;
+        let delayed = self.buffer[(self.write + len - self.delay) % len];
+        self.write = (self.write + 1) % len;
+        delayed
+    }
+}
+
+impl DelayLine {
+    fn new(channel_count: usize, max_delay_frames: usize) -> Self {
+        Self {
+            // One slot more than the longest delay: the sample read back at the maximum
+            // delay must not be the one just written.
+            buffers: vec![vec![0.0; max_delay_frames + 1]; channel_count],
+            block_write: 0,
+            delay: 0,
+        }
+    }
+
+    /// Changing the delay jumps the read position, so the audio is discontinuous at the
+    /// switch. That is accepted: the switch follows a deliberate settings change.
+    fn set_delay(&mut self, frames: usize) {
+        let max = self.buffers.first().map_or(0, |buffer| buffer.len() - 1);
+        self.delay = frames.min(max);
+    }
+
+    /// Returns `None` when there is no delay, so the caller passes samples through.
+    fn channel(&mut self, channel_index: usize, frame_in_block: usize) -> Option<ChannelDelay<'_>> {
+        if self.delay == 0 {
+            return None;
+        }
+        let buffer = self.buffers.get_mut(channel_index)?;
+        let write = (self.block_write + frame_in_block) % buffer.len();
+        Some(ChannelDelay {
+            buffer: buffer.as_mut_slice(),
+            write,
+            delay: self.delay,
+        })
+    }
+
+    fn advance(&mut self, frames: usize) {
+        if let Some(len) = self.buffers.first().map(Vec::len) {
+            self.block_write = (self.block_write + frames) % len;
+        }
     }
 }

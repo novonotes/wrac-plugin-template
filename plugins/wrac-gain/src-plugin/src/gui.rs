@@ -16,7 +16,7 @@ mod notifier;
 mod runtime;
 
 pub(crate) use notifier::{
-    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload,
+    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, latency_payload, parameter_payload,
 };
 
 use novonotes_run_loop::RunLoopLocal;
@@ -29,7 +29,7 @@ use wrac_wxp_gui::{
     WxpGuiRuntime,
 };
 
-use crate::plugin::WracGainParamOutputQueue;
+use crate::plugin::{LatencyStore, WracGainParamOutputQueue};
 use crate::state::{ProjectStateStore, SharedState};
 
 pub(crate) struct GuiIntegration {
@@ -66,6 +66,7 @@ pub(crate) fn create_gui_integration(
     descriptor: wrac_clap_adapter::interface::PluginDescriptor,
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
+    latency: Arc<LatencyStore>,
     param_output_queue: Arc<WracGainParamOutputQueue>,
     host_gui: Arc<dyn HostGui>,
     host_context: HostContext,
@@ -82,6 +83,7 @@ pub(crate) fn create_gui_integration(
         descriptor,
         project_state,
         shared,
+        latency,
         gui_notifier: notifier.clone(),
         param_output_queue,
         host_gui,

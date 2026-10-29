@@ -20,6 +20,9 @@ use crate::plugin::{DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, clamp_gain};
 pub(crate) enum EditorPage {
     Controls,
     About,
+    // Settings that are rarely changed during a session, such as the delay setting,
+    // stay off the main controls.
+    Settings,
 }
 
 impl Default for EditorPage {
@@ -33,6 +36,7 @@ impl EditorPage {
         match self {
             Self::Controls => "controls",
             Self::About => "about",
+            Self::Settings => "settings",
         }
     }
 
@@ -40,6 +44,7 @@ impl EditorPage {
         match value {
             "controls" => Some(Self::Controls),
             "about" => Some(Self::About),
+            "settings" => Some(Self::Settings),
             _ => None,
         }
     }

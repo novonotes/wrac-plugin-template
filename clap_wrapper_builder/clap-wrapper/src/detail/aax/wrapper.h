@@ -40,6 +40,7 @@
 // Wrapper
 #include "detail/os/osutil.h"
 #include "detail/clap/automation.h"
+#include "detail/shared/spinlock.h"
 #include "clap_proxy.h"
 #include "parameter.h"
 #include "process.h"
@@ -89,6 +90,8 @@ class AAXProcessAdapter
   // Zero every output channel of this render context. Used in place of
   // process() when CLAP does not allow the plugin to be rendered.
   void silenceOutputs(SAAX_Wrapper_AlgorithmicContext *context);
+  // The number of AAX output channels process() writes, counted from channel 0.
+  uint32_t outputChannelCount() const;
   void flush();
 
  private:
@@ -275,6 +278,11 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   void onIdle() override;
 
+  // Pro Tools adding and removing the algorithm instance. Serialized with
+  // restarts so that a restart cannot bring back a plugin the host removed.
+  void addInstance();
+  void removeInstance();
+
   // Returns false when the plugin refused to activate, in which case it is left
   // deactivated and must not be started.
   bool activatePlugin();
@@ -285,6 +293,12 @@ class ClapAsAAX : public AAX_CEffectParameters,
   void process(SAAX_Wrapper_AlgorithmicContext *context);
 
  protected:
+  // Reports the plugin's current latency to Pro Tools when it differs from the
+  // last value Pro Tools accepted.
+  void publishLatency();
+  void restartIfRequested();
+  void silenceAllOutputs(SAAX_Wrapper_AlgorithmicContext *context) const;
+
   Clap::Library *_library = nullptr;
   std::shared_ptr<Clap::Plugin> _plugin;
   Clap::MainThreadAttachment _mainThreadAttachment;
@@ -311,9 +325,30 @@ class ClapAsAAX : public AAX_CEffectParameters,
   std::atomic<bool> _processing{false};
   std::atomic<bool> _wants_on_main_thread = false;
   std::atomic<bool> _flushRequested = false;
+  // The latency Pro Tools last accepted through SetSignalLatency().
   uint32_t _latency = 0;
 
   std::unique_ptr<AAXProcessAdapter> _processAdapter;
+
+  // Set by restartPlugin(), which may be called from any thread, and drained by
+  // onIdle(), which reactivates the plugin. See restartIfRequested().
+  std::atomic_bool _requestRestart{false};
+  // Held by process() for its whole body (with try_lock, so the render thread
+  // never waits) and by a restart only to open and close _restarting. While
+  // _restarting is set, process() leaves the plugin and the process adapter
+  // alone and outputs silence.
+  ClapWrapper::detail::shared::SpinLock _processLock;
+  bool _restarting = false;
+  // Output channels to silence when process() cannot use the process adapter.
+  // The AAX stem layout does not change across a restart, so the count taken at
+  // the first activation stays valid while the adapter is rebuilt.
+  std::atomic<uint32_t> _outputChannelCount{0};
+  // Serializes activation changes between the algorithm instance callbacks, the
+  // destructor and restarts, which AAX may call on different threads.
+  std::mutex _lifecycleMutex;
+  // Whether Pro Tools currently has the algorithm instance; guarded by
+  // _lifecycleMutex. A restart only reactivates a plugin while this is true.
+  bool _instanceAdded = false;
 
   struct TimerObject
   {

@@ -15,7 +15,7 @@ use wxp::WxpCommandHandler;
 
 use crate::commands::{CommandRegistrationDependencies, register_commands};
 use crate::gui::GuiStateNotifier;
-use crate::plugin::{WracGainParamOutputQueue, notify_gui_parameters};
+use crate::plugin::{LatencyStore, WracGainParamOutputQueue, notify_gui_parameters};
 use crate::state::{ProjectStateStore, SharedState};
 
 // GUI window size bounds (pixels). The host opens at the default; resize is clamped to min..=max.
@@ -41,6 +41,7 @@ pub(super) struct GuiRuntimeDependencies {
     pub(super) descriptor: PluginDescriptor,
     pub(super) project_state: Arc<ProjectStateStore>,
     pub(super) shared: Arc<SharedState>,
+    pub(super) latency: Arc<LatencyStore>,
     pub(super) gui_notifier: Arc<GuiStateNotifier>,
     pub(super) param_output_queue: Arc<WracGainParamOutputQueue>,
     pub(super) host_gui: Arc<dyn HostGui>,
@@ -88,6 +89,7 @@ impl WracGainGuiRuntime {
             CommandRegistrationDependencies {
                 project_state: dependencies.project_state.clone(),
                 shared: dependencies.shared.clone(),
+                latency: dependencies.latency.clone(),
                 gui_notifier: dependencies.gui_notifier.clone(),
                 descriptor: dependencies.descriptor,
                 param_output_queue: dependencies.param_output_queue,

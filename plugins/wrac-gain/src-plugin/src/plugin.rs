@@ -17,6 +17,9 @@ mod latency;
 mod params;
 mod state;
 
+pub(crate) use latency::{
+    LATENCY_FRAME_CHOICES, LatencyStore, MAX_LATENCY_FRAMES, is_latency_frame_choice,
+};
 pub(crate) use params::{
     DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue,
     apply_param_input_events, clamp_gain, notify_gui_parameters, parameter_default_value,
@@ -114,6 +117,8 @@ pub(crate) struct WracGainPlugin {
     params: Arc<WracGainParamsExtension>,
     param_output_queue: Arc<WracGainParamOutputQueue>,
     gui: Arc<WxpGuiController>,
+    // The delay selection and the latency the active processor was built with.
+    latency_store: Arc<LatencyStore>,
     latency: Arc<WracGainLatencyExtension>,
     // Project state save/restore. A dedicated capability independent of the lifecycle
     // lock so that a committed snapshot can be returned even while active or during a
@@ -131,12 +136,14 @@ impl WracGainPlugin {
         let params = Arc::new(WracGainParamsExtension::new(shared.clone()));
         let param_output_queue =
             Arc::new(WracGainParamOutputQueue::new(context.host_params.clone()));
-        let latency = Arc::new(WracGainLatencyExtension);
         let project_state = Arc::new(ProjectStateStore::new());
+        let latency_store = Arc::new(LatencyStore::new(context.host_lifecycle.clone()));
+        let latency = Arc::new(WracGainLatencyExtension::new(latency_store.clone()));
         let gui = create_gui_integration(
             descriptor,
             project_state.clone(),
             shared.clone(),
+            latency_store.clone(),
             param_output_queue.clone(),
             context.host_gui,
             context.host_context,
@@ -144,6 +151,7 @@ impl WracGainPlugin {
         let state_extension = Arc::new(WracGainStateExtension::new(
             project_state,
             shared.clone(),
+            latency_store.clone(),
             gui.notifier.clone(),
         ));
 
@@ -156,6 +164,7 @@ impl WracGainPlugin {
             params,
             param_output_queue,
             gui: gui.controller,
+            latency_store,
             latency,
             state_extension,
         }
@@ -216,19 +225,26 @@ impl PluginInstance for WracGainPlugin {
         // lock; copying only the needed value instead structurally enforces "the audio
         // thread sees only immutable configuration."
         let audio_channel_count = self.audio_layout.channel_count();
+        // The processor follows the selected delay block by block; activation is where
+        // the reported latency catches up with it.
+        let latency_changed = self.latency_store.activate();
         log::debug!(
-            "activating audio processor: plugin_id={}, sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}",
+            "activating audio processor: plugin_id={}, sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}, latency_frames={}",
             self.descriptor.id,
             context.sample_rate,
             context.min_frames_count,
             context.max_frames_count,
-            audio_channel_count
+            audio_channel_count,
+            self.latency_store.selected_frames()
         );
-        Ok(ActivateResult::new(Box::new(WracGainAudioProcessor::new(
+        let mut result = ActivateResult::new(Box::new(WracGainAudioProcessor::new(
             self.shared.clone(),
             self.param_output_queue.clone(),
             audio_channel_count,
-        ))))
+            self.latency_store.clone(),
+        )));
+        result.notifications.latency_changed = latency_changed;
+        Ok(result)
     }
 
     /// Called when the host stops audio processing.
