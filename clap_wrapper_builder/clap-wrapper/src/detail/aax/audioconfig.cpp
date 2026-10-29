@@ -196,6 +196,9 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
   static const clap_host_audio_ports_t micro_audio_ports = {
       [](const clap_host_t *host, uint32_t flag) -> bool { return false; },
       [](const clap_host_t *host, uint32_t flags) -> void {}};
+  static const clap_wrapper_host_information_t micro_wrapper_info = {
+      [](const clap_host_t *host) -> const char * { return CLAP_WRAPPER_HOST_FLAVOR_AAX; },
+      [](const clap_host_t *host) -> const char * { return nullptr; }};
   clap_host_t microhost = {
       CLAP_VERSION,
       nullptr,
@@ -209,6 +212,7 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
         LOGDETAIL("plugin requests microhost extension {}", extension_id);
         if (!strcmp(CLAP_EXT_PARAMS, extension_id)) return &micro_params;
         if (!strcmp(CLAP_EXT_AUDIO_PORTS, extension_id)) return &micro_audio_ports;
+        if (!strcmp(CLAP_WRAPPER_HOST_INFORMATION, extension_id)) return &micro_wrapper_info;
         return nullptr;
       },
       [](const struct clap_host *host) -> void {},  // request_restart
@@ -345,7 +349,14 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
                 break;
             }
           }
-          result.stemformats.push_back({f, informat, outformat});
+          // Only record a stem format when the plugin actually has audio ports.
+          // A note-only plugin (0 in / 0 out) must leave stemformats empty so the
+          // placeholder-stem path below can give it a Mono/Stereo passthrough
+          // component; otherwise it would describe a bogus 0-channel component.
+          if (numinputs > 0 || numoutputs > 0)
+          {
+            result.stemformats.push_back({f, informat, outformat});
+          }
         }
       }
       else
@@ -384,6 +395,18 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
             }
           }
         }
+      }
+
+      // Pure-MIDI plugin (no audio ports) with MIDI: Pro Tools MIDI-effect
+      // plugins are audio components that pass audio through (see the AAX SDK's
+      // DemoMIDI_Transpose). Offer placeholder Mono and Stereo stems so the
+      // effect can be inserted on mono/stereo Instrument tracks; the wrapper
+      // passes the AAX audio through untouched at process time (the CLAP itself
+      // sees no audio ports).
+      if (result.stemformats.empty() && (result.has_midi_in || result.has_midi_out))
+      {
+        result.stemformats.push_back({"Mono", AAX_eStemFormat_Mono, AAX_eStemFormat_Mono});
+        result.stemformats.push_back({"Stereo", AAX_eStemFormat_Stereo, AAX_eStemFormat_Stereo});
       }
 
 #if (CLAP_WRAPPER_LOGLEVEL == 2)

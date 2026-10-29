@@ -293,9 +293,9 @@ if(CLAP_WRAPPER_BUILDER_BUILD_STANDALONE)
         # audio buses exposed to DAW hosts. Compile it into both wrapper targets so a product
         # that does not capture audio cannot request or reopen a physical input at runtime.
         target_compile_definitions(${STANDALONE_TARGET} PRIVATE
-            CLAP_WRAPPER_STANDALONE_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
+            CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
         target_compile_definitions(${STANDALONE_TARGET}-clap-wrapper-standalone-lib PRIVATE
-            CLAP_WRAPPER_STANDALONE_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
+            CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT=$<BOOL:${STANDALONE_AUDIO_INPUT}>)
         if(APPLE AND NOT STANDALONE_AUDIO_INPUT)
             add_custom_command(TARGET ${STANDALONE_TARGET} POST_BUILD
                 COMMAND /usr/bin/plutil -remove NSMicrophoneUsageDescription

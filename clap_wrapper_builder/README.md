@@ -37,8 +37,11 @@ AAX is off by default and requires the Avid AAX SDK. Enable it with
 ## Maintaining the clap-wrapper subtree
 
 `clap-wrapper` is vendored as ordinary files, not as an active submodule, but it
-keeps git-subtree metadata in history. Use `git subtree pull` for upstream
-updates. Put project-specific follow-up changes in later, small logical commits.
+keeps git-subtree metadata in history. The subtree tracks upstream release tags,
+not `next`: `next` carries unreleased features that widen the change set of an
+update. Put project-specific follow-up changes in later, small logical commits.
+An unreleased upstream fix that is needed before the next release is
+cherry-picked on its own with `-x`, so the next tag update can recognize it.
 
 Update command example:
 
@@ -46,6 +49,16 @@ Update command example:
 git subtree pull \
   --prefix=clap_wrapper_builder/clap-wrapper \
   https://github.com/free-audio/clap-wrapper.git \
-  next \
-  -m "Update clap-wrapper from free-audio next"
+  v0.17.0 \
+  -m "Update clap-wrapper subtree to v0.17.0"
+```
+
+When local patches conflict broadly with an update, set the subtree content to
+the plain upstream tag in the merge commit and reapply each local patch as its
+own commit on top, naming the commit it was reapplied from.
+
+Cherry-picking a single upstream commit:
+
+```bash
+git cherry-pick -x -Xsubtree=clap_wrapper_builder/clap-wrapper <upstream-commit>
 ```

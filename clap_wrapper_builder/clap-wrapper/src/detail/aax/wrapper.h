@@ -83,9 +83,12 @@ class AAXProcessAdapter
                        const clap_plugin_params_t *ext_param, const clap_plugin_audio_ports *ext_audio,
                        Clap::IAutomation *automation, std::vector<clap_id> &gesturedParameters,
                        ParamChangeQueue &inqueue,
-                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
-                       uint32_t midiportid, bool preferMIDI);
+                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid,
+                       bool preferMIDI, uint32_t placeholderInChannels, uint32_t placeholderOutChannels);
   void process(SAAX_Wrapper_AlgorithmicContext *context);
+  // Zero every output channel of this render context. Used in place of
+  // process() when CLAP does not allow the plugin to be rendered.
+  void silenceOutputs(SAAX_Wrapper_AlgorithmicContext *context);
   void flush();
 
  private:
@@ -127,6 +130,9 @@ class AAXProcessAdapter
   int _lastBypassState = -1;
 
   void sortEventIndices();
+  // Ends a process() cycle whether or not the plugin ran: placeholder-stem
+  // passthrough and releasing the per-cycle MIDI output node.
+  void finishProcessCycle(SAAX_Wrapper_AlgorithmicContext *context);
 
   static bool output_events_try_push(const struct clap_output_events *list,
                                      const clap_event_header_t *event);
@@ -134,6 +140,17 @@ class AAXProcessAdapter
   bool enqueueOutputEvent(const clap_event_header_t *event);
   void addToActiveNotes(const clap_event_note *note);
   void removeFromActiveNotes(const clap_event_note *note);
+
+  // Post a single MIDI 1.0 message (up to 3 bytes) to the AAX local MIDI
+  // output node, filtered to the channel-voice messages Pro Tools routes out
+  // of a plug-in. No-op when the plugin declares no MIDI out (node is a
+  // placeholder / nullptr). Called from enqueueOutputEvent while the plugin
+  // is inside process() and _outputNode is valid.
+  void postMIDI1(uint32_t timestamp, const uint8_t *bytes, uint32_t length);
+
+  // Post a (possibly long) SysEx message as a series of <=4-byte AAX packets
+  // sharing one timestamp. Best-effort: Pro Tools does not route plug-in SysEx.
+  void postSysEx(uint32_t timestamp, const uint8_t *data, uint32_t size);
 
   // the functions for the event list callback
   static uint32_t CLAP_ABI input_events_size(const struct clap_input_events *list);
@@ -143,6 +160,19 @@ class AAXProcessAdapter
   // MIDI
   uint32_t _midi_first_portid = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
+
+  // Local MIDI output node for the current process() call, captured from the
+  // AAX algorithm context. Only valid for the duration of process(); reset to
+  // nullptr afterwards so a stale node can never be posted to.
+  AAX_IMIDINode *_outputNode = nullptr;
+
+  // Placeholder-stem passthrough: a pure-MIDI CLAP (no audio ports) is wrapped
+  // as an AAX MIDI-effect component that still carries a Mono/Stereo audio bus.
+  // When these are non-zero the CLAP has no audio ports, so process() copies the
+  // AAX audio input straight to the output (matching DemoMIDI_Transpose) instead
+  // of leaving the output uninitialised. Zero for normal audio plugins.
+  uint32_t _placeholderInChannels = 0;
+  uint32_t _placeholderOutChannels = 0;
 };
 
 AAX_Result GetEffectDescriptions(AAX_ICollection *outDescriptions);
@@ -215,6 +245,8 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   void restartPlugin() override;
 
+  void request_process() override;
+
   void request_callback() override;
 
   // clap_timer support
@@ -223,6 +255,14 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   bool track_info_get(clap_track_info_t *info) override;
   const char *host_get_name() override;
+  const char *wrapper_flavor() const override
+  {
+    return CLAP_WRAPPER_HOST_FLAVOR_AAX;
+  }
+  const char *underlying_host_name() const override
+  {
+    return _underlying_hostname.empty() ? nullptr : _underlying_hostname.c_str();
+  }
 
   bool supportsContextMenu() const override;
   // context_menu
@@ -235,7 +275,9 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   void onIdle() override;
 
-  void activatePlugin();
+  // Returns false when the plugin refused to activate, in which case it is left
+  // deactivated and must not be started.
+  bool activatePlugin();
   void deactivatePlugin();
   void startProcessing();
   void stopProcessing();
@@ -251,6 +293,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
   os::State _os_attached;
 
   std::string _wrapper_hostname = "CLAP-As-AAX-Wrapper";
+  std::string _underlying_hostname;
 
   // _parameterMap maps the AAX CParamID to the wrapped parameter
   std::map<std::string, std::shared_ptr<AAXWrappedParameterInfo_t>> _parameterMap;

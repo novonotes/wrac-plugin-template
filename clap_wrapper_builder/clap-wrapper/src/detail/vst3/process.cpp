@@ -72,10 +72,6 @@ bool isMidiDataByte(uint8_t value)
 }
 }  // namespace
 
-ProcessAdapter::~ProcessAdapter()
-{
-}
-
 void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plugin_params_t *ext_params,
                                      Vst::BusList &audioinputs, Vst::BusList &audiooutputs,
                                      uint32_t numSamples, size_t /*numEventInputs*/,
@@ -362,6 +358,23 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
       auto param = (Vst3Parameter *)parameters->getParameter(paramid);
       if (param)
       {
+        if (param->isPreset)
+        {
+          // The preset selector. Only the last point in the block matters -
+          // loading three presets because a host sent three points would be
+          // absurd - and the load itself must happen on the main thread, so
+          // all that happens here is a request.
+          auto nums = k->getPointCount();
+          Vst::ParamValue value;
+          int32 offset;
+          if (nums > 0 && k->getPoint(nums - 1, offset, value) == kResultOk && _automation)
+          {
+            const auto index = static_cast<int64_t>(param->asClapValue(value) + 0.5);
+            if (index >= 0) _automation->onRequestPresetLoad(static_cast<size_t>(index));
+          }
+          continue;
+        }
+
         if (param->isMidi)
         {
           auto nums = k->getPointCount();
@@ -856,8 +869,11 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
     {
       auto ev = (clap_event_param_gesture *)event;
       auto param = (Vst3Parameter *)this->parameters->getParameter(ev->param_id & 0x7FFFFFFF);
-      _gesturedParameters->push_back(param->getInfo().id);
-      if (_automation) _automation->onBeginEdit(param->getInfo().id);
+      if (param)
+      {
+        _gesturedParameters->push_back(param->getInfo().id);
+        if (_automation) _automation->onBeginEdit(param->getInfo().id);
+      }
     }
       return true;
 
@@ -866,13 +882,15 @@ bool ProcessAdapter::enqueueOutputEvent(const clap_event_header_t *event)
     {
       auto ev = (clap_event_param_gesture *)event;
       auto param = (Vst3Parameter *)this->parameters->getParameter(ev->param_id & 0x7FFFFFFF);
-
-      auto n =
-          std::remove(_gesturedParameters->begin(), _gesturedParameters->end(), param->getInfo().id);
-      if (n != _gesturedParameters->end())
+      if (param)
       {
-        _gesturedParameters->erase(n, _gesturedParameters->end());
-        if (_automation) _automation->onEndEdit(param->getInfo().id);
+        auto n =
+            std::remove(_gesturedParameters->begin(), _gesturedParameters->end(), param->getInfo().id);
+        if (n != _gesturedParameters->end())
+        {
+          _gesturedParameters->erase(n, _gesturedParameters->end());
+          if (_automation) _automation->onEndEdit(param->getInfo().id);
+        }
       }
     }
       return true;

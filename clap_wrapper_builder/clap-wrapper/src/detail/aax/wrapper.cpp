@@ -105,8 +105,14 @@ AAXWrapper_inInstanceInitProc(const SAAX_Wrapper_AlgorithmicContext *inInstanceC
   {
     case AAX_eComponentInstanceInitAction_AddingNewInstance:
       LOGDETAIL("adding new instance");
-      self->activatePlugin();
-      self->startProcessing();
+      // A plugin that refuses to activate must not be asked to start processing.
+      // The instance is still reported as created: Pro Tools has no documented
+      // handling for a failed instance init, and the render path answers with
+      // silence for as long as the plugin stays down.
+      if (self->activatePlugin())
+      {
+        self->startProcessing();
+      }
       break;
     case AAX_eComponentInstanceInitAction_RemovingInstance:
       LOGDETAIL("removing instance");
@@ -166,6 +172,7 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   // Register MIDI nodes. To avoid context corruption, register small blocks of private data for fields where a node is not needed
   AAX_CFieldIndex globalNodeID = AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mGlobalNode);
   AAX_CFieldIndex localInputNodeID = AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mInputNode);
+  AAX_CFieldIndex localOutputNodeID = AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mOutputNode);
   AAX_CFieldIndex transportNodeID = AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mTransportNode);
 
   // Global MIDI node — not currently used
@@ -191,11 +198,16 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   if (businfo.has_midi_out)
   {
     if (aax_plugin_info && aax_plugin_info->midi_out_name)
-      err = outDesc->AddMIDINode(localInputNodeID, AAX_eMIDINodeType_LocalOutput,
+      err = outDesc->AddMIDINode(localOutputNodeID, AAX_eMIDINodeType_LocalOutput,
                                  aax_plugin_info->midi_out_name, aax_plugin_info->midi_out_channel_mask);
     else
-      err = outDesc->AddMIDINode(localInputNodeID, AAX_eMIDINodeType_LocalOutput,
+      err = outDesc->AddMIDINode(localOutputNodeID, AAX_eMIDINodeType_LocalOutput,
                                  businfo.midi_out_name.c_str(), 0xFFFF);
+  }
+  else
+  {
+    err = outDesc->AddPrivateData(localOutputNodeID, sizeof(float),
+                                  AAX_ePrivateDataOptions_DefaultOptions);
   }
 
   if (true)  // setupInfo.mNeedsTransport)
@@ -205,8 +217,8 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
         transportNodeID, sizeof(float),
         AAX_ePrivateDataOptions_DefaultOptions);  //Just here to fill the port.  Not used.
 
-  err = outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mBypass),
-                               sizeof(int32_t));
+  err =
+      outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mBypass), sizeof(int32_t));
 
   //Add pointer to the data model instance and other interesting information.
   err =
@@ -560,6 +572,9 @@ AAX_Result ClapAsAAX::EffectInit()
 
   LOGINFO(fmt::format("AAX Effect Init for '{}'", m.StdString().c_str()));
 
+  AAX_CString hostname;
+  if (AAX_SUCCESS == _aax_ctrl->GetHostName(&hostname)) _underlying_hostname = hostname.StdString();
+
   _library = CLAPAAX::guarantee_clap();
   _plugin = Clap::Plugin::createInstance(_library->_pluginFactory, m.StdString(), this);
 
@@ -743,8 +758,7 @@ AAX_Result ClapAsAAX::GetParameterValueFromString(AAX_CParamID iParameterID, dou
 {
   if (!_aaxMasterBypassID.empty() && _aaxMasterBypassID == iParameterID)
   {
-    return AAX_CEffectParameters::GetParameterValueFromString(iParameterID, oValuePtr,
-                                                              iValueString);
+    return AAX_CEffectParameters::GetParameterValueFromString(iParameterID, oValuePtr, iValueString);
   }
 
   auto n = this->_parameterMap.find(iParameterID);
@@ -757,8 +771,8 @@ AAX_Result ClapAsAAX::GetParameterValueFromString(AAX_CParamID iParameterID, dou
     }
 
     double clapValue = 0.0;
-    if (ext_params->text_to_value(_plugin->_plugin, n->second->_clap_param_info.id,
-                                  iValueString.Get(), &clapValue))
+    if (ext_params->text_to_value(_plugin->_plugin, n->second->_clap_param_info.id, iValueString.Get(),
+                                  &clapValue))
     {
       // AAX expects normalized parameter values; CLAP text_to_value returns
       // the parameter-domain value.
@@ -1087,9 +1101,8 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
         // handler writes a compatible value for the process context.
         auto p = new AAX_CParameter<bool>(
             wrappedParam->_aax_identifier.c_str(), AAX_CString(paramname),
-            wrappedParam->asAAXValue(info.default_value) >= 0.5,
-            AAX_CBinaryTaperDelegate<bool>(), AAX_CBinaryDisplayDelegate<bool>("off", "on"),
-            info.flags & CLAP_PARAM_IS_AUTOMATABLE);
+            wrappedParam->asAAXValue(info.default_value) >= 0.5, AAX_CBinaryTaperDelegate<bool>(),
+            AAX_CBinaryDisplayDelegate<bool>("off", "on"), info.flags & CLAP_PARAM_IS_AUTOMATABLE);
         p->SetNumberOfSteps(2);
         p->SetType(AAX_eParameterType_Discrete);
         mParameterManager.AddParameter(p);
@@ -1115,9 +1128,9 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
     // Keep AAX master bypass usable even for CLAP plugins without an explicit
     // bypass parameter; the process adapter handles this as wrapper bypass.
     _aaxMasterBypassID = kAAXMasterBypassID;
-    auto bypass = new AAX_CParameter<bool>(
-        _aaxMasterBypassID.c_str(), AAX_CString("Master Bypass"), false,
-        AAX_CBinaryTaperDelegate<bool>(), AAX_CBinaryDisplayDelegate<bool>("off", "on"), true);
+    auto bypass = new AAX_CParameter<bool>(_aaxMasterBypassID.c_str(), AAX_CString("Master Bypass"),
+                                           false, AAX_CBinaryTaperDelegate<bool>(),
+                                           AAX_CBinaryDisplayDelegate<bool>("off", "on"), true);
     bypass->SetNumberOfSteps(2);
     bypass->SetType(AAX_eParameterType_Discrete);
     mParameterManager.AddParameter(bypass);
@@ -1225,6 +1238,12 @@ void ClapAsAAX::restartPlugin()
 {
 }
 
+void ClapAsAAX::request_process()
+{
+  // AAX has no host-facing way to ask for processing to start, the same as
+  // restartPlugin() above.
+}
+
 bool ClapAsAAX::register_timer(uint32_t period_ms, clap_id *timer_id)
 {
   // AAX TimerWakeup fires at roughly 30ms; clamp period to that minimum.
@@ -1274,13 +1293,7 @@ bool ClapAsAAX::track_info_get(clap_track_info_t *info)
 
 const char *ClapAsAAX::host_get_name()
 {
-  AAX_IController *ctrl = Controller();
-  AAX_CString hostname;
-  if (AAX_SUCCESS == ctrl->GetHostName(&hostname))
-  {
-    _wrapper_hostname = hostname.StdString();
-    _wrapper_hostname.append(" (CLAP-as-AAX)");
-  }
+  if (!_underlying_hostname.empty()) _wrapper_hostname = _underlying_hostname + " (CLAP-as-AAX)";
   return _wrapper_hostname.c_str();
 }
 
@@ -1333,20 +1346,47 @@ void ClapAsAAX::onIdle()
   }
 }
 
-void ClapAsAAX::activatePlugin()
+bool ClapAsAAX::activatePlugin()
 {
   if (!_activated)
   {
     _gesturedparameters.reserve(8192);
 
-    _processAdapter = std::make_unique<AAXProcessAdapter>();
-    _processAdapter->setupProcessing(_plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params,
-                                     _plugin->_ext._audioports, this, _gesturedparameters,
-                                     _paramsToProcess, _bypassParameter, _midi_first_portid,
-                                     _midi_prefer_mididialect);
+    // For a pure-MIDI CLAP (no audio ports) the AAX component still carries a
+    // placeholder Mono/Stereo audio bus (see getAvailableBusConfigs); capture
+    // its channel counts from the negotiated stem format so the process adapter
+    // can pass that audio through. Zero for normal audio plugins.
+    uint32_t placeholderInChannels = 0, placeholderOutChannels = 0;
+    auto ext_audio = _plugin->_ext._audioports;
+    uint32_t clapInPorts = ext_audio ? ext_audio->count(_plugin->_plugin, true) : 0;
+    uint32_t clapOutPorts = ext_audio ? ext_audio->count(_plugin->_plugin, false) : 0;
+    if (clapInPorts == 0 && clapOutPorts == 0 && _aax_ctrl)
+    {
+      AAX_EStemFormat stem_in = AAX_eStemFormat_None, stem_out = AAX_eStemFormat_None;
+      _aax_ctrl->GetInputStemFormat(&stem_in);
+      _aax_ctrl->GetOutputStemFormat(&stem_out);
+      placeholderInChannels = (uint32_t)AAX_STEM_FORMAT_CHANNEL_COUNT(stem_in);
+      placeholderOutChannels = (uint32_t)AAX_STEM_FORMAT_CHANNEL_COUNT(stem_out);
+    }
 
-    _activated = true;
-    _plugin->activate();
+    _processAdapter = std::make_unique<AAXProcessAdapter>();
+    _processAdapter->setupProcessing(
+        _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
+        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
+        _midi_prefer_mididialect, placeholderInChannels, placeholderOutChannels);
+
+    // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()
+    // on a plugin that never activated, and _activated is what deactivatePlugin()
+    // and the destructor decide that from. The adapter stays: Pro Tools renders
+    // the instance whatever this returns, and process() needs the adapter to know
+    // the channel layout it has to silence. onIdle() may still flush through it,
+    // which is legal on a deactivated plugin and runs on the main thread.
+    _activated = _plugin->activate();
+    if (!_activated)
+    {
+      LOGINFO("[ERROR] Plugin activate() failed; plugin remains deactivated");
+      return false;
+    }
 
     // pass latency when activated
     auto scope = _plugin->AlwaysMainThread();
@@ -1357,6 +1397,7 @@ void ClapAsAAX::activatePlugin()
       _aax_ctrl->SetSignalLatency(_latency);
     }
   }
+  return _activated;
 }
 
 void ClapAsAAX::deactivatePlugin()
@@ -1371,10 +1412,19 @@ void ClapAsAAX::deactivatePlugin()
 
 void ClapAsAAX::startProcessing()
 {
+  // CLAP only allows start_processing() on an active plugin, and activatePlugin()
+  // can now legitimately have left it deactivated.
+  if (!_activated) return;
+
   if (!_processing)
   {
-    _processing = true;
-    _plugin->start_processing();
+    // Latch the flag on the plugin's answer, not ahead of it. CLAP is explicit
+    // that a false return means processing did not start: process() must not be
+    // called, and the stop_processing() that stopProcessing() would pair with it
+    // must not happen either. Leaving the flag clear also lets a later
+    // startProcessing() ask again instead of short-circuiting on a state the
+    // plugin never reached.
+    _processing = _plugin->start_processing();
   }
 }
 
