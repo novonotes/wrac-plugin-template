@@ -1002,6 +1002,11 @@ OSStatus WrapAsAUV2::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope in
   {
     switch (inID)
     {
+      case kAudioUnitProperty_AUHostIdentifier:
+        // Advertise the writable property so hosts can identify themselves after creation.
+        outWritable = true;
+        outDataSize = sizeof(AUHostVersionIdentifier);
+        return noErr;
       case kAudioUnitProperty_ParameterStringFromValue:
         if (inScope == kAudioUnitScope_Global)
         {
@@ -1258,6 +1263,26 @@ OSStatus WrapAsAUV2::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
   {
     switch (inID)
     {
+      case kAudioUnitProperty_AUHostIdentifier:
+      {
+        if (!inData || inDataSize < sizeof(AUHostVersionIdentifier))
+          return kAudioUnitErr_InvalidPropertyValue;
+        // The adapter copies the CFString during this call; the host retains ownership.
+        struct HostIdentityExtension
+        {
+          bool (*set)(const clap_plugin_t *, CFStringRef);
+        };
+        if (_plugin && _plugin->_plugin && _plugin->_plugin->get_extension)
+        {
+          const auto *plugin = _plugin->_plugin;
+          const auto *extension = static_cast<const HostIdentityExtension *>(
+              plugin->get_extension(plugin, "com.novonotes.wrac.au-host-identifier/1"));
+          if (extension &&
+              !extension->set(plugin, static_cast<const AUHostVersionIdentifier *>(inData)->hostName))
+            return kAudioUnitErr_InvalidPropertyValue;
+        }
+        return noErr;
+      }
       case kAudioUnitProperty_BypassEffect:
       {
         if (inDataSize < sizeof(UInt32))

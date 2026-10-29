@@ -53,6 +53,7 @@ pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool 
             host_note_ports: instance.host_note_ports.clone(),
             host_lifecycle: instance.host_lifecycle.clone(),
             host_gui: instance.host_gui.clone(),
+            host_identity: instance.host_identity.clone(),
             host_context: instance.host_context.clone(),
         };
         let Some(mut core) = instance
@@ -436,6 +437,11 @@ pub(super) unsafe extern "C" fn plugin_get_extension(
             wrac_log::rtwarn!("plugin.get_extension: missing plugin instance");
             return ptr::null();
         };
+        #[cfg(target_os = "macos")]
+        if id == super::identity_extension::AU_HOST_IDENTIFIER {
+            // The wrapper may receive this AU property before other capabilities are ready.
+            return &super::identity_extension::AU_HOST_IDENTITY as *const _ as *const c_void;
+        }
         let Some(runtime) = instance.runtime.get() else {
             // Some wrapper backends may probe from native object construction paths. Returning
             // null keeps those calls non-blocking and avoids exposing half-frozen capabilities.

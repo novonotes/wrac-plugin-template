@@ -10,7 +10,7 @@ use std::{path::Path, sync::OnceLock};
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;
 
-/// Host process identity plus the wrapper format inferred from CLAP metadata.
+/// Host identity, process details, and wrapper format inferred from runtime context.
 ///
 /// The host family is intentionally diagnostic/mechanical context, not policy. Callers
 /// decide which workaround or compatibility decision to apply from this value so product
@@ -22,11 +22,16 @@ pub struct HostContext {
     pub system: SystemContext,
 }
 
+mod identity;
+use identity::host_from_wrapper_if_needed;
+
 impl HostContext {
     pub fn detect_current(clap_host_name: Option<&str>) -> Self {
+        let plugin_format = PluginFormat::detect(clap_host_name.unwrap_or_default());
+        let host = host_from_wrapper_if_needed(detect_host(), plugin_format, clap_host_name);
         Self {
-            host: detect_host(),
-            plugin_format: PluginFormat::detect(clap_host_name.unwrap_or_default()),
+            host,
+            plugin_format,
             system: SystemContext::detect(),
         }
     }
@@ -62,7 +67,7 @@ impl SystemContext {
     }
 }
 
-/// Parsed host identity from the process executable.
+/// Host identity inferred from the process executable or the AU wrapper's host name.
 ///
 /// `display_name` preserves the human-readable names historically used in logs, while
 /// `family` and `version` are stable fields for tests and host-specific quirk selection.

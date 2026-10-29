@@ -11,7 +11,14 @@
 //!   avoid calls from realtime paths.
 //! - `[realtime-safe & thread-safe]`: calls from realtime paths and concurrent calls are allowed.
 
-use crate::interface::{GuiSize, NoteDialects, PluginResult};
+use crate::interface::{DetectedHost, GuiSize, NoteDialects, PluginResult};
+
+/// Resolves host identity when a wrapper receives host metadata after plugin creation.
+pub trait HostIdentity: Send + Sync {
+    /// Returns the current host while retaining the actual process identity.
+    /// `[non-realtime & thread-safe]`
+    fn current_host(&self) -> DetectedHost;
+}
 
 /// Requests host-side parameter synchronization and invalidation.
 ///
