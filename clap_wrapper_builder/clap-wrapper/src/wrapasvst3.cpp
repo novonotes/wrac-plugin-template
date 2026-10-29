@@ -48,6 +48,12 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 #define S16(x) u##x
 #endif
 
+static bool supportsVst3EventBus(const clap_note_port_info_t &info)
+{
+  return (info.supported_dialects & CLAP_NOTE_DIALECT_MIDI) ||
+         (info.supported_dialects & CLAP_NOTE_DIALECT_CLAP);
+}
+
 DEF_CLASS_IID(ARA::IPlugInEntryPoint)
 DEF_CLASS_IID(ARA::IPlugInEntryPoint2)
 DEF_CLASS_IID(Presonus::IGainReductionInfo)
@@ -218,7 +224,7 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
     _processAdapter = new Clap::ProcessAdapter();
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->_ext._params, this->audioInputs, this->audioOutputs,
-        this->_largestBlocksize, this->eventInputs.size(), this->eventOutputs.size(), parameters,
+        this->_largestBlocksize, this->eventInputs.size(), _outputEventBusByPort, parameters,
         componentHandler, this, _gesturedparameters,
         _expressionmap & clap_supported_note_expressions::AS_VST3_NOTE_EXPRESSION_PRESSURE,
         _expressionmap & clap_supported_note_expressions::AS_VST3_NOTE_EXPRESSION_TUNING);
@@ -1139,8 +1145,7 @@ void ClapAsVst3::addAudioBusFrom(uint32_t index, const clap_audio_port_info_t *i
 
 void ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input)
 {
-  if ((info->supported_dialects & CLAP_NOTE_DIALECT_MIDI) ||
-      (info->supported_dialects & CLAP_NOTE_DIALECT_CLAP))
+  if (supportsVst3EventBus(*info))
   {
     auto numchannels = 16;
     if (_vst3specifics)
@@ -1342,12 +1347,8 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
   auto numMIDIOutPorts = noteports->count(plugin, false);
 
   // fprintf(stderr, "\tMIDI in: %d, out: %d\n", (int)numMIDIInPorts, (int)numMIDIOutPorts);
-
-  std::vector<clap_note_port_info_t> inputs;
-  std::vector<clap_note_port_info_t> outputs;
-
-  inputs.resize(numMIDIInPorts);
-  outputs.resize(numMIDIOutPorts);
+  // Unsupported CLAP dialects create gaps because VST3 does not expose a bus for those ports.
+  _outputEventBusByPort.assign(numMIDIOutPorts, -1);
 
   for (decltype(numMIDIInPorts) i = 0; i < numMIDIInPorts; ++i)
   {
@@ -1362,7 +1363,11 @@ void ClapAsVst3::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_
     clap_note_port_info_t info;
     if (noteports->get(plugin, i, false, &info))
     {
-      addMIDIBusFrom(&info, i, false);
+      if (supportsVst3EventBus(info))
+      {
+        _outputEventBusByPort[i] = static_cast<int32_t>(eventOutputs.size());
+        addMIDIBusFrom(&info, i, false);
+      }
     }
   }
 }
@@ -2120,7 +2125,7 @@ void ClapAsVst3::onIdle()
     {
       // setup a ProcessAdapter just for flush with no audio
       Clap::ProcessAdapter pa;
-      pa.setupProcessing(_plugin->_plugin, _plugin->_ext._params, audioInputs, audioOutputs, 0, 0, 0,
+      pa.setupProcessing(_plugin->_plugin, _plugin->_ext._params, audioInputs, audioOutputs, 0, 0, {},
                          this->parameters, componentHandler, this, _gesturedparameters, false, false);
       auto thisFn = _plugin->AlwaysAudioThread();  // just to pacify the clap-helper
 
