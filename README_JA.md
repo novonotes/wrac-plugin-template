@@ -27,10 +27,10 @@ WRAC スタックとは、 **Webview, Rust Audio, CLAP** の三つを中心に�
 初期実装として WRAC Gain というシンプルなプラグインが実装されています。
 テンプレートとしても使えるように配慮しています。
 
+主な依存:
 - [clap-sys](https://github.com/micahrj/clap-sys) を用いた Rust による CLAP プラグイン実装
 - [wxp](https://github.com/novonotes/wxp) を用いた WebView GUI 実装
 - [clap-wrapper](https://github.com/free-audio/clap-wrapper) による VST3 / AU / AAX プラグインのビルドと開発用 standalone app
-- ホストへの再起動要求を通じて遅延の変更を反映する例として、申告する遅延を変える GUI の遅延設定
 
 ## クイックスタート
 
@@ -60,7 +60,7 @@ npm run dev
 
 ### なぜ GPU ネイティブな UI スタックではなく WebView なのか
 
-実運用のプラグインでは、予測しやすさを重視しました。Web プラットフォームは成熟しており、デスクトップアプリやプラグイン UI の文脈でも利点と制約が比較的よく知られています。wgpu のような GPU ネイティブな UI スタックは有望ですが、DAW にホストされるプラグイン環境では、まだ実運用上の予測材料が少ないと考えています。
+実運用のプラグインでは、不確実性の低さしやすさを重視しました。一番避けたいのは、技術的に解決できるか分からないDAW固有の不具合を、製品リリース直前に踏むことです。Web プラットフォームは成熟しており、デスクトップアプリでも、オーディオプラグイン UI の文脈でも利点と制約が比較的よく知られています。wgpu のような GPU ネイティブな UI スタックは有望ですが、DAW にホストされるプラグイン環境という条件下では、まだ商用レベルの運用のための予測材料が少ないと考えています。
 
 ### これはフレームワークですか
 
@@ -72,7 +72,7 @@ npm run dev
 
 ### AAX / AUv3 対応はありますか
 
-AAX は macOS / Windows で明示的な build / install / validate target として対応しています。詳細は [AAX Build and Validation](docs/aax-ja.md) を参照してください。
+AAX 対応ずみです。詳細は [AAX Build and Validation](docs/aax-ja.md) を参照してください。
 AUv3 対応はまだ進行中です。
 
 ## ビルド
@@ -120,5 +120,3 @@ cargo xtask build --help
 主要 DAW での動作確認状況は [Wiki](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix) を参照してください。
 
 wxp クレートの使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
-
-このテンプレートを元にした追加のプラグイン例は [wrac-examples](https://github.com/novonotes/wrac-examples) を参照してください。

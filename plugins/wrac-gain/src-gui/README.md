@@ -1,5 +1,7 @@
 # WRAC Gain GUI
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 Vite/TypeScript WebView frontend for the WRAC Gain example plugin.
 
 Debug plugin builds load this package from the Vite dev server. Release builds

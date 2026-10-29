@@ -2,6 +2,8 @@
 
 # The clap-wrapper Project
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 The `clap-wrapper` project allows you to wrap your CLAP plugin
 into other plugin or standalone executable formats, letting your
 plugin run in hosts which don't support the CLAP format and 
@@ -50,7 +52,7 @@ simple CMake command
 ```bash
 git clone https://github.com/free-audio/clap-wrapper.git
 mkdir build
-cmake -B build \ 
+cmake -B build \
       -DCLAP_SDK_ROOT={path to clap sdk} \
       -DVST3_SDK_ROOT={path to vst3 sdk} \
       -DCLAP_WRAPPER_OUTPUT_NAME="The Name of your CLAP"

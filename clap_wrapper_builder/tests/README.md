@@ -1,5 +1,7 @@
 # AU state recall regression
 
+> 日本語版: [README_JA.md](README_JA.md)
+
 On macOS, build an AUv2 plugin with the current wrapper, then compile and run the
 native host below. It loads the bundle directly, without installing it or opening
 an editor. The plugin must expose deterministic CLAP state and a writable

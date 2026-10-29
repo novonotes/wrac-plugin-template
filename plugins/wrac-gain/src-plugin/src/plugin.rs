@@ -1,14 +1,14 @@
 //! The plugin contract as seen by the host.
 //!
 //! What is declared here:
-//! 1. Plugin self-descriptions generated from package metadata
+//! 1. Plugin self-descriptions generated from `wrac-plugin.toml`
 //! 2. [`SharedState`] shared by the audio thread, GUI, and host
 //! 3. The audio [`ActiveProcessor`] handed over at activation, and how host extension
 //!    capabilities are bundled
 //!
 //! Parameter, audio port, and state-persistence implementations live under `plugin/`.
-//! Format differences between CLAP, VST3, and AU are absorbed by `wrac_clap_adapter::interface`,
-//! so this module focuses solely on "which capabilities this plugin offers."
+//! This module defines the plugin's capabilities through `wrac_clap_adapter::interface`.
+//! The adapter implements the CLAP ABI, and clap-wrapper handles other plugin formats.
 
 use std::sync::Arc;
 

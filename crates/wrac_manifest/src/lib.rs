@@ -4,6 +4,13 @@
 //! bundle identifiers, plugin IDs, wrapper descriptors, format policies, and
 //! artifact metadata. This crate reads that file into typed Rust structures
 //! for build scripts and xtask code; it does not perform plugin builds itself.
+//!
+//! Validation cannot infer plugin behavior, global identity, or compatibility
+//! with released versions. Choose CLAP features and AAX stem layouts that match
+//! the plugin's actual behavior and VST3 subcategories accepted by target hosts;
+//! validation only checks that the subcategories are nonempty. Use a globally
+//! unique CLAP plugin ID and keep format identifiers stable after release so
+//! hosts can restore saved projects.
 
 use std::{
     collections::HashSet,
@@ -16,8 +23,10 @@ use serde::Deserialize;
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct ManifestPackageInfo {
+    // Keep the manifest key aligned with Cargo while distinguishing it in Rust.
+    #[serde(rename = "name")]
     pub package_name: Option<String>,
     pub version: Option<String>,
     pub repository: Option<String>,
@@ -474,28 +483,6 @@ struct DedicatedBundle {
     formats: Vec<PluginFormatDefinition>,
 }
 
-impl<'de> Deserialize<'de> for ManifestPackageInfo {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct Raw {
-            name: Option<String>,
-            version: Option<String>,
-            repository: Option<String>,
-            #[allow(dead_code)]
-            version_source: Option<String>,
-        }
-        let raw = Raw::deserialize(deserializer)?;
-        Ok(Self {
-            package_name: raw.name,
-            version: raw.version,
-            repository: raw.repository,
-        })
-    }
-}
-
 #[derive(Debug, Deserialize)]
 struct CargoManifest {
     package: CargoPackage,
@@ -530,16 +517,17 @@ mod tests {
 
     #[test]
     fn package_ignores_repository_specific_extensions() {
-        let info: ManifestPackageInfo = toml::from_str("version_source = \"cargo\"").unwrap();
+        let info: ManifestPackageInfo =
+            toml::from_str("name = \"example\"\nrelease_label = \"preview\"").unwrap();
 
-        assert_eq!(info.package_name, None);
+        assert_eq!(info.package_name.as_deref(), Some("example"));
 
         let manifest: DedicatedManifest = toml::from_str(
             r#"
 schema_version = 1
 
 [package]
-version_source = "cargo"
+release_label = "preview"
 
 [bundle]
 company_name = "Example"

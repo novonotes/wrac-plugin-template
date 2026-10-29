@@ -56,15 +56,7 @@ Plugin identity is centralized in `plugins/wrac-gain/src-plugin/wrac-plugin.toml
 Edit that manifest instead of duplicating host-visible IDs in Rust code or Cargo metadata.
 
 Keep each plugin's manifests at `<plugin-root>/src-plugin/Cargo.toml` and `<plugin-root>/src-plugin/wrac-plugin.toml`; xtask and CI reject missing or differently placed WRAC manifests.
-> **Important:** The plugin ID must be globally unique. It cannot be changed once published.
-> AUv2 `auv2_type`, `auv2_subtype`, and `auv2_manufacturer_code` must each be exactly 4 ASCII bytes.
-> `clap_features` must match the plugin's real audio/MIDI behavior because CLAP hosts read it directly.
-> `formats` is the product policy used by default `xtask` build/install/validate commands. Its
-> `distribution` value declares whether each format may be included in public artifacts.
-> `vst3_subcategories` controls VST3 host browser categories; use Steinberg-style `|`-separated values such as `Fx|Dynamics`.
-> `vst3_component_id` must be a stable UUID. Generate it once before release and never change it for the same product.
-> `aax_manufacturer_id`, `aax_product_id`, and each AAX stem config `plugin_id` must be stable 4-byte ASCII IDs.
-> AAX stem configs should list only the channel layouts the product actually supports.
+See the [wrac_manifest README](../crates/wrac_manifest/README.md) for the fields and their requirements.
 
 ### 3. Bulk Replace Remaining Identifiers
 
@@ -78,6 +70,21 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 | WRAC plugin package name (Cargo package) | `wrac_gain_plugin` | `my_plugin` |
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
+
+For example, find remaining template names and repository URLs with:
+
+```sh
+rg --hidden 'wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin' \
+  --glob '!.git/**' --glob '!node_modules/**' --glob '!dist/**' \
+  --glob '!target/**' --glob '!clap_wrapper_builder/clap-wrapper/**' \
+  --glob '!*.lock' --glob '!docs/setup*.md'
+rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' \
+  --glob '!.git/**' --glob 'Cargo.toml'
+```
+
+Review the matches, replace the identifiers that belong to your plugin, and run
+the searches again to check for anything missed. Some matches may be references
+to the template rather than plugin identifiers.
 
 ### 4. Build & Install
 
@@ -95,8 +102,6 @@ For detailed usage of each xtask command, see `cargo xtask --help`.
 
 Debug builds fetch GUI resources from the Vite dev server (`localhost:5173`).
 Before launching the plugin in your DAW, start the dev server with the following commands.
-If the WebView cannot connect to the configured URL, the plugin shows a low-level load error
-instead of a blank editor so you can see the failed URL and socket error directly.
 
 ```sh
 cd /path/to/my_plugin/plugins/wrac-gain/src-gui
@@ -108,7 +113,7 @@ For release builds, `src-plugin/build.rs` zips the sibling `src-gui/dist` and em
 
 Launch your DAW and try inserting the plugin.
 Some DAWs may require a plugin rescan.
-The GUI supports hot reload — try editing the HTML files.
+The GUI supports hot reload.
 
 ### 6. Debug
 
