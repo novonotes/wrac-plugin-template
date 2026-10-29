@@ -35,6 +35,7 @@ fn main() -> Result<()> {
         wrapper_dir: root.join("clap_wrapper_builder"),
         target_namespace: "wrac-plugins".to_string(),
         default_aax_sdk_root: None,
+        default_aax_validator_dsh_archive: None,
         output_language: XtaskOutputLanguage::English,
         root,
     };
