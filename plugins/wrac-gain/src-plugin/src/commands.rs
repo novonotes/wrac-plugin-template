@@ -125,11 +125,12 @@ pub(crate) fn register_commands(
 
     // The delay setting is editor state, not a host parameter: a latency change makes the
     // host recompute its delay compensation, which hosts do not expect from automation.
-    // Selecting it here asks the host for the reactivation that applies it.
+    // Selecting it here changes the audio at once and asks the host for the reactivation
+    // that updates the reported latency.
     {
-        let project_state = project_state.clone();
+        let latency = latency.clone();
         command_handler.register_sync("get_latency", move |_| {
-            Ok::<_, String>(latency_payload(project_state.latency_frames()))
+            Ok::<_, String>(latency_payload(latency.selected_frames()))
         });
     }
 

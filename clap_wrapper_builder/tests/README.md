@@ -43,7 +43,10 @@ clang++ -std=c++17 -Wall -Wextra -Werror \
 ```
 
 The test restores states that select a different delay, which makes the plugin request
-a restart. While another thread keeps rendering, it runs the main run loop so the
+a restart. Before the run loop runs, it checks that the audio already follows the new
+delay while the old latency is still reported: the plugin applies the change itself
+and only the report waits for the restart. While another thread keeps rendering, it
+runs the main run loop so the
 wrapper's idle timer can reactivate the plugin, then checks that the AU reports the new
 `kAudioUnitProperty_Latency`, that latency listeners were notified, and that an impulse
 comes out delayed by exactly the reported latency. The change is driven by state rather

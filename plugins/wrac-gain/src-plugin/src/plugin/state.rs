@@ -61,7 +61,7 @@ impl PluginStateExtension for WracGainStateExtension {
             gain: params.gain,
             bypass: params.bypass,
             editor_page: project.editor_page,
-            latency_frames: project.latency_frames,
+            latency_frames: self.latency.selected_frames(),
         })
         .map_err(|_| PluginError::InvalidState)?;
         Ok(wrac_clap_adapter::interface::PreparedStateSave::new(
@@ -80,11 +80,11 @@ impl PluginStateExtension for WracGainStateExtension {
         }
         let project = ProjectState {
             editor_page: state.editor_page,
-            latency_frames: state.latency_frames,
         };
         self.project_state.commit(project);
-        // A restored delay takes effect through a reactivation, like a GUI selection.
-        self.latency.request_restart_if_pending();
+        // A restored delay is selected like a GUI choice: the audio follows at once and
+        // the reported latency through the reactivation this asks for.
+        self.latency.select(state.latency_frames);
         self.shared.restore_parameters(ParameterStateSnapshot {
             gain: state.gain,
             bypass: state.bypass,
@@ -93,7 +93,7 @@ impl PluginStateExtension for WracGainStateExtension {
             self.gui_notifier.notify_parameter(parameter_id, value);
         });
         self.gui_notifier.notify_editor_page(project.editor_page);
-        self.gui_notifier.notify_latency(project.latency_frames);
+        self.gui_notifier.notify_latency(state.latency_frames);
         Ok(())
     }
 }

@@ -17,7 +17,9 @@ mod latency;
 mod params;
 mod state;
 
-pub(crate) use latency::{LATENCY_FRAME_CHOICES, LatencyStore, is_latency_frame_choice};
+pub(crate) use latency::{
+    LATENCY_FRAME_CHOICES, LatencyStore, MAX_LATENCY_FRAMES, is_latency_frame_choice,
+};
 pub(crate) use params::{
     DEFAULT_GAIN, PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue,
     apply_param_input_events, clamp_gain, notify_gui_parameters, parameter_default_value,
@@ -135,10 +137,7 @@ impl WracGainPlugin {
         let param_output_queue =
             Arc::new(WracGainParamOutputQueue::new(context.host_params.clone()));
         let project_state = Arc::new(ProjectStateStore::new());
-        let latency_store = Arc::new(LatencyStore::new(
-            project_state.clone(),
-            context.host_lifecycle.clone(),
-        ));
+        let latency_store = Arc::new(LatencyStore::new(context.host_lifecycle.clone()));
         let latency = Arc::new(WracGainLatencyExtension::new(latency_store.clone()));
         let gui = create_gui_integration(
             descriptor,
@@ -226,9 +225,9 @@ impl PluginInstance for WracGainPlugin {
         // lock; copying only the needed value instead structurally enforces "the audio
         // thread sees only immutable configuration."
         let audio_channel_count = self.audio_layout.channel_count();
-        // The delay is fixed for the processor's lifetime, like the layout. A new
-        // selection is applied by the reactivation it requested.
-        let (latency_frames, latency_changed) = self.latency_store.activate();
+        // The processor follows the selected delay block by block; activation is where
+        // the reported latency catches up with it.
+        let latency_changed = self.latency_store.activate();
         log::debug!(
             "activating audio processor: plugin_id={}, sample_rate={}, min_frames_count={}, max_frames_count={}, audio_channel_count={}, latency_frames={}",
             self.descriptor.id,
@@ -236,13 +235,13 @@ impl PluginInstance for WracGainPlugin {
             context.min_frames_count,
             context.max_frames_count,
             audio_channel_count,
-            latency_frames
+            self.latency_store.selected_frames()
         );
         let mut result = ActivateResult::new(Box::new(WracGainAudioProcessor::new(
             self.shared.clone(),
             self.param_output_queue.clone(),
             audio_channel_count,
-            latency_frames,
+            self.latency_store.clone(),
         )));
         result.notifications.latency_changed = latency_changed;
         Ok(result)

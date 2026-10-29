@@ -4,6 +4,11 @@
 // notifies listeners, rendering continues on another thread throughout the restart,
 // and the audio afterwards is delayed by exactly the latency the AU reports.
 //
+// The template plugin applies a new delay to its audio at once, before any restart, so
+// that its own processing never waits for the host; only the reported latency waits for
+// the reactivation. The test checks that too, by rendering before the run loop gives
+// the wrapper a chance to restart.
+//
 // The latency change is driven by a state restore rather than a parameter, because the
 // template plugin keeps its delay setting out of the host parameter list.
 #include <AudioToolbox/AudioToolbox.h>
@@ -121,15 +126,29 @@ static CFPropertyListRef stateWithLatency(AudioUnit unit, int frames)
   return edited;
 }
 
+static int64_t measuredDelay(Renderer &renderer);
+static void requireDelay(int64_t delay, long expected, const char *message)
+{
+  if (delay == expected) return;
+  std::fprintf(stderr, "expected delay %ld, measured %lld\n", expected, static_cast<long long>(delay));
+  throw std::runtime_error(message);
+}
+
 // Restores a state that selects `frames` of delay, renders on another thread the whole
 // time the wrapper restarts the plugin, and waits for the AU to report the new latency.
 static void changeLatency(Renderer &renderer, int frames)
 {
   auto state = stateWithLatency(renderer.unit, frames);
   const int notificationsBefore = gLatencyNotifications.load();
+  const long latencyBefore = latencyFrames(renderer.unit);
   ok(AudioUnitSetProperty(renderer.unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0, &state,
                           sizeof(state)));
   CFRelease(state);
+
+  // The run loop has not run yet, so the wrapper cannot have restarted the plugin: the
+  // audio must already follow the new delay while the old latency is still reported.
+  requireDelay(measuredDelay(renderer), frames, "Audio did not follow the new delay before the restart");
+  require(latencyFrames(renderer.unit) == latencyBefore, "Latency changed without a restart");
 
   // The wrapper never blocks the render thread for a restart; renders during it must
   // keep succeeding (the wrapper outputs silence for those blocks).
@@ -233,13 +252,7 @@ int main(int argc, char **argv)
     for (int frames : {1024, 0})
     {
       changeLatency(renderer, frames);
-      const auto delay = measuredDelay(renderer);
-      if (delay != frames)
-      {
-        std::fprintf(stderr, "reported latency %d, measured delay %lld\n", frames,
-                     static_cast<long long>(delay));
-        throw std::runtime_error("Audio delay does not match the reported latency");
-      }
+      requireDelay(measuredDelay(renderer), frames, "Audio delay does not match the reported latency");
     }
 
     std::printf("PASS: latency reported, notified and applied across restarts\n");

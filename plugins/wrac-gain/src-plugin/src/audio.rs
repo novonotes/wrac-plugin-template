@@ -14,8 +14,8 @@ use wrac_clap_adapter::interface::{
 };
 
 use crate::plugin::{
-    PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue, apply_param_input_events,
-    parameter_host_input_to_plain,
+    LatencyStore, MAX_LATENCY_FRAMES, PARAM_BYPASS_ID, PARAM_GAIN_ID, WracGainParamOutputQueue,
+    apply_param_input_events, parameter_host_input_to_plain,
 };
 use crate::state::SharedState;
 
@@ -36,7 +36,9 @@ pub(crate) struct WracGainAudioProcessor {
     // "snapshot layout at activate time and store it as a field."
     // In debug builds, the actual buffer is verified to match this snapshot.
     audio_channel_count: u32,
-    // Fixed for this processor's lifetime and equal to the latency reported for it.
+    // Follows the selected delay every block, ahead of the latency reported for this
+    // processor until the host reactivates the plugin (see `plugin::latency`).
+    latency: Arc<LatencyStore>,
     delay: DelayLine,
 }
 
@@ -45,14 +47,16 @@ impl WracGainAudioProcessor {
         shared: Arc<SharedState>,
         param_output_queue: Arc<WracGainParamOutputQueue>,
         audio_channel_count: u32,
-        latency_frames: u32,
+        latency: Arc<LatencyStore>,
     ) -> Self {
         Self {
             shared,
             param_output_queue,
             audio_channel_count,
-            // Allocated here, at activation, so process() never allocates.
-            delay: DelayLine::new(audio_channel_count as usize, latency_frames as usize),
+            latency,
+            // Sized for the longest delay at activation, so a new selection never makes
+            // process() allocate.
+            delay: DelayLine::new(audio_channel_count as usize, MAX_LATENCY_FRAMES as usize),
         }
     }
 }
@@ -98,6 +102,9 @@ impl WracGainAudioProcessor {
         );
 
         self.param_output_queue.drain(&mut context.events.output);
+
+        self.delay
+            .set_delay(self.latency.selected_frames() as usize);
 
         // Gain at the start of this block; updated each time a parameter event arrives.
         let mut gain = self.shared.gain();
@@ -315,55 +322,71 @@ fn process_channels_range<T: Sample>(
     }
 }
 
-/// Delays every channel by a fixed number of samples.
+/// Delays every channel by a selectable number of samples.
 ///
-/// One ring buffer per channel. All channels advance together, so the read/write
-/// position at the start of the block is common to them.
+/// One ring buffer per channel, sized for the longest delay. Each sample is written at
+/// the write position and the one written `delay` samples earlier is read back, so a
+/// new delay takes effect from the next block without reallocating. All channels advance
+/// together, so the write position at the start of the block is common to them.
 struct DelayLine {
     buffers: Vec<Vec<f64>>,
-    block_position: usize,
+    block_write: usize,
+    delay: usize,
 }
 
 /// One channel's view of the delay line, starting at a frame within the block.
 struct ChannelDelay<'a> {
     buffer: &'a mut [f64],
-    position: usize,
+    write: usize,
+    delay: usize,
 }
 
 impl ChannelDelay<'_> {
-    /// Stores `sample` and returns the one stored `buffer.len()` samples earlier.
+    /// Stores `sample` and returns the one stored `delay` samples earlier.
     fn push(&mut self, sample: f64) -> f64 {
-        let delayed = std::mem::replace(&mut self.buffer[self.position], sample);
-        self.position = (self.position + 1) % self.buffer.len();
+        let len = self.buffer.len();
+        self.buffer[self.write] = sample;
+        let delayed = self.buffer[(self.write + len - self.delay) % len];
+        self.write = (self.write + 1) % len;
         delayed
     }
 }
 
 impl DelayLine {
-    fn new(channel_count: usize, delay_frames: usize) -> Self {
+    fn new(channel_count: usize, max_delay_frames: usize) -> Self {
         Self {
-            buffers: if delay_frames == 0 {
-                Vec::new()
-            } else {
-                vec![vec![0.0; delay_frames]; channel_count]
-            },
-            block_position: 0,
+            // One slot more than the longest delay: the sample read back at the maximum
+            // delay must not be the one just written.
+            buffers: vec![vec![0.0; max_delay_frames + 1]; channel_count],
+            block_write: 0,
+            delay: 0,
         }
+    }
+
+    /// Changing the delay jumps the read position, so the audio is discontinuous at the
+    /// switch. That is accepted: the switch follows a deliberate settings change.
+    fn set_delay(&mut self, frames: usize) {
+        let max = self.buffers.first().map_or(0, |buffer| buffer.len() - 1);
+        self.delay = frames.min(max);
     }
 
     /// Returns `None` when there is no delay, so the caller passes samples through.
     fn channel(&mut self, channel_index: usize, frame_in_block: usize) -> Option<ChannelDelay<'_>> {
+        if self.delay == 0 {
+            return None;
+        }
         let buffer = self.buffers.get_mut(channel_index)?;
-        let position = (self.block_position + frame_in_block) % buffer.len();
+        let write = (self.block_write + frame_in_block) % buffer.len();
         Some(ChannelDelay {
             buffer: buffer.as_mut_slice(),
-            position,
+            write,
+            delay: self.delay,
         })
     }
 
     fn advance(&mut self, frames: usize) {
-        if let Some(delay_frames) = self.buffers.first().map(Vec::len) {
-            self.block_position = (self.block_position + frames) % delay_frames;
+        if let Some(len) = self.buffers.first().map(Vec::len) {
+            self.block_write = (self.block_write + frames) % len;
         }
     }
 }
