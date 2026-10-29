@@ -19,9 +19,8 @@ plugin GUIs:
 - host GUI resizing via `begin_gui_resize_drag`, `request_gui_resize`, and
   `end_gui_resize_drag`
 
-It intentionally does not define product parameter APIs, device command
-schemas, telemetry payloads, preset behavior, or client subscription models.
-Those contracts belong to the plugin or device layer.
+Plugin-specific contracts, such as parameter APIs, commands, and preset behavior,
+are defined by the plugin rather than this shared runtime.
 
 The public invocation and channel contracts are deliberately owned by this
 package and expose only what WRAC frontends need. The default transport uses

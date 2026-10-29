@@ -38,7 +38,6 @@ package `Cargo.toml`.
 | `name` | string | No | Non-empty package name when supplied | Overrides the Cargo package name used by WRAC artifact metadata. Usually omit this and use `Cargo.toml`. |
 | `version` | string | No | Non-empty version when supplied | Overrides the Cargo package version used in generated plugin descriptors and bundles. Usually omit this and use `Cargo.toml`. |
 | `repository` | string | No | Any non-empty repository URL when supplied | Overrides the Cargo package repository metadata. |
-| `version_source` | string | No | `cargo` by convention | Compatibility/documentation field. WRAC currently fills missing `version` from Cargo metadata and does not support another version source. |
 
 ### `[bundle]`
 
@@ -58,6 +57,12 @@ from the same binary bundle.
 | `description` | string | Yes | Non-empty | Generated into CLAP descriptor `description`. This is a short user-facing product description that may appear in host or scanner UI. |
 | `copyright` | string | Yes | Non-empty | Generated into macOS bundle copyright metadata. |
 | `formats` | array of `PluginFormatDefinition` | Yes | `type` is `clap`, `vst3`, `au`, or `aax`; `distribution` is `development-only` or `public`; non-empty; no duplicate types | Product policy for supported plugin formats and whether each format may be included in a public distribution. Default and explicit plugin targets may use either distribution value. |
+
+`distribution` is available to repository-specific release workflows through
+`WracContext::public_plugin_formats()` and `publicly_distributes_plugin_format()`
+in `wrac_build_ops`. This template does not create public release artifacts or
+filter build, install, and validate targets by this value; a release workflow must
+apply the policy itself.
 
 ### `[[plugins]]`
 

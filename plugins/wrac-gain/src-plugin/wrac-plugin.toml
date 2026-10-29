@@ -7,9 +7,6 @@
 # recall.
 schema_version = 1
 
-[package]
-version_source = "cargo"
-
 [bundle]
 company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"

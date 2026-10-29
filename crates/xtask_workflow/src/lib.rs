@@ -37,9 +37,7 @@ pub fn failure_policy(continue_on_error: bool) -> FailurePolicy {
 
 /// User-facing text used by the generic workflow executor.
 ///
-/// The workflow crate owns execution mechanics but not product language policy.
-/// Repositories pass the message set that matches their CLI, keeping template
-/// output English-only while private product repositories can use Japanese.
+/// Callers choose the message set so execution mechanics do not impose a language.
 #[derive(Debug, Clone)]
 pub struct WorkflowMessages {
     pub plan_heading: &'static str,

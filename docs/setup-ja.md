@@ -79,6 +79,19 @@ IDE の機能や `rg`、LLM エージェントなどで全ファイルを検索�
 | GUI / スクリプト内などの kebab-case 名 | `wrac-gain-plugin` | `my-plugin` |
 | `Cargo.toml` 内の repository URL | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
+例えば、次のコマンドで残っているテンプレート名とリポジトリ URL を検索できます。
+
+```sh
+rg --hidden 'wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin' \
+  --glob '!.git/**' --glob '!node_modules/**' --glob '!dist/**' \
+  --glob '!target/**' --glob '!clap_wrapper_builder/clap-wrapper/**' \
+  --glob '!*.lock' --glob '!docs/setup*.md'
+rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' \
+  --glob '!.git/**' --glob 'Cargo.toml'
+```
+
+検索結果を確認してプラグインに関係する識別子を置き換えたら、もう一度検索して漏れが
+ないか確認してください。テンプレート自体への参照が検索結果に含まれる場合もあります。
 
 ### 4. ビルド & インストール
 

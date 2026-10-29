@@ -79,6 +79,21 @@ Use your IDE's find-and-replace, `rg`, or an LLM agent to search all files and r
 | kebab-case name in GUI / scripts / etc. | `wrac-gain-plugin` | `my-plugin` |
 | Repository URL in `Cargo.toml` files | `https://github.com/novonotes/wrac-plugin-template` | `https://github.com/your-org/my-plugin` |
 
+For example, find remaining template names and repository URLs with:
+
+```sh
+rg --hidden 'wrac_gain_plugin|WRAC Gain|com\.your-company\.wrac-gain|wrac-gain-plugin' \
+  --glob '!.git/**' --glob '!node_modules/**' --glob '!dist/**' \
+  --glob '!target/**' --glob '!clap_wrapper_builder/clap-wrapper/**' \
+  --glob '!*.lock' --glob '!docs/setup*.md'
+rg --hidden 'repository = "https://github.com/novonotes/wrac-plugin-template"' \
+  --glob '!.git/**' --glob 'Cargo.toml'
+```
+
+Review the matches, replace the identifiers that belong to your plugin, and run
+the searches again to check for anything missed. Some matches may be references
+to the template rather than plugin identifiers.
+
 ### 4. Build & Install
 
 Run the following from the repository root.

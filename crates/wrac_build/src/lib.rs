@@ -507,9 +507,6 @@ mod tests {
     const FIXTURE_MANIFEST: &str = r#"
 schema_version = 1
 
-[package]
-version_source = "cargo"
-
 [bundle]
 company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
@@ -555,9 +552,6 @@ plugin_id = "WtGS"
 
     const NON_AAX_FIXTURE_MANIFEST: &str = r#"
 schema_version = 1
-
-[package]
-version_source = "cargo"
 
 [bundle]
 company_name = "Your Company"

@@ -2,30 +2,28 @@
 
 [English](README.md)
 
-WRAC/WXP plugin frontend向けの完全なWRAC facadeです。plugin frontendと上位の
-frontend packageは、`@novonotes/webview-bridge`を直接importせず、このpackageを
-介してhostと通信します。
+WRAC/WXP プラグインのフロントエンド向けに、WRAC の機能をまとめて提供するパッケージです。
+プラグインのフロントエンドや上位のパッケージは、`@novonotes/webview-bridge` を直接
+インポートせず、このパッケージを介してホストと通信します。
 
-このpackageは、DAWにhostされるWebView plugin GUIで共通する次のruntime機能を
-提供します。
+DAW で動作する WebView プラグイン GUI に共通する、次の機能を提供します。
 
-- `write_to_log`によるfrontend log転送
-- Spaceなどのkeyをhostへ残し、GUI操作後に`focus_host_window`でfocusを戻すkey routing
-- `get_frontend_runtime_context`によるfrontend runtime context取得
-- `runtime.invoke<TResponse>()`による型付きcommand呼び出し
-- `runtime.createChannel<T>()`によるpush channel生成
-- `apply_native_cursor`によるnative cursor連携
-- `begin_gui_resize_drag`、`request_gui_resize`、`end_gui_resize_drag`によるhost GUIのresize
+- `write_to_log` によるフロントエンドのログ転送
+- Space などのキーをホストに渡し、GUI 操作後に `focus_host_window` でフォーカスをホストに戻すキー処理
+- `get_frontend_runtime_context` による実行環境情報の取得
+- `runtime.invoke<TResponse>()` による型付きコマンドの呼び出し
+- `runtime.createChannel<T>()` によるプッシュ通知用チャネルの生成
+- `apply_native_cursor` によるネイティブカーソルとの連携
+- `begin_gui_resize_drag`、`request_gui_resize`、`end_gui_resize_drag` によるホスト GUI のサイズ変更
 
-製品parameter API、device command schema、telemetry payload、preset動作、client固有の
-subscription modelは意図的に定義しません。これらの契約はpluginまたはdevice layerに
-属します。
+パラメーター API、コマンド、プリセットの動作など、プラグイン固有の契約はこの共通
+ランタイムではなく、プラグイン側で定義します。
 
-公開するinvokeとchannelの契約はこのpackageが独自に所有し、WRAC frontendに必要な
-最小限のinterfaceだけを公開します。default transportは
-`@novonotes/webview-bridge`を使用します。テストではWebView hostへ依存せず、
-`WracFrontendTransport`を`createWracFrontendRuntime()`へ渡してtransportを
-差し替えられます。
+コマンド呼び出しとチャネルの契約はこのパッケージが管理し、WRAC のフロントエンドに
+必要な最小限のインターフェースを公開します。通信には既定で
+`@novonotes/webview-bridge` を使用します。テストでは、
+`createWracFrontendRuntime()` に `WracFrontendTransport` を渡して通信手段を差し替えることで、
+WebView ホストに依存せずに実行できます。
 
 ## 使用例
 

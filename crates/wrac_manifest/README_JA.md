@@ -37,7 +37,6 @@ validation_profile = "prototype"
 | `name` | string | いいえ | 指定する場合は空文字不可 | WRAC の成果物メタデータで使う Cargo パッケージ名を上書きします。通常は省略し、`Cargo.toml` を使います。 |
 | `version` | string | いいえ | 指定する場合は空文字不可 | 生成されるプラグインディスクリプターやバンドルに使うバージョンを上書きします。通常は省略し、`Cargo.toml` を使います。 |
 | `repository` | string | いいえ | 指定する場合は空文字不可 | Cargo パッケージの repository 情報を上書きします。 |
-| `version_source` | string | いいえ | 慣例として `cargo` | 互換性と意図表示のために受け付けているフィールドです。WRAC は現在、省略された `version` を Cargo メタデータから補完しますが、他のバージョン取得元は扱いません。 |
 
 ### `[bundle]`
 
@@ -57,6 +56,11 @@ validation_profile = "prototype"
 | `description` | string | はい | 空文字不可 | CLAP ディスクリプターの `description` に生成されます。ホストやスキャナーの UI に表示され得る、ユーザー向けの短い製品説明です。 |
 | `copyright` | string | はい | 空文字不可 | macOS バンドルの著作権メタデータに生成されます。 |
 | `formats` | array of `PluginFormatDefinition` | はい | `type` は `clap`、`vst3`、`au`、`aax`。`distribution` は `development-only` または `public`。空配列と形式の重複は不可 | 対応するプラグイン形式と、各形式を公開配布へ含めてよいかを決める製品方針です。既定・明示指定のビルド対象にはどちらの配布区分も使用できます。 |
+
+`distribution` は、各リポジトリのリリース処理から `wrac_build_ops` の
+`WracContext::public_plugin_formats()` と `publicly_distributes_plugin_format()` を通じて参照できます。
+このテンプレートは公開用の配布物を作成せず、ビルド・インストール・検証対象もこの値では絞り込みません。
+公開可否の方針は、リリース処理で適用してください。
 
 ### `[[plugins]]`
 
