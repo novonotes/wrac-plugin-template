@@ -123,5 +123,3 @@ cargo xtask build --help
 For known DAW compatibility status, see the [DAW Compatibility Matrix](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix).
 
 For usage of the wxp crate, see the [wxp README](https://github.com/novonotes/wxp/tree/main/crates/wxp).
-
-For additional plugin examples built from this template, see [wrac-examples](https://github.com/novonotes/wrac-examples).

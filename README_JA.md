@@ -120,5 +120,3 @@ cargo xtask build --help
 主要 DAW での動作確認状況は [Wiki](https://github.com/novonotes/wrac-plugin-template/wiki/DAW-Compatibility-Matrix) を参照してください。
 
 wxp クレートの使い方は [wxp の README](https://github.com/novonotes/wxp/tree/main/crates/wxp) に記載しています。
-
-このテンプレートを元にした追加のプラグイン例は [wrac-examples](https://github.com/novonotes/wrac-examples) を参照してください。
