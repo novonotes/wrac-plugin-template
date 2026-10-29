@@ -33,6 +33,7 @@ It is also structured so it can be used as a template.
 - CLAP plugin implementation in Rust using [clap-sys](https://github.com/micahrj/clap-sys)
 - WebView GUI implementation using [wxp](https://github.com/novonotes/wxp)
 - VST3 / AU / AAX plugin builds and a development standalone app via [clap-wrapper](https://github.com/free-audio/clap-wrapper)
+- A delay setting in the GUI that changes the reported latency, as an example of applying a latency change through a host restart request
 
 ## Quick Start
 

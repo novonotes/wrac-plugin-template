@@ -30,6 +30,7 @@ WRAC スタックとは、 **Webview, Rust Audio, CLAP** の三つを中心に�
 - [clap-sys](https://github.com/micahrj/clap-sys) を用いた Rust による CLAP プラグイン実装
 - [wxp](https://github.com/novonotes/wxp) を用いた WebView GUI 実装
 - [clap-wrapper](https://github.com/free-audio/clap-wrapper) による VST3 / AU / AAX プラグインのビルドと開発用 standalone app
+- ホストへの再起動要求を通じて遅延の変更を反映する例として、申告する遅延を変える GUI の遅延設定
 
 ## クイックスタート
 
