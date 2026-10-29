@@ -13,7 +13,9 @@
 // template plugin keeps its delay setting out of the host parameter list.
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -36,14 +38,18 @@ static void ok(OSStatus status)
 // The input is silence with a single unit impulse at gImpulseAt (in the render sample
 // timeline), so the output position of the impulse is the plugin's actual delay.
 static std::atomic<int64_t> gImpulseAt{-1};
+// Continuous input makes a stale output buffer observable during a restart.
+static std::atomic<bool> gContinuousInput{false};
 static OSStatus input(void *, AudioUnitRenderActionFlags *, const AudioTimeStamp *timeStamp, UInt32,
                       UInt32 frames, AudioBufferList *buffers)
 {
   const auto start = static_cast<int64_t>(timeStamp->mSampleTime);
   const auto impulseAt = gImpulseAt.load();
+  const auto continuous = gContinuousInput.load();
   for (UInt32 c = 0; c < buffers->mNumberBuffers; ++c)
     for (UInt32 i = 0; i < frames; ++i)
-      static_cast<float *>(buffers->mBuffers[c].mData)[i] = (start + i == impulseAt) ? 1.0f : 0.0f;
+      static_cast<float *>(buffers->mBuffers[c].mData)[i] =
+          continuous ? 0.125f : ((start + i == impulseAt) ? 1.0f : 0.0f);
   return noErr;
 }
 
@@ -59,11 +65,16 @@ struct Renderer
   int64_t sampleTime = 0;
   float left[kBlockFrames]{};
   float right[kBlockFrames]{};
+  int silenceBlocksChecked = 0;
+  int signalBlocks = 0;
 
-  // Renders one block and returns the output sample time of the loudest sample in it,
-  // or -1 when the block is silent.
+  // Returns the loudest left-channel sample time above 0.5, or -1 otherwise. The
+  // threshold distinguishes the unit impulse from the lower-level continuous input.
   int64_t renderBlock()
   {
+    // A prefilled host buffer catches a restart path that marks silence but leaves stale data.
+    std::fill_n(left, kBlockFrames, 0.75f);
+    std::fill_n(right, kBlockFrames, -0.75f);
     AudioBufferList *buffers =
         static_cast<AudioBufferList *>(alloca(sizeof(AudioBufferList) + sizeof(AudioBuffer)));
     buffers->mNumberBuffers = 2;
@@ -76,15 +87,21 @@ struct Renderer
     ok(AudioUnitRender(unit, &flags, &timeStamp, 0, kBlockFrames, buffers));
     int64_t peakAt = -1;
     float peak = 0.5f;
+    bool hasSignal = false;
+    const bool silent = (flags & kAudioUnitRenderAction_OutputIsSilence) != 0;
     for (UInt32 i = 0; i < kBlockFrames; ++i)
     {
       require(std::isfinite(left[i]) && std::isfinite(right[i]), "Non-finite output");
+      if (silent) require(left[i] == 0.0f && right[i] == 0.0f, "Silence flag with nonzero output");
+      hasSignal |= left[i] != 0.0f || right[i] != 0.0f;
       if (std::fabs(left[i]) > peak)
       {
         peak = std::fabs(left[i]);
         peakAt = sampleTime + i;
       }
     }
+    if (silent) ++silenceBlocksChecked;
+    if (!silent && hasSignal) ++signalBlocks;
     sampleTime += kBlockFrames;
     return peakAt;
   }
@@ -136,7 +153,7 @@ static void requireDelay(int64_t delay, long expected, const char *message)
 
 // Restores a state that selects `frames` of delay, renders on another thread the whole
 // time the wrapper restarts the plugin, and waits for the AU to report the new latency.
-static void changeLatency(Renderer &renderer, int frames)
+static int changeLatency(Renderer &renderer, int frames)
 {
   auto state = stateWithLatency(renderer.unit, frames);
   const int notificationsBefore = gLatencyNotifications.load();
@@ -153,29 +170,46 @@ static void changeLatency(Renderer &renderer, int frames)
   // The wrapper never blocks the render thread for a restart; renders during it must
   // keep succeeding (the wrapper outputs silence for those blocks).
   std::atomic<bool> rendering{true};
+  std::atomic<bool> renderReady{false};
   std::exception_ptr renderError;
+  const int silenceBefore = renderer.silenceBlocksChecked;
+  const int signalBefore = renderer.signalBlocks;
+  gContinuousInput = true;
   std::thread renderThread(
       [&]
       {
         try
         {
-          while (rendering) renderer.renderBlock();
+          while (rendering)
+          {
+            renderer.renderBlock();
+            if (renderer.signalBlocks > signalBefore) renderReady = true;
+          }
         }
         catch (...)
         {
           renderError = std::current_exception();
+          renderReady = true;
         }
       });
 
+  // Start the restart only after nonzero audio has flowed, so silence checks cannot
+  // pass merely because the render thread was never scheduled.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!renderReady && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+
   // The restart runs from the wrapper's idle timer on this thread's run loop.
-  for (int i = 0; i < 100 && latencyFrames(renderer.unit) != frames; ++i)
+  for (int i = 0; renderReady && i < 100 && latencyFrames(renderer.unit) != frames; ++i)
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
   rendering = false;
   renderThread.join();
+  gContinuousInput = false;
   if (renderError) std::rethrow_exception(renderError);
+  require(renderReady, "Concurrent renderer did not produce nonzero audio");
 
   require(latencyFrames(renderer.unit) == frames, "AU did not report the new latency");
   require(gLatencyNotifications.load() > notificationsBefore, "AU did not notify the latency change");
+  return renderer.silenceBlocksChecked - silenceBefore;
 }
 
 // Sends one impulse through the plugin and returns how many samples later it came out.
@@ -249,13 +283,18 @@ int main(int argc, char **argv)
     require(latencyFrames(unit) == 0, "Plugin must start without latency");
     require(measuredDelay(renderer) == 0, "Audio is delayed although no latency is reported");
 
+    int silenceBlocksChecked = 0;
     for (int frames : {1024, 0})
     {
-      changeLatency(renderer, frames);
+      silenceBlocksChecked += changeLatency(renderer, frames);
       requireDelay(measuredDelay(renderer), frames, "Audio delay does not match the reported latency");
     }
 
     std::printf("PASS: latency reported, notified and applied across restarts\n");
+    if (silenceBlocksChecked > 0)
+      std::printf("PASS: %d silence-flagged blocks contained zero samples\n", silenceBlocksChecked);
+    else
+      std::printf("SKIP: no silence-flagged block was captured during restart\n");
     AudioUnitUninitialize(unit);
     AudioComponentInstanceDispose(unit);
     return 0;
