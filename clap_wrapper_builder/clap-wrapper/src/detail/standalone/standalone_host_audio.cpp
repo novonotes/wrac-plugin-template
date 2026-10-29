@@ -473,6 +473,11 @@ std::string StandaloneHost::deviceName(const std::string &id)
 std::vector<AudioDevice> StandaloneHost::getInputAudioDevices()
 {
   std::vector<AudioDevice> res;
+#if !CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT
+  // Nothing to offer: the settings screen must not let the user pick an input this build
+  // cannot open.
+  return res;
+#endif
   for (const auto &device : deviceList())
   {
     if (device.inputChannels > 0) res.push_back(device);
@@ -542,6 +547,12 @@ void StandaloneHost::startAudioThreadOn(const std::string &inputDevice, uint32_t
   // would leave the standalone half-started, so trap it here; the plugin simply stays
   // deactivated and the app runs on without audio.
   lastAudioError.clear();
+
+#if !CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT
+  // Keep every entry point output-only so settings UI or restored state cannot regain a capability
+  // that the embedding build intentionally removed.
+  useInput = false;
+#endif
 
   try
   {

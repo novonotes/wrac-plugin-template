@@ -15,6 +15,12 @@
 #include "detail/clap/fsutil.h"
 
 #include "standalone_audio.h"
+
+// Preserve the upstream standalone behavior unless the embedding build declares that physical
+// audio capture is outside the app's capability set.
+#ifndef CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT
+#define CLAP_WRAPPER_STANDALONE_ALLOW_AUDIO_INPUT 1
+#endif
 #include "standalone_midi.h"
 #include "midi_ring.h"
 
