@@ -21,6 +21,8 @@ mod configurable_audio_ports;
 mod entry_callbacks;
 mod ffi;
 mod gui_extension;
+#[cfg(target_os = "macos")]
+mod identity_extension;
 mod latency_extension;
 mod note_ports;
 mod params_extension;
@@ -255,11 +257,7 @@ impl PluginInstanceState {
             host_extensions_initialized.clone(),
         ));
         let host_gui = Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone()));
-        let host_identity = Arc::new(HostIdentityProxy::new(
-            host,
-            host_extensions_initialized.clone(),
-            host_context.clone(),
-        ));
+        let host_identity = Arc::new(HostIdentityProxy::new(host_context.clone()));
         let storage = registration.storage();
 
         Some(Box::new(Self {

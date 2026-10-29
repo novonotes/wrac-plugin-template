@@ -109,6 +109,76 @@ static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
 static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(target_os = "macos")]
+#[test]
+fn au_identifier_extension_copies_host_owned_strings_per_instance() {
+    use crate::interface::HostIdentity;
+    use std::ffi::{c_char, c_void};
+    use wrac_host_context::HostFamily;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFStringCreateWithCString(
+            allocator: *const c_void,
+            text: *const c_char,
+            encoding: u32,
+        ) -> *const c_void;
+        fn CFRelease(object: *const c_void);
+    }
+
+    let host = test_host();
+    let mut context = HostContext::detect_current(None);
+    context.plugin_format = wrac_host_context::PluginFormat::Au;
+    context.host = wrac_host_context::detect_host_from_path("/unknown-host");
+    let mut instance = PluginInstanceState::new(
+        &ZERO_LATENCY_REGISTRATION,
+        0,
+        TEST_DESCRIPTOR.id,
+        &host,
+        None,
+        context.clone(),
+    )
+    .expect("test plugin instance");
+    let other = PluginInstanceState::new(
+        &ZERO_LATENCY_REGISTRATION,
+        0,
+        TEST_DESCRIPTOR.id,
+        &host,
+        None,
+        context,
+    )
+    .expect("second test plugin instance");
+    instance.plugin.plugin_data = (&mut *instance as *mut PluginInstanceState).cast();
+    let plugin = &instance.plugin as *const clap_plugin;
+    let ext = unsafe {
+        plugin_get_extension(
+            plugin,
+            super::identity_extension::AU_HOST_IDENTIFIER.as_ptr(),
+        )
+    };
+    assert!(!ext.is_null());
+    let ext = unsafe { &*(ext as *const super::identity_extension::AuHostIdentity) };
+    let name = unsafe {
+        CFStringCreateWithCString(ptr::null(), c"com.apple.garageband".as_ptr(), 0x0800_0100)
+    };
+    assert!(!name.is_null());
+    assert!(unsafe { (ext.set)(plugin, name) });
+    unsafe { CFRelease(name) };
+    assert_eq!(
+        instance.host_identity.current_host().family,
+        HostFamily::AppleGarageBand
+    );
+    assert_eq!(
+        other.host_identity.current_host().family,
+        HostFamily::Unknown
+    );
+    assert!(unsafe { (ext.set)(plugin, ptr::null()) });
+    assert_eq!(
+        instance.host_identity.current_host().family,
+        HostFamily::Unknown
+    );
+}
+
 #[test]
 fn zero_latency_exposes_latency_extension() {
     let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());

@@ -14,14 +14,6 @@ extern bool fillAudioUnitCocoaView(AudioUnitCocoaViewInfo *viewInfo, std::shared
 namespace free_audio::auv2_wrapper
 {
 
-bool WrapAsAUV2::copy_au_host_identifier(char *buffer, uint32_t capacity)
-{
-  std::lock_guard<std::mutex> lock(_hostIdentifierMutex);
-  if (!buffer || _hostIdentifier.empty() || _hostIdentifier.size() + 1 > capacity) return false;
-  std::memcpy(buffer, _hostIdentifier.c_str(), _hostIdentifier.size() + 1);
-  return true;
-}
-
 // Holds the library with plugins. Intentionally never destroyed: at process
 // exit dyld finalizes the hosted .clap before this binary, so running
 // clap_entry.deinit() from a static destructor reaches into a plugin whose
@@ -1275,20 +1267,20 @@ OSStatus WrapAsAUV2::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
       {
         if (!inData || inDataSize < sizeof(AUHostVersionIdentifier))
           return kAudioUnitErr_InvalidPropertyValue;
-        const auto *identifier = static_cast<const AUHostVersionIdentifier *>(inData);
-        std::string value;
-        if (identifier->hostName)
+        // The adapter copies the CFString during this call; the host retains ownership.
+        struct HostIdentityExtension
         {
-          const auto capacity = CFStringGetMaximumSizeForEncoding(CFStringGetLength(identifier->hostName),
-                                                                   kCFStringEncodingUTF8) + 1;
-          std::vector<char> text(static_cast<size_t>(capacity));
-          if (!CFStringGetCString(identifier->hostName, text.data(), capacity, kCFStringEncodingUTF8))
+          bool (*set)(const clap_plugin_t *, CFStringRef);
+        };
+        if (_plugin && _plugin->_plugin && _plugin->_plugin->get_extension)
+        {
+          const auto *plugin = _plugin->_plugin;
+          const auto *extension = static_cast<const HostIdentityExtension *>(
+              plugin->get_extension(plugin, "com.novonotes.wrac.au-host-identifier/1"));
+          if (extension &&
+              !extension->set(plugin, static_cast<const AUHostVersionIdentifier *>(inData)->hostName))
             return kAudioUnitErr_InvalidPropertyValue;
-          value = text.data();
         }
-        // Copy the CFString because the host only owns it for the duration of SetProperty.
-        std::lock_guard<std::mutex> lock(_hostIdentifierMutex);
-        _hostIdentifier = std::move(value);
         return noErr;
       }
       case kAudioUnitProperty_BypassEffect:
