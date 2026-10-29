@@ -4,6 +4,13 @@
 //! bundle identifiers, plugin IDs, wrapper descriptors, format policies, and
 //! artifact metadata. This crate reads that file into typed Rust structures
 //! for build scripts and xtask code; it does not perform plugin builds itself.
+//!
+//! Validation cannot infer plugin behavior, global identity, or compatibility
+//! with released versions. Choose CLAP features and AAX stem layouts that match
+//! the plugin's actual behavior and VST3 subcategories accepted by target hosts;
+//! validation only checks that the subcategories are nonempty. Use a globally
+//! unique CLAP plugin ID and keep format identifiers stable after release so
+//! hosts can restore saved projects.
 
 use std::{
     collections::HashSet,

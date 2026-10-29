@@ -56,15 +56,7 @@ AAX ビルドには、加えて private な AAX SDK が必要です。ローカ�
 host-visible ID を Rust code や Cargo metadata に重複して書かず、この manifest を編集してください。
 
 各プラグインのマニフェストは `<plugin-root>/src-plugin/Cargo.toml` と `<plugin-root>/src-plugin/wrac-plugin.toml` に置いてください。xtask と CI は WRAC マニフェストの欠落や別配置を拒否します。
-> **重要:** プラグイン ID はグローバルに一意である必要があります。一度公開したら変更できません。
-> AUv2 の `auv2_type`、`auv2_subtype`、`auv2_manufacturer_code` は、それぞれ 4 byte の ASCII にしてください。
-> `clap_features` は実際の audio/MIDI 挙動と一致させてください。CLAP host が直接読みます。
-> `formats` は、既定の `xtask` build/install/validate が使う製品方針です。各形式の
-> `distribution` は公開配布物へ含めてよいかを宣言します。
-> `vst3_subcategories` は VST3 host browser category を制御します。`Fx|Dynamics` のような Steinberg 形式の `|` 区切り値を指定してください。
-> `vst3_component_id` は安定した UUID にしてください。release 前に一度生成し、同じ製品では変更しないでください。
-> `aax_manufacturer_id`、`aax_product_id`、各 AAX stem config の `plugin_id` は、安定した 4 byte ASCII ID にしてください。
-> AAX stem config には、製品が実際に対応する channel layout だけを列挙してください。
+設定項目と注意事項は [wrac_manifest の README](../crates/wrac_manifest/README_JA.md) を参照してください。
 
 ### 3. 残りの識別子を一括置換
 

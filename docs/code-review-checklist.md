@@ -13,8 +13,9 @@ requirements and does not access project/editor state, GUI notifications, file
 I/O, or other non-realtime services.
 
 Also check logging in realtime paths. Code reachable from the audio callback,
-parameter/event application performed by that callback, host process callbacks,
-or realtime query methods must not use regular `log::*` macros. When
+parameter/event application performed by that callback, code called synchronously
+from host process callbacks, or realtime query methods must not use regular
+`log::*` macros. When
 realtime-path logging is unavoidable, use realtime-safe `wrac_log::rtwarn!` /
 `wrac_log::rtdebug!` instead.
 

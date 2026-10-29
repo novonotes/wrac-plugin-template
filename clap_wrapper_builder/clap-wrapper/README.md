@@ -52,7 +52,7 @@ simple CMake command
 ```bash
 git clone https://github.com/free-audio/clap-wrapper.git
 mkdir build
-cmake -B build \ 
+cmake -B build \
       -DCLAP_SDK_ROOT={path to clap sdk} \
       -DVST3_SDK_ROOT={path to vst3 sdk} \
       -DCLAP_WRAPPER_OUTPUT_NAME="The Name of your CLAP"
