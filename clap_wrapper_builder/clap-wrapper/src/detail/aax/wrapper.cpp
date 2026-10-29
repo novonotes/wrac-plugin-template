@@ -1081,15 +1081,29 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
         _bypassParameter = wrappedParam;
       }
 
-      auto p = new AAX_CParameter<double>(
-          _parameterMap[id]->_aax_identifier.c_str(), AAX_CString(paramname),
-          wrappedParam->asAAXValue(info.default_value), AAX_CLinearTaperDelegate<double>(0, 1),
-          AAX_ClapParamDisplayDelegate(wrappedParam), info.flags & CLAP_PARAM_IS_AUTOMATABLE);
-      mParameterManager.AddParameter(p);
-      if (wrappedParam == _bypassParameter)
+      if (isBypassParameter)
       {
+        // The AAX master bypass data port is an int32 packet. Keep the public
+        // CLAP bypass parameter on AAX's binary path so the default packet
+        // handler writes a compatible value for the process context.
+        auto p = new AAX_CParameter<bool>(
+            wrappedParam->_aax_identifier.c_str(), AAX_CString(paramname),
+            wrappedParam->asAAXValue(info.default_value) >= 0.5,
+            AAX_CBinaryTaperDelegate<bool>(), AAX_CBinaryDisplayDelegate<bool>("off", "on"),
+            info.flags & CLAP_PARAM_IS_AUTOMATABLE);
+        p->SetNumberOfSteps(2);
+        p->SetType(AAX_eParameterType_Discrete);
+        mParameterManager.AddParameter(p);
         mPacketDispatcher.RegisterPacket(wrappedParam->_aax_identifier.c_str(),
                                          AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mBypass));
+      }
+      else
+      {
+        auto p = new AAX_CParameter<double>(
+            _parameterMap[id]->_aax_identifier.c_str(), AAX_CString(paramname),
+            wrappedParam->asAAXValue(info.default_value), AAX_CLinearTaperDelegate<double>(0, 1),
+            AAX_ClapParamDisplayDelegate(wrappedParam), info.flags & CLAP_PARAM_IS_AUTOMATABLE);
+        mParameterManager.AddParameter(p);
       }
 
       // get the index and store it for fast retrieval
