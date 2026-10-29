@@ -49,6 +49,9 @@ impl EditorPage {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ProjectState {
     pub(crate) editor_page: EditorPage,
+    // The delay the user selected. The audio thread never reads it: it takes effect
+    // through the next activation (see `plugin::latency`).
+    pub(crate) latency_frames: u32,
 }
 
 /// Source of truth for [`ProjectState`]. The audio thread never touches this lock.
@@ -80,6 +83,14 @@ impl ProjectStateStore {
 
     pub(crate) fn set_editor_page(&self, editor_page: EditorPage) {
         self.state.write().editor_page = editor_page;
+    }
+
+    pub(crate) fn latency_frames(&self) -> u32 {
+        self.snapshot().latency_frames
+    }
+
+    pub(crate) fn set_latency_frames(&self, latency_frames: u32) {
+        self.state.write().latency_frames = latency_frames;
     }
 }
 

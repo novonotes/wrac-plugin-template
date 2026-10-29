@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use serde_json::json;
 use wxp::Channel;
 
-use crate::plugin::parameter_value_text;
+use crate::plugin::{LATENCY_FRAME_CHOICES, parameter_value_text};
 use crate::state::EditorPage;
 
 /// Outbound notification channel that pushes GUI state to the WebView. The caller decides when to notify.
@@ -47,6 +47,7 @@ impl GuiSubscriptionId {
 enum GuiSubscriptionKind {
     Parameters,
     EditorPage,
+    Latency,
 }
 
 impl GuiStateNotifier {
@@ -63,6 +64,10 @@ impl GuiStateNotifier {
 
     pub(crate) fn subscribe_editor_page(&self, channel: Channel) -> GuiSubscriptionId {
         self.subscribe(GuiSubscriptionKind::EditorPage, channel)
+    }
+
+    pub(crate) fn subscribe_latency(&self, channel: Channel) -> GuiSubscriptionId {
+        self.subscribe(GuiSubscriptionKind::Latency, channel)
     }
 
     fn subscribe(&self, kind: GuiSubscriptionKind, channel: Channel) -> GuiSubscriptionId {
@@ -94,6 +99,13 @@ impl GuiStateNotifier {
         self.notify(
             GuiSubscriptionKind::EditorPage,
             editor_page_payload(editor_page),
+        );
+    }
+
+    pub(crate) fn notify_latency(&self, latency_frames: u32) {
+        self.notify(
+            GuiSubscriptionKind::Latency,
+            latency_payload(latency_frames),
         );
     }
 
@@ -139,5 +151,13 @@ pub(crate) fn editor_page_payload(editor_page: EditorPage) -> serde_json::Value 
     json!({
         "type": "editor-page",
         "page": editor_page.as_str(),
+    })
+}
+
+pub(crate) fn latency_payload(latency_frames: u32) -> serde_json::Value {
+    json!({
+        "type": "latency",
+        "latencyFrames": latency_frames,
+        "choices": LATENCY_FRAME_CHOICES,
     })
 }

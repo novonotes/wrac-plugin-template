@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use wrac_clap_adapter::interface::{PluginError, PluginResult, PluginStateExtension, State};
 
+use super::latency::{LatencyStore, is_latency_frame_choice};
 use crate::gui::GuiStateNotifier;
 use crate::plugin::notify_gui_parameters;
 use crate::state::{
@@ -22,11 +23,15 @@ pub(crate) struct SavedState {
     pub(crate) bypass: bool,
     #[serde(default)]
     pub(crate) editor_page: EditorPage,
+    // Absent from projects saved before the delay setting existed, which had none.
+    #[serde(default)]
+    pub(crate) latency_frames: u32,
 }
 
 pub(super) struct WracGainStateExtension {
     project_state: Arc<ProjectStateStore>,
     shared: Arc<SharedState>,
+    latency: Arc<LatencyStore>,
     gui_notifier: Arc<GuiStateNotifier>,
 }
 
@@ -34,11 +39,13 @@ impl WracGainStateExtension {
     pub(super) fn new(
         project_state: Arc<ProjectStateStore>,
         shared: Arc<SharedState>,
+        latency: Arc<LatencyStore>,
         gui_notifier: Arc<GuiStateNotifier>,
     ) -> Self {
         Self {
             project_state,
             shared,
+            latency,
             gui_notifier,
         }
     }
@@ -54,6 +61,7 @@ impl PluginStateExtension for WracGainStateExtension {
             gain: params.gain,
             bypass: params.bypass,
             editor_page: project.editor_page,
+            latency_frames: project.latency_frames,
         })
         .map_err(|_| PluginError::InvalidState)?;
         Ok(wrac_clap_adapter::interface::PreparedStateSave::new(
@@ -65,10 +73,18 @@ impl PluginStateExtension for WracGainStateExtension {
         log::debug!("restoring plugin state: byte_count={}", state.bytes.len());
         let state: SavedState =
             serde_json::from_slice(&state.bytes).map_err(|_| PluginError::InvalidState)?;
+        // Reject the whole payload rather than loading a delay the processor was never
+        // built for; a failed restore leaves the current state untouched.
+        if !is_latency_frame_choice(state.latency_frames) {
+            return Err(PluginError::InvalidState);
+        }
         let project = ProjectState {
             editor_page: state.editor_page,
+            latency_frames: state.latency_frames,
         };
         self.project_state.commit(project);
+        // A restored delay takes effect through a reactivation, like a GUI selection.
+        self.latency.request_restart_if_pending();
         self.shared.restore_parameters(ParameterStateSnapshot {
             gain: state.gain,
             bypass: state.bypass,
@@ -77,6 +93,7 @@ impl PluginStateExtension for WracGainStateExtension {
             self.gui_notifier.notify_parameter(parameter_id, value);
         });
         self.gui_notifier.notify_editor_page(project.editor_page);
+        self.gui_notifier.notify_latency(project.latency_frames);
         Ok(())
     }
 }
@@ -91,5 +108,6 @@ mod tests {
         assert_eq!(state.gain, 1.25);
         assert!(!state.bypass);
         assert_eq!(state.editor_page, EditorPage::Controls);
+        assert_eq!(state.latency_frames, 0);
     }
 }

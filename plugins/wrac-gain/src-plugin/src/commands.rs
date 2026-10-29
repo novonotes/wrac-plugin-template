@@ -15,9 +15,12 @@ use wrac_wxp_gui::{
 };
 use wxp::WxpCommandHandler;
 
-use crate::gui::{GuiStateNotifier, GuiSubscriptionId, editor_page_payload, parameter_payload};
+use crate::gui::{
+    GuiStateNotifier, GuiSubscriptionId, editor_page_payload, latency_payload, parameter_payload,
+};
 use crate::plugin::{
-    WracGainParamOutputQueue, parameter_default_value, parameter_host_value, parameter_text_value,
+    LatencyStore, WracGainParamOutputQueue, is_latency_frame_choice, parameter_default_value,
+    parameter_host_value, parameter_text_value,
 };
 use crate::state::{EditorPage, ProjectStateStore, SharedState};
 
@@ -42,6 +45,7 @@ struct FrontendLogEntry {
 pub(crate) struct CommandRegistrationDependencies {
     pub(crate) project_state: Arc<ProjectStateStore>,
     pub(crate) shared: Arc<SharedState>,
+    pub(crate) latency: Arc<LatencyStore>,
     pub(crate) gui_notifier: Arc<GuiStateNotifier>,
     pub(crate) descriptor: PluginDescriptor,
     pub(crate) param_output_queue: Arc<WracGainParamOutputQueue>,
@@ -61,6 +65,7 @@ pub(crate) fn register_commands(
     let CommandRegistrationDependencies {
         project_state,
         shared,
+        latency,
         gui_notifier,
         descriptor,
         param_output_queue,
@@ -115,6 +120,30 @@ pub(crate) fn register_commands(
             project_state.set_editor_page(editor_page);
             gui_notifier.notify_editor_page(editor_page);
             Ok::<_, String>(editor_page_payload(editor_page))
+        });
+    }
+
+    // The delay setting is editor state, not a host parameter: a latency change makes the
+    // host recompute its delay compensation, which hosts do not expect from automation.
+    // Selecting it here asks the host for the reactivation that applies it.
+    {
+        let project_state = project_state.clone();
+        command_handler.register_sync("get_latency", move |_| {
+            Ok::<_, String>(latency_payload(project_state.latency_frames()))
+        });
+    }
+
+    {
+        let latency = latency.clone();
+        let gui_notifier = gui_notifier.clone();
+        command_handler.register_sync("set_latency", move |ctx| {
+            let latency_frames = ctx.arg::<u32>("latencyFrames").map_err(|e| e.to_string())?;
+            if !is_latency_frame_choice(latency_frames) {
+                return Err("invalid latency".to_string());
+            }
+            latency.select(latency_frames);
+            gui_notifier.notify_latency(latency_frames);
+            Ok::<_, String>(latency_payload(latency_frames))
         });
     }
 
@@ -240,6 +269,18 @@ pub(crate) fn register_commands(
         command_handler.register_sync("subscribe_editor_page", move |ctx| {
             let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
             let subscription_id = gui_notifier.subscribe_editor_page(channel);
+            Ok::<_, String>(json!({
+                "ok": true,
+                "subscriptionId": subscription_id.get(),
+            }))
+        });
+    }
+
+    {
+        let gui_notifier = gui_notifier.clone();
+        command_handler.register_sync("subscribe_latency", move |ctx| {
+            let channel = ctx.channel("channel").map_err(|e| e.to_string())?;
+            let subscription_id = gui_notifier.subscribe_latency(channel);
             Ok::<_, String>(json!({
                 "ok": true,
                 "subscriptionId": subscription_id.get(),

@@ -36,6 +36,8 @@ pub(crate) struct WracGainAudioProcessor {
     // "snapshot layout at activate time and store it as a field."
     // In debug builds, the actual buffer is verified to match this snapshot.
     audio_channel_count: u32,
+    // Fixed for this processor's lifetime and equal to the latency reported for it.
+    delay: DelayLine,
 }
 
 impl WracGainAudioProcessor {
@@ -43,11 +45,14 @@ impl WracGainAudioProcessor {
         shared: Arc<SharedState>,
         param_output_queue: Arc<WracGainParamOutputQueue>,
         audio_channel_count: u32,
+        latency_frames: u32,
     ) -> Self {
         Self {
             shared,
             param_output_queue,
             audio_channel_count,
+            // Allocated here, at activation, so process() never allocates.
+            delay: DelayLine::new(audio_channel_count as usize, latency_frames as usize),
         }
     }
 }
@@ -93,6 +98,12 @@ impl WracGainAudioProcessor {
         );
 
         self.param_output_queue.drain(&mut context.events.output);
+
+        // Delay the whole block before gain, bypassed or not: the reported latency must
+        // describe the audio in every state, or the host's compensation would be wrong
+        // whenever bypass is toggled.
+        self.delay
+            .process(&mut context.audio, context.frames_count as usize)?;
 
         // Gain at the start of this block; updated each time a parameter event arrives.
         let mut gain = self.shared.gain();
@@ -257,5 +268,60 @@ fn process_channels_range<T>(
 {
     for mut channel in channels {
         channel.map_samples_range(start, len, |sample| sample * gain);
+    }
+}
+
+/// Delays every channel by a fixed number of samples.
+///
+/// One ring buffer per channel, shared by f32 and f64 blocks by storing f64. All channels
+/// advance together, so `position` is common to them.
+struct DelayLine {
+    buffers: Vec<Vec<f64>>,
+    position: usize,
+}
+
+impl DelayLine {
+    fn new(channel_count: usize, delay_frames: usize) -> Self {
+        Self {
+            buffers: if delay_frames == 0 {
+                Vec::new()
+            } else {
+                vec![vec![0.0; delay_frames]; channel_count]
+            },
+            position: 0,
+        }
+    }
+
+    fn process(&mut self, audio: &mut AudioProcessBuffer<'_>, frames: usize) -> PluginResult<()> {
+        let Some(delay_frames) = self.buffers.first().map(Vec::len) else {
+            return Ok(());
+        };
+        // WRAC Gain has a single main port pair (see the layout assertion above).
+        if let Some(mut port_pair) = audio.port_pair(0) {
+            match port_pair.channels()? {
+                AudioPortChannels::F32(channels) => {
+                    for (mut channel, buffer) in channels.into_iter().zip(self.buffers.iter_mut()) {
+                        let mut position = self.position;
+                        channel.map_samples_range(0, frames, |sample| {
+                            let delayed = std::mem::replace(&mut buffer[position], sample as f64);
+                            position = (position + 1) % delay_frames;
+                            delayed as f32
+                        });
+                    }
+                }
+                AudioPortChannels::F64(channels) => {
+                    for (mut channel, buffer) in channels.into_iter().zip(self.buffers.iter_mut()) {
+                        let mut position = self.position;
+                        channel.map_samples_range(0, frames, |sample| {
+                            let delayed = std::mem::replace(&mut buffer[position], sample);
+                            position = (position + 1) % delay_frames;
+                            delayed
+                        });
+                    }
+                }
+            }
+        }
+        self.position = (self.position + frames) % delay_frames;
+        Ok(())
     }
 }

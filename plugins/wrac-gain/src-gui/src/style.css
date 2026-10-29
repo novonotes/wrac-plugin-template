@@ -194,6 +194,27 @@ body {
   transform-origin: 50% 87px;
 }
 
+.latency-row {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: #d9b985;
+}
+
+.latency-select {
+  min-width: 120px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.24);
+  color: #f7f1e7;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
 .resize-grip {
   position: absolute;
   right: 8px;
