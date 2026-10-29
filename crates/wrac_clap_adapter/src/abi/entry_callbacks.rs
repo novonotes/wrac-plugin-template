@@ -300,7 +300,8 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
         };
 
         let clap_host_name = unsafe { clap_host_name(host) };
-        let host_context = HostContext::detect_current(clap_host_name.as_deref());
+        let (host_context, au_host_identifier) =
+            HostContext::detect_current(clap_host_name.as_deref());
         let attach_in_adapter = host_context.plugin_format == PluginFormat::Unknown;
         if attach_in_adapter {
             registration.entry.attach_main_thread();
@@ -313,6 +314,7 @@ pub(crate) unsafe extern "C" fn factory_create_plugin(
             host,
             clap_host_name,
             host_context,
+            au_host_identifier,
         ) else {
             if attach_in_adapter {
                 registration.entry.detach_main_thread();

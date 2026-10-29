@@ -34,8 +34,8 @@ fn selects_logical_host_size_for_macos_wrappers() {
     let formats = [PluginFormat::Vst3, PluginFormat::Au, PluginFormat::Aax];
 
     for plugin_format in formats {
-        let context = HostContext {
-            host: DetectedHost {
+        let (context, _) = HostContext::new(
+            DetectedHost {
                 family: HostFamily::Unknown,
                 display_name: "test".to_string(),
                 process_name: "test".to_string(),
@@ -43,8 +43,8 @@ fn selects_logical_host_size_for_macos_wrappers() {
                 version: None,
             },
             plugin_format,
-            system: wrac_host_context::SystemContext::detect(),
-        };
+            wrac_host_context::SystemContext::detect(),
+        );
 
         let expected = if cfg!(target_os = "macos") {
             HostGuiSizeUnit::LogicalPoints

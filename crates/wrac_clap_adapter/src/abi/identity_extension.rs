@@ -5,15 +5,17 @@ use clap_sys::plugin::clap_plugin;
 use super::PluginInstanceState;
 use super::ffi::ffi_bool;
 
+// Mirrors `WRAC_AU_HOST_IDENTIFIER` and `wrac_au_host_identifier` in clapwrapper/wrac.h,
+// the source of truth for this wrapper-to-adapter ABI.
 pub(super) const AU_HOST_IDENTIFIER: &CStr = c"com.novonotes.wrac.au-host-identifier/1";
 
 // The AU wrapper forwards a borrowed CFString, which must be copied before returning.
 #[repr(C)]
-pub(super) struct AuHostIdentity {
+pub(super) struct AuHostIdentifier {
     pub(super) set: unsafe extern "C" fn(*const clap_plugin, *const c_void) -> bool,
 }
 
-pub(super) static AU_HOST_IDENTITY: AuHostIdentity = AuHostIdentity {
+pub(super) static AU_HOST_IDENTIFIER_EXTENSION: AuHostIdentifier = AuHostIdentifier {
     set: set_identifier,
 };
 
@@ -55,7 +57,7 @@ unsafe extern "C" fn set_identifier(plugin: *const clap_plugin, string: *const c
             };
             Some(identifier.to_owned())
         };
-        instance.host_identity.set_au_identifier(identifier);
+        instance.au_host_identifier.set(identifier);
         true
     })
 }

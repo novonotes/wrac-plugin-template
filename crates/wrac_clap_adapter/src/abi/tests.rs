@@ -112,9 +112,8 @@ static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
 #[cfg(target_os = "macos")]
 #[test]
 fn au_identifier_extension_copies_host_owned_strings_per_instance() {
-    use crate::interface::HostIdentity;
     use std::ffi::{c_char, c_void};
-    use wrac_host_context::HostFamily;
+    use wrac_host_context::{HostFamily, PluginFormat, SystemContext, detect_host_from_path};
 
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
@@ -127,27 +126,25 @@ fn au_identifier_extension_copies_host_owned_strings_per_instance() {
     }
 
     let host = test_host();
-    let mut context = HostContext::detect_current(None);
-    context.plugin_format = wrac_host_context::PluginFormat::Au;
-    context.host = wrac_host_context::detect_host_from_path("/unknown-host");
-    let mut instance = PluginInstanceState::new(
-        &ZERO_LATENCY_REGISTRATION,
-        0,
-        TEST_DESCRIPTOR.id,
-        &host,
-        None,
-        context.clone(),
-    )
-    .expect("test plugin instance");
-    let other = PluginInstanceState::new(
-        &ZERO_LATENCY_REGISTRATION,
-        0,
-        TEST_DESCRIPTOR.id,
-        &host,
-        None,
-        context,
-    )
-    .expect("second test plugin instance");
+    let au_instance = || {
+        let (context, writer) = HostContext::new(
+            detect_host_from_path("/unknown-host"),
+            PluginFormat::Au,
+            SystemContext::detect(),
+        );
+        PluginInstanceState::new(
+            &ZERO_LATENCY_REGISTRATION,
+            0,
+            TEST_DESCRIPTOR.id,
+            &host,
+            None,
+            context,
+            writer,
+        )
+        .expect("test plugin instance")
+    };
+    let mut instance = au_instance();
+    let other = au_instance();
     instance.plugin.plugin_data = (&mut *instance as *mut PluginInstanceState).cast();
     let plugin = &instance.plugin as *const clap_plugin;
     let ext = unsafe {
@@ -157,7 +154,7 @@ fn au_identifier_extension_copies_host_owned_strings_per_instance() {
         )
     };
     assert!(!ext.is_null());
-    let ext = unsafe { &*(ext as *const super::identity_extension::AuHostIdentity) };
+    let ext = unsafe { &*(ext as *const super::identity_extension::AuHostIdentifier) };
     let name = unsafe {
         CFStringCreateWithCString(ptr::null(), c"com.apple.garageband".as_ptr(), 0x0800_0100)
     };
@@ -165,18 +162,12 @@ fn au_identifier_extension_copies_host_owned_strings_per_instance() {
     assert!(unsafe { (ext.set)(plugin, name) });
     unsafe { CFRelease(name) };
     assert_eq!(
-        instance.host_identity.current_host().family,
+        instance.host_context.host().family,
         HostFamily::AppleGarageBand
     );
-    assert_eq!(
-        other.host_identity.current_host().family,
-        HostFamily::Unknown
-    );
+    assert_eq!(other.host_context.host().family, HostFamily::Unknown);
     assert!(unsafe { (ext.set)(plugin, ptr::null()) });
-    assert_eq!(
-        instance.host_identity.current_host().family,
-        HostFamily::Unknown
-    );
+    assert_eq!(instance.host_context.host().family, HostFamily::Unknown);
 }
 
 #[test]
@@ -333,13 +324,15 @@ fn test_instance(
     registration: &'static EntryRegistration,
     host: *const clap_host,
 ) -> Box<PluginInstanceState> {
+    let (context, writer) = HostContext::detect_current(None);
     let mut instance = PluginInstanceState::new(
         registration,
         0,
         TEST_DESCRIPTOR.id,
         host,
         None,
-        HostContext::detect_current(None),
+        context,
+        writer,
     )
     .expect("test plugin instance");
     let instance_ptr = (&mut *instance) as *mut PluginInstanceState;

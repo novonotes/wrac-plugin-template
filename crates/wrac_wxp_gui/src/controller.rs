@@ -179,7 +179,7 @@ impl WxpGuiController {
 }
 
 fn is_cubase_vst3(host_context: &HostContext) -> bool {
-    host_context.host.family == HostFamily::SteinbergCubase
+    host_context.host().family == HostFamily::SteinbergCubase
         && host_context.plugin_format == PluginFormat::Vst3
 }
 

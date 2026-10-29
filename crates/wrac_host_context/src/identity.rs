@@ -58,38 +58,35 @@ fn valid_apple_host_name(name: &str, family: HostFamily) -> bool {
         })
 }
 
-impl HostContext {
-    /// Resolves the current AU host identifier without changing the process identity.
-    ///
-    /// Hosts can supply this identifier after instance creation. Validation processes
-    /// keep their own classification even when hosted by an application.
-    pub fn host_with_au_identifier(&self, identifier: Option<&str>) -> DetectedHost {
-        if self.plugin_format != PluginFormat::Au || self.host.is_validation_or_scan_host() {
-            return self.host.clone();
+/// Resolves the AU host identifier sent after instance creation against the process host.
+///
+/// Unrecognized or missing identifiers fall back to the process host.
+pub(super) fn resolve_au_host(
+    process_host: &DetectedHost,
+    identifier: Option<&str>,
+) -> DetectedHost {
+    let matched = match identifier {
+        Some("com.apple.garageband") => {
+            Some(host(HostFamily::AppleGarageBand, "Apple GarageBand", None))
         }
-        let matched = match identifier {
-            Some("com.apple.garageband") => {
-                Some(host(HostFamily::AppleGarageBand, "Apple GarageBand", None))
-            }
-            Some("com.apple.logic.pro") => Some(host(HostFamily::AppleLogic, "Apple Logic", None)),
-            Some("com.apple.mainstage") => {
-                Some(host(HostFamily::AppleMainStage, "Apple MainStage", None))
-            }
-            _ => None,
-        };
-        match matched {
-            Some(matched) => DetectedHost {
-                family: matched.family,
-                display_name: matched.display_name.to_string(),
-                // The identifier does not carry a version; keep a known version for the same host.
-                version: matched.version.or_else(|| {
-                    (matched.family == self.host.family)
-                        .then_some(self.host.version)
-                        .flatten()
-                }),
-                ..self.host.clone()
-            },
-            None => self.host.clone(),
+        Some("com.apple.logic.pro") => Some(host(HostFamily::AppleLogic, "Apple Logic", None)),
+        Some("com.apple.mainstage") => {
+            Some(host(HostFamily::AppleMainStage, "Apple MainStage", None))
         }
+        _ => None,
+    };
+    match matched {
+        Some(matched) => DetectedHost {
+            family: matched.family,
+            display_name: matched.display_name.to_string(),
+            // The identifier does not carry a version; keep a known version for the same host.
+            version: matched.version.or_else(|| {
+                (matched.family == process_host.family)
+                    .then_some(process_host.version)
+                    .flatten()
+            }),
+            ..process_host.clone()
+        },
+        None => process_host.clone(),
     }
 }

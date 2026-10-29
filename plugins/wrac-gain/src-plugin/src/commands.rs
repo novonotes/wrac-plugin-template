@@ -349,12 +349,13 @@ fn write_frontend_log(entry: FrontendLogEntry) {
 }
 
 fn frontend_runtime_context(host_context: &HostContext) -> serde_json::Value {
+    let host = host_context.host();
     json!({
         "os": std::env::consts::OS,
         "pluginFormat": host_context.plugin_format.as_str(),
-        "hostFamily": host_family_id(host_context.host.family),
-        "hostName": host_context.host.display_name,
-        "processName": host_context.host.process_name,
+        "hostFamily": host_family_id(host.family),
+        "hostName": host.display_name,
+        "processName": host.process_name,
     })
 }
 

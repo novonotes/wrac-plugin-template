@@ -2,7 +2,6 @@
 
 mod audio_ports;
 mod gui;
-mod identity;
 mod latency;
 mod lifecycle;
 mod note_ports;
@@ -12,7 +11,6 @@ mod tail;
 
 pub(crate) use audio_ports::HostAudioPortsProxy;
 pub(crate) use gui::HostGuiProxy;
-pub(crate) use identity::HostIdentityProxy;
 pub(crate) use latency::HostLatencyProxy;
 pub(crate) use lifecycle::HostLifecycleProxy;
 pub(crate) use note_ports::HostNotePortsProxy;

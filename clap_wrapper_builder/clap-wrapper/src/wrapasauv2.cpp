@@ -1,5 +1,6 @@
 #include "generated_entrypoints.hxx"
 #include "detail/auv2/process.h"
+#include "clapwrapper/wrac.h"
 #include <set>
 #include <limits>
 #include <cassert>
@@ -1268,15 +1269,11 @@ OSStatus WrapAsAUV2::SetProperty(AudioUnitPropertyID inID, AudioUnitScope inScop
         if (!inData || inDataSize < sizeof(AUHostVersionIdentifier))
           return kAudioUnitErr_InvalidPropertyValue;
         // The adapter copies the CFString during this call; the host retains ownership.
-        struct HostIdentityExtension
-        {
-          bool (*set)(const clap_plugin_t *, CFStringRef);
-        };
         if (_plugin && _plugin->_plugin && _plugin->_plugin->get_extension)
         {
           const auto *plugin = _plugin->_plugin;
-          const auto *extension = static_cast<const HostIdentityExtension *>(
-              plugin->get_extension(plugin, "com.novonotes.wrac.au-host-identifier/1"));
+          const auto *extension = static_cast<const wrac_au_host_identifier_t *>(
+              plugin->get_extension(plugin, WRAC_AU_HOST_IDENTIFIER));
           if (extension &&
               !extension->set(plugin, static_cast<const AUHostVersionIdentifier *>(inData)->hostName))
             return kAudioUnitErr_InvalidPropertyValue;
