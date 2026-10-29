@@ -738,6 +738,8 @@ class WrapAsAUV2 : public ausdk::AUBase,
     return _underlying_hostname.empty() ? nullptr : _underlying_hostname.c_str();
   }
 
+  bool copy_au_host_identifier(char *buffer, uint32_t capacity) override;
+
   const char *host_get_name() override
   {
     char text[65];
@@ -979,6 +981,9 @@ class WrapAsAUV2 : public ausdk::AUBase,
 
   std::string _hostname = "CLAP-as-AUv2";
   std::string _underlying_hostname;
+  // The host may change this after CLAP creation while the product reads it.
+  std::mutex _hostIdentifierMutex;
+  std::string _hostIdentifier;
 
 #ifdef DUAL_SCHEDULING_ENABLED
   bool _midi_dualscheduling_mode = false;

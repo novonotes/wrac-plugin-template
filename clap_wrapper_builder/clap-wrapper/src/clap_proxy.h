@@ -80,6 +80,9 @@ class IHost
   // set before the plugin is created and not changed after; nullptr when unknowable
   virtual const char *underlying_host_name() const = 0;
 
+  // Only AU hosts provide this property; other wrapper formats have no identifier.
+  virtual bool copy_au_host_identifier(char *, uint32_t) { return false; }
+
   // CLAP_WRAPPER_STANDALONE_FEATURES; only the standalone answers
   virtual const clap_wrapper_standalone_features_t *standalone_features()
   {
@@ -306,6 +309,10 @@ class Plugin
   const char *underlying_host_name() const
   {
     return _parentHost->underlying_host_name();
+  }
+  bool copy_au_host_identifier(char *buffer, uint32_t capacity)
+  {
+    return _parentHost->copy_au_host_identifier(buffer, capacity);
   }
   const clap_wrapper_standalone_features_t *standalone_features()
   {

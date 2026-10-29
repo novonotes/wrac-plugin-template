@@ -47,6 +47,17 @@ extern "C"
     const char *(CLAP_ABI *get_underlying_host_name)(const clap_host_t *host);
   } clap_wrapper_host_information_t;
 
+  // AU hosts can provide an identifier after CLAP instance creation. Copy it
+  // into caller-owned storage so the wrapper can update it without invalidating
+  // pointers used by a concurrent non-realtime reader.
+  static const CLAP_CONSTEXPR char CLAP_WRAPPER_AU_HOST_IDENTIFIER[] = "clap-wrapper.au-host-identifier/1";
+  typedef struct clap_wrapper_au_host_identifier
+  {
+    // Returns false if unavailable or the supplied buffer is too small.
+    // [thread-safe, !audio-thread]
+    bool (CLAP_ABI *get)(const clap_host_t *host, char *buffer, uint32_t capacity);
+  } clap_wrapper_au_host_identifier_t;
+
 #ifdef __cplusplus
 }
 #endif

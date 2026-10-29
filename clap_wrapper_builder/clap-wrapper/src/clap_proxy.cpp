@@ -149,6 +149,10 @@ const clap_wrapper_host_information_t wrapper_host_information = {
     [](const clap_host_t *host) -> const char * { return self(host)->wrapper_flavor(); },
     [](const clap_host_t *host) -> const char * { return self(host)->underlying_host_name(); }};
 
+const clap_wrapper_au_host_identifier_t au_host_identifier = {
+    [](const clap_host_t *host, char *buffer, uint32_t capacity) -> bool
+    { return self(host)->copy_au_host_identifier(buffer, capacity); }};
+
 const clap_host_preset_load_t preset_load = {
     /* on_error */
     [](const clap_host_t *host, uint32_t location_kind, const char *location, const char *load_key,
@@ -599,6 +603,7 @@ const void *Plugin::clapExtension(const clap_host *host, const char *extension)
   if (!strcmp(extension, CLAP_EXT_PRESET_LOAD) || !strcmp(extension, CLAP_EXT_PRESET_LOAD_COMPAT))
     return &HostExt::preset_load;
   if (!strcmp(extension, CLAP_WRAPPER_HOST_INFORMATION)) return &HostExt::wrapper_host_information;
+  if (!strcmp(extension, CLAP_WRAPPER_AU_HOST_IDENTIFIER)) return &HostExt::au_host_identifier;
   if (!strcmp(extension, CLAP_WRAPPER_STANDALONE_FEATURES))
     return HostExt::self(host)->standalone_features();
 

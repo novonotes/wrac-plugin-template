@@ -42,8 +42,8 @@ use self::plugin_callbacks::{
 };
 use crate::entry::EntryRegistration;
 use crate::host_proxy::{
-    HostAudioPortsProxy, HostGuiProxy, HostLatencyProxy, HostLifecycleProxy, HostNotePortsProxy,
-    HostParamsProxy, HostStateProxy, HostTailFactory,
+    HostAudioPortsProxy, HostGuiProxy, HostIdentityProxy, HostLatencyProxy, HostLifecycleProxy,
+    HostNotePortsProxy, HostParamsProxy, HostStateProxy, HostTailFactory,
 };
 use crate::interface::{
     ActiveProcessor, InactiveProcessor, PluginAudioPortsExtension,
@@ -175,6 +175,7 @@ pub(crate) struct PluginInstanceState {
     host_note_ports: Arc<HostNotePortsProxy>,
     host_lifecycle: Arc<HostLifecycleProxy>,
     host_gui: Arc<HostGuiProxy>,
+    host_identity: Arc<HostIdentityProxy>,
     // To preserve soundness even when a wrapper violates thread/lifecycle annotations,
     // the RT path never takes a lock — only a callback that wins the atomic guard
     // constructs a `&mut` to the active or inactive processor.
@@ -254,6 +255,11 @@ impl PluginInstanceState {
             host_extensions_initialized.clone(),
         ));
         let host_gui = Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone()));
+        let host_identity = Arc::new(HostIdentityProxy::new(
+            host,
+            host_extensions_initialized.clone(),
+            host_context.clone(),
+        ));
         let storage = registration.storage();
 
         Some(Box::new(Self {
@@ -288,6 +294,7 @@ impl PluginInstanceState {
             host_note_ports,
             host_lifecycle,
             host_gui,
+            host_identity,
             inactive_processor: UnsafeCell::new(None),
             processor: UnsafeCell::new(None),
             processor_busy: AtomicBool::new(false),

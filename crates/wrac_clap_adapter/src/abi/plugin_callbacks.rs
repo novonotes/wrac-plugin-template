@@ -53,6 +53,7 @@ pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool 
             host_note_ports: instance.host_note_ports.clone(),
             host_lifecycle: instance.host_lifecycle.clone(),
             host_gui: instance.host_gui.clone(),
+            host_identity: instance.host_identity.clone(),
             host_context: instance.host_context.clone(),
         };
         let Some(mut core) = instance

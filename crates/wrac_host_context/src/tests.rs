@@ -46,6 +46,85 @@ fn detects_macos_hosts_like_existing_adapter() {
     assert_eq!(luna.family, HostFamily::Luna);
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn wrapper_name_preserves_a_version_detected_from_the_same_host_process() {
+    let detected = detect_host_from_path("/Applications/Cubase 10.app/Contents/MacOS/Cubase");
+    let resolved =
+        host_from_wrapper_if_needed(detected, PluginFormat::Vst3, Some("Cubase (CLAP-as-VST3)"));
+    assert_eq!(resolved.family, HostFamily::SteinbergCubase);
+    assert_eq!(resolved.version, Some(HostVersion::major(10)));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn recognizes_apple_daws_hosted_by_the_au_service() {
+    let path = "/System/Library/Frameworks/AudioToolbox.framework/XPCServices/AUHostingServiceXPC_arrow.xpc/Contents/MacOS/AUHostingServiceXPC_arrow";
+    for (name, expected) in [
+        (
+            "GarageBand 10.4.8 (CLAP-as-AUv2)",
+            HostFamily::AppleGarageBand,
+        ),
+        ("Logic Pro 11.0 (CLAP-as-AUv2)", HostFamily::AppleLogic),
+        ("MainStage 3 (CLAP-as-AUv2)", HostFamily::AppleMainStage),
+        ("GarageBand Helper 1 (CLAP-as-VST3)", HostFamily::Unknown),
+        ("GarageBandHelper 1 (CLAP-as-AUv2)", HostFamily::Unknown),
+        ("GarageBand Helper 1 (CLAP-as-AUv2)", HostFamily::Unknown),
+        ("CLAP-as-AUv2", HostFamily::Unknown),
+    ] {
+        let detected = host_from_wrapper_if_needed(
+            detect_host_from_path(path),
+            PluginFormat::detect(name),
+            Some(name),
+        );
+        assert_eq!(detected.family, expected, "{name}");
+        assert_eq!(detected.process_path, path);
+        assert_eq!(detected.process_name, "AUHostingServiceXPC_arrow");
+    }
+
+    // Scanner and other processes must retain their original identity.
+    let detected = host_from_wrapper_if_needed(
+        detect_host_from_path("/usr/bin/auvaltool"),
+        PluginFormat::Au,
+        Some("GarageBand 10.4.8 (CLAP-as-AUv2)"),
+    );
+    assert_eq!(detected.family, HostFamily::AppleAuval);
+}
+
+#[test]
+fn host_identifier_can_arrive_after_initial_detection() {
+    let mut context = HostContext::detect_current(None);
+    context.plugin_format = PluginFormat::Au;
+    context.host = detect_host_from_path("/some/unknown-host");
+    assert_eq!(
+        context.host_with_au_identifier(None).family,
+        HostFamily::Unknown
+    );
+    assert_eq!(
+        context
+            .host_with_au_identifier(Some("com.apple.garageband"))
+            .family,
+        HostFamily::AppleGarageBand
+    );
+    assert_eq!(
+        context
+            .host_with_au_identifier(Some("com.apple.logic.pro"))
+            .family,
+        HostFamily::AppleLogic
+    );
+    assert_eq!(
+        context.host_with_au_identifier(Some("unrecognized")).family,
+        HostFamily::Unknown
+    );
+    context.plugin_format = PluginFormat::Vst3;
+    assert_eq!(
+        context
+            .host_with_au_identifier(Some("com.apple.garageband"))
+            .family,
+        HostFamily::Unknown
+    );
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn detects_windows_hosts_like_existing_adapter() {
