@@ -1,4 +1,5 @@
 use super::*;
+use crate::identity::host_from_wrapper_if_needed;
 
 #[test]
 fn detects_wrapper_format_from_clap_host_name() {
