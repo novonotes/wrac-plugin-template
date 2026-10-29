@@ -53,7 +53,6 @@
 // #include <mutex>
 // #include <functional>
 
-static const char *kAAXMasterBypassID = "MasterBypass";
 static constexpr int32_t kAAXContinuousParameterDefaultSteps = 2048;
 
 class ClapAsAAXRegistry
@@ -1062,10 +1061,9 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
       paramname.append(info.name);
 
       const bool isBypassParameter = (info.flags & CLAP_PARAM_IS_BYPASS) && !_bypassParameter;
-      // Pro Tools exposes master bypass through a reserved AAX parameter path.
-      // Reuse that path for CLAP bypass so host automation reaches the plugin
-      // instead of creating an unrelated wrapper-local bypass parameter.
-      auto id = isBypassParameter ? std::string(kAAXMasterBypassID) : createAAXId(info.id);
+      // The SDK reports its default ID as the host's master bypass parameter.
+      // Register CLAP bypass under that ID so host bypass reaches the plugin.
+      auto id = isBypassParameter ? std::string(cDefaultMasterBypassID) : createAAXId(info.id);
 
       auto wrappedParam =
           std::make_shared<AAXWrappedParameterInfo_t>(this->_plugin->_plugin, info, params, id);
@@ -1118,7 +1116,8 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
   {
     // Keep AAX master bypass usable even for CLAP plugins without an explicit
     // bypass parameter; the process adapter handles this as wrapper bypass.
-    _aaxMasterBypassID = kAAXMasterBypassID;
+    // The SDK recognizes the host control only under its default parameter ID.
+    _aaxMasterBypassID = cDefaultMasterBypassID;
     auto bypass = new AAX_CParameter<bool>(_aaxMasterBypassID.c_str(), AAX_CString("Master Bypass"),
                                            false, AAX_CBinaryTaperDelegate<bool>(),
                                            AAX_CBinaryDisplayDelegate<bool>("off", "on"), true);
