@@ -21,11 +21,11 @@ use crate::state::{ProjectStateStore, SharedState};
 // GUI window size bounds (pixels). The host opens at the default; resize is clamped to min..=max.
 pub(super) const DEFAULT_GUI_SIZE: GuiSize = GuiSize {
     width: 320,
-    height: 424,
+    height: 380,
 };
 pub(super) const MIN_GUI_SIZE: GuiSize = GuiSize {
     width: 320,
-    height: 424,
+    height: 380,
 };
 pub(super) const MAX_GUI_SIZE: GuiSize = GuiSize {
     width: 720,

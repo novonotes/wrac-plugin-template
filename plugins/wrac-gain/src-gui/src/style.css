@@ -194,14 +194,60 @@ body {
   transform-origin: 50% 87px;
 }
 
-.latency-row {
-  margin-top: 16px;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A quiet icon rather than an outlined button: the settings behind it are rarely changed. */
+.header-action.header-settings {
+  border-color: transparent;
+  color: rgba(247, 241, 231, 0.46);
+}
+
+.header-action.header-settings:hover {
+  color: #d9b985;
+}
+
+/* .header-action sets display, which would otherwise override the hidden attribute. */
+.header-settings[hidden] {
+  display: none;
+}
+
+.header-settings svg {
+  display: block;
+}
+
+.settings-page {
+  padding-top: 34px;
+}
+
+.settings-title {
+  margin: 0;
+  color: #f7f1e7;
+  font-size: 32px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.settings-row {
+  margin-top: 28px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   color: #d9b985;
+}
+
+.settings-note {
+  margin: 12px 0 0;
+  color: rgba(247, 241, 231, 0.58);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .latency-select {

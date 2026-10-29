@@ -45,7 +45,7 @@ type ParameterState = {
   text: string;
 };
 
-type EditorPage = "controls" | "about";
+type EditorPage = "controls" | "about" | "settings";
 
 type EditorPageState = {
   type: "editor-page";
@@ -86,6 +86,8 @@ const dbLabel = document.querySelector<HTMLButtonElement>("#gain-db");
 const gainInput = document.querySelector<HTMLInputElement>("#gain-input");
 const headerAction =
   document.querySelector<HTMLButtonElement>("#header-action");
+const headerSettings =
+  document.querySelector<HTMLButtonElement>("#header-settings");
 const pluginName = document.querySelector<HTMLButtonElement>("#plugin-name");
 const aboutTitle = document.querySelector<HTMLElement>("#about-title");
 const aboutPluginName =
@@ -100,6 +102,7 @@ const indicator = document.querySelector<HTMLDivElement>("#knob-indicator");
 const resizeGrip = document.querySelector<HTMLButtonElement>("#resize-grip");
 const pageControls = document.querySelector<HTMLElement>("#page-controls");
 const pageAbout = document.querySelector<HTMLElement>("#page-about");
+const pageSettings = document.querySelector<HTMLElement>("#page-settings");
 const latencySelect =
   document.querySelector<HTMLSelectElement>("#latency-select");
 
@@ -107,6 +110,7 @@ if (
   !dbLabel ||
   !gainInput ||
   !headerAction ||
+  !headerSettings ||
   !pluginName ||
   !aboutTitle ||
   !aboutPluginName ||
@@ -118,6 +122,7 @@ if (
   !resizeGrip ||
   !pageControls ||
   !pageAbout ||
+  !pageSettings ||
   !latencySelect
 ) {
   throw new Error("required elements not found");
@@ -224,10 +229,12 @@ void (async () => {
   editorPageSubscriptionId = editorPageSubscription.subscriptionId;
 
   renderLatency(await runtime.invoke<LatencyState>("get_latency"));
-  const latencySubscription =
-    await runtime.invoke<SubscribeParametersResponse>("subscribe_latency", {
+  const latencySubscription = await runtime.invoke<SubscribeParametersResponse>(
+    "subscribe_latency",
+    {
       channel: latencyChannel,
-    });
+    },
+  );
   latencySubscriptionId = latencySubscription.subscriptionId;
   console.info("GUI initialization completed");
   const runtimeContext = await runtime
@@ -283,10 +290,16 @@ function renderPluginMetadata(metadata: PluginMetadata): void {
 
 function renderEditorPage(page: EditorPage): void {
   const showControls = page === "controls";
-  pageControls.hidden = !showControls;
-  pageAbout.hidden = showControls;
-  pageControls.classList.toggle("is-active", showControls);
-  pageAbout.classList.toggle("is-active", !showControls);
+  for (const [element, elementPage] of [
+    [pageControls, "controls"],
+    [pageAbout, "about"],
+    [pageSettings, "settings"],
+  ] as const) {
+    element.hidden = elementPage !== page;
+    element.classList.toggle("is-active", elementPage === page);
+  }
+  // Settings open from the controls page only; the other pages close back to it.
+  headerSettings.hidden = !showControls;
   pluginName.setAttribute(
     "aria-label",
     showControls ? "Show about page" : "Show controls",
@@ -298,7 +311,7 @@ function renderEditorPage(page: EditorPage): void {
   headerAction.classList.toggle("is-close", !showControls);
   headerAction.setAttribute(
     "aria-label",
-    showControls ? "Plugin version" : "Close about page",
+    showControls ? "Plugin version" : "Close page",
   );
 }
 
@@ -498,6 +511,13 @@ gainInput.addEventListener("keydown", (event) => {
   }
 });
 gainInput.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+// Rarely changed settings (the delay setting) live behind this button so they stay off the
+// main controls and are not changed by accident during a session.
+headerSettings.addEventListener("click", (event) => {
+  setEditorPage("settings");
+  restoreHostFocusIfNeeded(event.target);
+});
 
 // About is a detail view of plugin identity rather than a settings screen, so the plugin name
 // itself is used as the entry point/toggle instead of a permanent tab, to avoid an extra
