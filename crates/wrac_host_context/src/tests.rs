@@ -121,9 +121,16 @@ fn host_identifier_can_arrive_after_initial_detection() {
     writer.set(Some("com.apple.garageband".into()));
     assert_eq!(other_format.host().family, HostFamily::Unknown);
 
-    // A validator hosted by an application keeps its process role.
+    // A validator hosted by an application keeps its process role. Build the host directly
+    // because the executable-path tables only recognize auval on macOS.
     let (validator, writer) = HostContext::new(
-        detect_host_from_path("/usr/bin/auvaltool"),
+        DetectedHost {
+            display_name: "Apple auval".into(),
+            process_name: "auvaltool".into(),
+            process_path: "/usr/bin/auvaltool".into(),
+            family: HostFamily::AppleAuval,
+            version: None,
+        },
         PluginFormat::Au,
         SystemContext::detect(),
     );
