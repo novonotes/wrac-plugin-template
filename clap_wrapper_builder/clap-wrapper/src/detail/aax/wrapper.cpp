@@ -105,21 +105,13 @@ AAXWrapper_inInstanceInitProc(const SAAX_Wrapper_AlgorithmicContext *inInstanceC
   {
     case AAX_eComponentInstanceInitAction_AddingNewInstance:
       LOGDETAIL("adding new instance");
-      // A plugin that refuses to activate must not be asked to start processing.
-      // The instance is still reported as created: Pro Tools has no documented
-      // handling for a failed instance init, and the render path answers with
-      // silence for as long as the plugin stays down.
-      if (self->activatePlugin())
-      {
-        self->startProcessing();
-      }
+      self->addInstance();
       break;
     case AAX_eComponentInstanceInitAction_RemovingInstance:
       LOGDETAIL("removing instance");
       if (ClapAsAAXRegistry::Exists(self))
       {
-        self->stopProcessing();
-        self->deactivatePlugin();
+        self->removeInstance();
       }
       else
       {
@@ -525,8 +517,7 @@ ClapAsAAX::~ClapAsAAX()
   // null and calling into stop/deactivate would dereference it.
   if (_plugin)
   {
-    this->stopProcessing();
-    this->deactivatePlugin();
+    this->removeInstance();
   }
   ClapAsAAXRegistry::Unregister(this);
 }
@@ -1218,9 +1209,36 @@ bool ClapAsAAX::gui_request_hide()
 
 void ClapAsAAX::latency_changed()
 {
-  _aax_ctrl->SetSignalLatency(_plugin->_ext._latency->get(_plugin->_plugin));
-  // will be signalled from the host with a latency notification
-  // see AAX_eNotificationEvent_SignalLatencyChanged
+  // CLAP allows this only while the plugin is being activated, and
+  // activatePlugin() publishes the latency once activate() has returned anyway.
+  // Publishing here as well is harmless: publishLatency() skips a value Pro
+  // Tools already has.
+  publishLatency();
+}
+
+void ClapAsAAX::publishLatency()
+{
+  if (!_plugin || !_plugin->_ext._latency || !_aax_ctrl) return;
+
+  auto scope = _plugin->AlwaysMainThread();
+  const auto newLatency = _plugin->_ext._latency->get(_plugin->_plugin);
+  if (newLatency == _latency) return;
+
+  // The AAX SDK asks a plug-in to keep its old latency until Pro Tools confirms
+  // the new one with AAX_eNotificationEvent_SignalLatencyChanged. A CLAP plugin
+  // has already switched by the time it reports a latency, and holding a
+  // reactivated plugin back until the host answers would make audio depend on a
+  // notification that may come late or not at all. So the new value is
+  // published without waiting, and Pro Tools catches up with its compensation.
+  const auto result = _aax_ctrl->SetSignalLatency(static_cast<int32_t>(newLatency));
+  if (result != AAX_SUCCESS)
+  {
+    // Keep the old value so the next activation tries again rather than
+    // believing Pro Tools already has this one.
+    LOGINFO("[ERROR] SetSignalLatency({}) failed: {}", newLatency, result);
+    return;
+  }
+  _latency = newLatency;
 }
 
 void ClapAsAAX::tail_changed()
@@ -1236,6 +1254,8 @@ void ClapAsAAX::mark_dirty()
 
 void ClapAsAAX::restartPlugin()
 {
+  // [thread-safe] in CLAP, so only record it. onIdle() does the restart.
+  _requestRestart = true;
 }
 
 void ClapAsAAX::request_process()
@@ -1337,12 +1357,86 @@ void ClapAsAAX::onIdle()
     if (_processAdapter) _processAdapter->flush();
   }
 
+  restartIfRequested();
+
   // process requests etc. on mainthread etc.
   if (_wants_on_main_thread.exchange(false))
   {
     // this IS the main thread
     auto fo = _plugin->AlwaysMainThread();
     _plugin->_plugin->on_main_thread(_plugin->_plugin);
+  }
+}
+
+void ClapAsAAX::addInstance()
+{
+  std::lock_guard<std::mutex> lifecycleGuard(_lifecycleMutex);
+  _instanceAdded = true;
+  // A plugin that refuses to activate must not be asked to start processing.
+  // The instance is still reported as created: Pro Tools has no documented
+  // handling for a failed instance init, and the render path answers with
+  // silence for as long as the plugin stays down.
+  if (activatePlugin())
+  {
+    startProcessing();
+  }
+}
+
+void ClapAsAAX::removeInstance()
+{
+  std::lock_guard<std::mutex> lifecycleGuard(_lifecycleMutex);
+  _instanceAdded = false;
+  stopProcessing();
+  deactivatePlugin();
+}
+
+// CLAP lets a plugin ask for a deactivate/activate cycle, which is how it gets
+// a new latency or audio port layout applied. Pro Tools has no call for that,
+// but none is needed: the wrapper owns the plugin's activation, so it cycles it
+// underneath the AAX instance, which stays as it is. Called from onIdle(), the
+// thread the wrapper already uses as the plugin's main thread.
+//
+// The render thread is not stopped or waited for. process() keeps running and
+// outputs silence for the few blocks the rebuild takes, so the restart never
+// depends on Pro Tools rendering, and a stopped transport restarts as well as a
+// running one.
+void ClapAsAAX::restartIfRequested()
+{
+  if (!_requestRestart.exchange(false) || !_plugin) return;
+
+  std::lock_guard<std::mutex> lifecycleGuard(_lifecycleMutex);
+  // The host removed the instance (or never added it); its next add activates
+  // the plugin with whatever it reports then.
+  if (!_instanceAdded) return;
+
+  auto guarantee_mainthread = _plugin->AlwaysMainThread();
+
+  // The lock is held only to close the door. process() holds it for its whole
+  // body, so once it is acquired no render is inside the plugin or the process
+  // adapter, and every render after it sees _restarting and outputs silence.
+  {
+    ClapWrapper::detail::shared::SpinLockGuard processGuard(_processLock);
+    _restarting = true;
+  }
+
+  stopProcessing();
+  deactivatePlugin();
+  // Parameter changes queued in _paramsToProcess meanwhile stay there and reach
+  // the plugin with the first render after the restart.
+  if (activatePlugin())
+  {
+    startProcessing();
+  }
+  else
+  {
+    // Left deactivated: process() answers with silence and never calls the
+    // plugin, and the next restart request or instance add tries again.
+    LOGINFO("[ERROR] restart: could not reactivate the plugin");
+  }
+
+  {
+    ClapWrapper::detail::shared::SpinLockGuard processGuard(_processLock);
+    _restarting = false;
   }
 }
 
@@ -1374,6 +1468,7 @@ bool ClapAsAAX::activatePlugin()
         _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
         this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
         _midi_prefer_mididialect, placeholderInChannels, placeholderOutChannels);
+    _outputChannelCount = _processAdapter->outputChannelCount();
 
     // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()
     // on a plugin that never activated, and _activated is what deactivatePlugin()
@@ -1389,13 +1484,7 @@ bool ClapAsAAX::activatePlugin()
     }
 
     // pass latency when activated
-    auto scope = _plugin->AlwaysMainThread();
-    auto newlatency = _plugin->_ext._latency->get(_plugin->_plugin);
-    if (newlatency != _latency)
-    {
-      _latency = newlatency;
-      _aax_ctrl->SetSignalLatency(_latency);
-    }
+    publishLatency();
   }
   return _activated;
 }

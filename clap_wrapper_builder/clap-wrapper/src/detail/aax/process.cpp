@@ -60,6 +60,17 @@ void AAX_CALLBACK AAXWrapper_AlgorithmProcessProc(
 
 void ClapAsAAX::process(SAAX_Wrapper_AlgorithmicContext *context)
 {
+  // try_lock, not lock: a restart holds this only to open or close the restart
+  // window, and the render thread must not wait on another thread. A block that
+  // would have had to wait renders silence instead, as does every block while
+  // the plugin is being torn down and reactivated underneath this instance.
+  std::unique_lock<ClapWrapper::detail::shared::SpinLock> processGuard(_processLock, std::try_to_lock);
+  if (!processGuard.owns_lock() || _restarting)
+  {
+    silenceAllOutputs(context);
+    return;
+  }
+
   if (!_processAdapter) return;
 
   // CLAP forbids process() on a plugin that is not processing, which is where a
@@ -78,6 +89,26 @@ void ClapAsAAX::process(SAAX_Wrapper_AlgorithmicContext *context)
 
   // process
   _processAdapter->process(context);
+}
+
+uint32_t AAXProcessAdapter::outputChannelCount() const
+{
+  // Matches what process() and silenceOutputs() write: the CLAP output ports in
+  // order, or the placeholder stem of a pure-MIDI plugin.
+  uint32_t channels = 0;
+  for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i) channels += _output_ports[i].channel_count;
+  return channels > 0 ? channels : _placeholderOutChannels;
+}
+
+void ClapAsAAX::silenceAllOutputs(SAAX_Wrapper_AlgorithmicContext *context) const
+{
+  if (!context->mAudioOutputs || !context->mNumSamples) return;
+  const size_t bytes = sizeof(float) * (size_t)*(context->mNumSamples);
+  const auto channels = _outputChannelCount.load();
+  for (uint32_t c = 0; c < channels; ++c)
+  {
+    if (context->mAudioOutputs[c]) memset(context->mAudioOutputs[c], 0, bytes);
+  }
 }
 
 void AAXProcessAdapter::silenceOutputs(SAAX_Wrapper_AlgorithmicContext *context)
