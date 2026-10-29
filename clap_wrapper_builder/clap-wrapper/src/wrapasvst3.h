@@ -173,10 +173,12 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   tresult PLUGIN_API setIoMode(Vst::IoMode mode) override;
 
   // from IEditController
+  tresult PLUGIN_API setComponentState(IBStream *state) override;
+  tresult PLUGIN_API setEditorState(IBStream *state) override;
+  tresult PLUGIN_API getEditorState(IBStream *state) override;
   tresult PLUGIN_API setComponentHandler(Vst::IComponentHandler *handler) override;
 
   //----from IEditControllerEx1--------------------------------
-  tresult PLUGIN_API setComponentState(IBStream * /*state*/) override;
   IPlugView *PLUGIN_API createView(FIDString name) override;
   /** Gets for a given paramID and normalized value its associated string representation. */
   tresult PLUGIN_API getParamStringByValue(Vst::ParamID id, Vst::ParamValue valueNormalized /*in*/,

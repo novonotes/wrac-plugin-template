@@ -406,6 +406,24 @@ tresult PLUGIN_API ClapAsVst3::getState(IBStream *state)
   return (_plugin->save(CLAPVST3StreamAdapter(state)) ? Steinberg::kResultOk : Steinberg::kResultFalse);
 }
 
+tresult PLUGIN_API ClapAsVst3::setComponentState(IBStream *state)
+{
+  // Some hosts restore a combined component through the controller state path.
+  return setState(state);
+}
+
+tresult PLUGIN_API ClapAsVst3::setEditorState(IBStream *state)
+{
+  // SingleComponentEffect separates IEditController::setState into this path.
+  return setState(state);
+}
+
+tresult PLUGIN_API ClapAsVst3::getEditorState(IBStream *state)
+{
+  // Preserve project state for hosts that request controller/editor state.
+  return getState(state);
+}
+
 uint32 PLUGIN_API ClapAsVst3::getLatencySamples()
 {
   if (!_plugin->_ext._latency)
@@ -666,12 +684,6 @@ tresult PLUGIN_API ClapAsVst3::getBusArrangement(Vst::BusDirection dir, int32 in
                                                  Vst::SpeakerArrangement &arr)
 {
   return super::getBusArrangement(dir, index, arr);
-}
-
-tresult PLUGIN_API ClapAsVst3::setComponentState(IBStream * /*state*/)
-{
-  // this should satisfy Hosts that want to be satisfied
-  return kResultOk;
 }
 
 IPlugView *PLUGIN_API ClapAsVst3::createView(FIDString /*name*/)
