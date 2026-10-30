@@ -909,7 +909,18 @@ void WrapAsAUV2::SetBypassEffect(bool bypass)
     }
     if (value)
     {
-      SetParameter(_bypassParamID, kAudioUnitScope_Global, 0, *value, 0);
+      // The property and parameter are the same control, so parameter listeners
+      // must also hear property writes. On macOS 14.8.5, Live 12.4.6 sets the
+      // bypass property on then off when inserting an AU. Without this event,
+      // Live's parameter display stays On even though the effect is processing
+      // (a -20 dBFS input with -24 dB gain produced -44 dBFS in the test).
+      if (SetParameter(_bypassParamID, kAudioUnitScope_Global, 0, *value, 0) == noErr)
+      {
+        AudioUnitEvent event{};
+        event.mEventType = kAudioUnitEvent_ParameterValueChange;
+        event.mArgument.mParameter = {GetComponentInstance(), _bypassParamID, kAudioUnitScope_Global, 0};
+        AUEventListenerNotify(nullptr, nullptr, &event);
+      }
     }
   }
 }
