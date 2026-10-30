@@ -53,7 +53,6 @@ pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool 
             host_note_ports: instance.host_note_ports.clone(),
             host_lifecycle: instance.host_lifecycle.clone(),
             host_gui: instance.host_gui.clone(),
-            host_identity: instance.host_identity.clone(),
             host_context: instance.host_context.clone(),
         };
         let Some(mut core) = instance
@@ -68,10 +67,11 @@ pub(super) unsafe extern "C" fn plugin_init(plugin: *const clap_plugin) -> bool 
         // Instance creation starts plugin logging before CLAP init. Emit immediately
         // after product construction so wrapper/host routing is visible before
         // capability queries or GUI attachment.
+        let host = instance.host_context.host();
         log::info!(
             "plugin.init: host_context host=\"{}\" process=\"{}\" format={} clap_host_name=\"{}\"",
-            instance.host_context.host.display_name,
-            instance.host_context.host.process_name,
+            host.display_name,
+            host.process_name,
             instance.host_context.plugin_format.as_str(),
             instance.clap_host_name.as_deref().unwrap_or("")
         );
@@ -440,7 +440,8 @@ pub(super) unsafe extern "C" fn plugin_get_extension(
         #[cfg(target_os = "macos")]
         if id == super::identity_extension::AU_HOST_IDENTIFIER {
             // The wrapper may receive this AU property before other capabilities are ready.
-            return &super::identity_extension::AU_HOST_IDENTITY as *const _ as *const c_void;
+            return &super::identity_extension::AU_HOST_IDENTIFIER_EXTENSION as *const _
+                as *const c_void;
         }
         let Some(runtime) = instance.runtime.get() else {
             // Some wrapper backends may probe from native object construction paths. Returning

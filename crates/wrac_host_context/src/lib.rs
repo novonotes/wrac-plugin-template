@@ -10,40 +10,9 @@ use std::{path::Path, sync::OnceLock};
 #[cfg(target_os = "macos")]
 use std::ffi::CStr;
 
-/// Host identity, process details, and wrapper format inferred from runtime context.
-///
-/// The host family is intentionally diagnostic/mechanical context, not policy. Callers
-/// decide which workaround or compatibility decision to apply from this value so product
-/// behavior does not accumulate inside the detection table.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HostContext {
-    pub host: DetectedHost,
-    pub plugin_format: PluginFormat,
-    pub system: SystemContext,
-}
-
+mod context;
 mod identity;
-use identity::host_from_wrapper_if_needed;
-
-impl HostContext {
-    pub fn detect_current(clap_host_name: Option<&str>) -> Self {
-        let plugin_format = PluginFormat::detect(clap_host_name.unwrap_or_default());
-        let host = host_from_wrapper_if_needed(detect_host(), plugin_format, clap_host_name);
-        Self {
-            host,
-            plugin_format,
-            system: SystemContext::detect(),
-        }
-    }
-
-    /// Keeps validation / scanner process classification as the WRAC-owned source of truth.
-    ///
-    /// Product code should consume this result from the `PluginInstanceContext::host_context`
-    /// passed during plugin instance creation instead of duplicating process-name checks.
-    pub fn is_validation_or_scan_host(&self) -> bool {
-        self.host.is_validation_or_scan_host()
-    }
-}
+pub use context::{AuHostIdentifierWriter, HostContext};
 
 /// Operating-system context captured outside the plugin entry DSO lifecycle.
 ///

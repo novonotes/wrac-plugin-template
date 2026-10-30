@@ -62,8 +62,7 @@ pub use extensions::{
 };
 pub use factory::PluginFactory;
 pub use host::{
-    HostAudioPorts, HostGui, HostIdentity, HostLifecycle, HostNotePorts, HostParams, HostState,
-    HostTail,
+    HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState, HostTail,
 };
 pub use params::PluginParamsQuery;
 pub use process::{

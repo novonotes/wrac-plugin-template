@@ -55,7 +55,7 @@ unsafe extern "C" fn note_ports_get(
         let port = note_ports.note_port_info(index, is_input).or_else(|| {
             let is_clap_validator = instance
                 .host_context
-                .host
+                .host()
                 .process_name
                 .contains("clap-validator");
             if is_clap_validator && is_input {

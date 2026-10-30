@@ -1,4 +1,7 @@
 use super::*;
+// Only the macOS host tables exercise wrapper-reported host names.
+#[cfg(target_os = "macos")]
+use crate::identity::host_from_wrapper_if_needed;
 
 #[test]
 fn detects_wrapper_format_from_clap_host_name() {
@@ -93,36 +96,46 @@ fn recognizes_apple_daws_hosted_by_the_au_service() {
 
 #[test]
 fn host_identifier_can_arrive_after_initial_detection() {
-    let mut context = HostContext::detect_current(None);
-    context.plugin_format = PluginFormat::Au;
-    context.host = detect_host_from_path("/some/unknown-host");
-    assert_eq!(
-        context.host_with_au_identifier(None).family,
-        HostFamily::Unknown
+    let (context, writer) = HostContext::new(
+        detect_host_from_path("/some/unknown-host"),
+        PluginFormat::Au,
+        SystemContext::detect(),
     );
-    assert_eq!(
-        context
-            .host_with_au_identifier(Some("com.apple.garageband"))
-            .family,
-        HostFamily::AppleGarageBand
+    // Products keep clones from instance creation; they must observe later identifiers.
+    let product_clone = context.clone();
+    assert_eq!(product_clone.host().family, HostFamily::Unknown);
+    writer.set(Some("com.apple.garageband".into()));
+    assert_eq!(product_clone.host().family, HostFamily::AppleGarageBand);
+    writer.set(Some("com.apple.logic.pro".into()));
+    assert_eq!(context.host().family, HostFamily::AppleLogic);
+    writer.set(Some("unrecognized".into()));
+    assert_eq!(context.host().family, HostFamily::Unknown);
+    writer.set(None);
+    assert_eq!(context.host().family, HostFamily::Unknown);
+
+    let (other_format, writer) = HostContext::new(
+        detect_host_from_path("/some/unknown-host"),
+        PluginFormat::Vst3,
+        SystemContext::detect(),
     );
-    assert_eq!(
-        context
-            .host_with_au_identifier(Some("com.apple.logic.pro"))
-            .family,
-        HostFamily::AppleLogic
+    writer.set(Some("com.apple.garageband".into()));
+    assert_eq!(other_format.host().family, HostFamily::Unknown);
+
+    // A validator hosted by an application keeps its process role. Build the host directly
+    // because the executable-path tables only recognize auval on macOS.
+    let (validator, writer) = HostContext::new(
+        DetectedHost {
+            display_name: "Apple auval".into(),
+            process_name: "auvaltool".into(),
+            process_path: "/usr/bin/auvaltool".into(),
+            family: HostFamily::AppleAuval,
+            version: None,
+        },
+        PluginFormat::Au,
+        SystemContext::detect(),
     );
-    assert_eq!(
-        context.host_with_au_identifier(Some("unrecognized")).family,
-        HostFamily::Unknown
-    );
-    context.plugin_format = PluginFormat::Vst3;
-    assert_eq!(
-        context
-            .host_with_au_identifier(Some("com.apple.garageband"))
-            .family,
-        HostFamily::Unknown
-    );
+    writer.set(Some("com.apple.garageband".into()));
+    assert_eq!(validator.host().family, HostFamily::AppleAuval);
 }
 
 #[cfg(target_os = "windows")]

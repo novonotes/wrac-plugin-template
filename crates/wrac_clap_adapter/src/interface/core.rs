@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use crate::interface::{
-    ActiveProcessor, HostAudioPorts, HostGui, HostIdentity, HostLifecycle, HostNotePorts,
-    HostParams, HostState, HostTail, InactiveProcessor, PluginAudioPortsExtension,
-    PluginConfigurableAudioPortsExtension, PluginGuiExtension, PluginLatencyExtension,
-    PluginNotePortsExtension, PluginParamsQuery, PluginRenderExtension, PluginResult,
-    PluginStateExtension, PluginTailExtension,
+    ActiveProcessor, HostAudioPorts, HostGui, HostLifecycle, HostNotePorts, HostParams, HostState,
+    HostTail, InactiveProcessor, PluginAudioPortsExtension, PluginConfigurableAudioPortsExtension,
+    PluginGuiExtension, PluginLatencyExtension, PluginNotePortsExtension, PluginParamsQuery,
+    PluginRenderExtension, PluginResult, PluginStateExtension, PluginTailExtension,
 };
 use wrac_host_context::HostContext;
 
@@ -50,7 +49,6 @@ pub struct PluginInstanceContext {
     pub host_note_ports: Arc<dyn HostNotePorts>,
     pub host_lifecycle: Arc<dyn HostLifecycle>,
     pub host_gui: Arc<dyn HostGui>,
-    pub host_identity: Arc<dyn HostIdentity>,
     pub host_context: HostContext,
 }
 
