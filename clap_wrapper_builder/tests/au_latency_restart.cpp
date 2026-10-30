@@ -11,6 +11,7 @@
 //
 // The latency change is driven by a state restore rather than a parameter, because the
 // template plugin keeps its delay setting out of the host parameter list.
+// The silent-buffer check is skipped if no silence-flagged block is captured.
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <algorithm>

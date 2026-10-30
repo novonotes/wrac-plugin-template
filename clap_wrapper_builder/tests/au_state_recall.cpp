@@ -1,6 +1,7 @@
 // AU recall must replace pending host parameters, including before the first
 // render. Checking ClassInfo after rendering detects divergence hidden by the
 // AU parameter cache, without depending on a plugin's editor or audio algorithm.
+// Concurrent recall is skipped if the plugin does not notify ClassInfo during load.
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <cstdio>
