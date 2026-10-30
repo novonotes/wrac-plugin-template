@@ -167,6 +167,13 @@ jobs:
       - name: Verify plugin and standalone artifacts
         run: ${{ matrix.verify }}
 
+      - name: Run VST3 latency cache regression
+        if: runner.os == 'Windows'
+        run: |
+          cmake -S clap_wrapper_builder/tests/vst3_latency_cache -B target/vst3-latency-cache-test
+          cmake --build target/vst3-latency-cache-test --config Release --target vst3_latency_cache
+          target/vst3-latency-cache-test/Release/vst3_latency_cache.exe "target/wrac-plugins/wrac-gain/wrac/plugins/release/WRAC Gain.vst3"
+
       - name: Run AU regression tests
         if: runner.os == 'macOS'
         # A state-recall regression can deadlock, so bound the whole test step.

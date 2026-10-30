@@ -30,3 +30,16 @@ clang++ -std=c++17 -Wall -Wextra -Werror \
 ```
 
 テスト中に無音ブロックが観測されなかった場合、無音バッファーの確認は SKIP と報告されます。
+
+# VST3 レイテンシーのキャッシュの回帰テスト
+
+Windows で現在のラッパーを使ってテンプレートの WRAC Gain VST3 をビルドします。
+初回有効化前、有効化中に問い合わせず停止した後、オフライン処理への切り替え時、
+レイテンシー変更後の停止中の問い合わせを確認します。停止中の問い合わせに続いて
+レイテンシー変更通知が送られることも確認します。
+
+```powershell
+cmake -S clap_wrapper_builder/tests/vst3_latency_cache -B target/vst3-latency-cache-test
+cmake --build target/vst3-latency-cache-test --config Release --target vst3_latency_cache
+& 'target/vst3-latency-cache-test/Release/vst3_latency_cache.exe' 'path/to/WRAC Gain.vst3'
+```
