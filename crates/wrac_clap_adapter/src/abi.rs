@@ -260,6 +260,7 @@ impl PluginInstanceState {
         let host_lifecycle = Arc::new(HostLifecycleProxy::new(
             host,
             host_extensions_initialized.clone(),
+            &host_context,
         ));
         let host_gui = Arc::new(HostGuiProxy::new(host, host_extensions_initialized.clone()));
         let storage = registration.storage();

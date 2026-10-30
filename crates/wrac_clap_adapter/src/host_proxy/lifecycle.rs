@@ -4,18 +4,34 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use crate::interface::HostLifecycle;
+use crate::interface::{HostContext, HostFamily, HostLifecycle, PluginFormat};
 
 pub(crate) struct HostLifecycleProxy {
     callbacks: HostLifecycleCallbacks,
     initialized: Arc<AtomicBool>,
+    skip_restart: bool,
 }
 
 impl HostLifecycleProxy {
-    pub(crate) fn new(host: *const clap_host, initialized: Arc<AtomicBool>) -> Self {
+    pub(crate) fn new(
+        host: *const clap_host,
+        initialized: Arc<AtomicBool>,
+        context: &HostContext,
+    ) -> Self {
+        let identity = context.host();
         Self {
             callbacks: HostLifecycleCallbacks::new(host),
             initialized,
+            // LUNA 3.1.0.4581 (Windows) and 3.1.0 (macOS) assert on the VST3
+            // wrapper's kIoChanged restart. This suppresses non-latency restarts too;
+            // reported latency stays unchanged until host reactivation.
+            // Windows host detection currently leaves LUNA's family unknown.
+            skip_restart: context.plugin_format == PluginFormat::Vst3
+                && match context.system.os {
+                    "windows" => identity.process_name.eq_ignore_ascii_case("LUNA.exe"),
+                    "macos" => identity.family == HostFamily::Luna,
+                    _ => false,
+                },
         }
     }
 
@@ -31,7 +47,7 @@ impl HostLifecycleProxy {
 
 impl HostLifecycle for HostLifecycleProxy {
     fn request_restart(&self) {
-        if !self.is_available("request_restart") {
+        if self.skip_restart || !self.is_available("request_restart") {
             return;
         }
 

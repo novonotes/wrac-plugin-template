@@ -225,6 +225,72 @@ fn activate_forwards_host_lifecycle_requests() {
 }
 
 #[test]
+fn luna_vst3_skips_only_restart_callback_on_both_platforms() {
+    use wrac_host_context::{HostFamily, PluginFormat, SystemContext};
+    for (os, name, family, format, restarts) in [
+        (
+            "windows",
+            "LUNA.exe",
+            HostFamily::Unknown,
+            PluginFormat::Vst3,
+            0,
+        ),
+        ("macos", "LUNA", HostFamily::Luna, PluginFormat::Vst3, 0),
+        ("macos", "LUNA", HostFamily::Luna, PluginFormat::Au, 1),
+        (
+            "windows",
+            "LUNA.exe",
+            HostFamily::Unknown,
+            PluginFormat::Unknown,
+            1,
+        ),
+        (
+            "windows",
+            "Other.exe",
+            HostFamily::Unknown,
+            PluginFormat::Vst3,
+            1,
+        ),
+    ] {
+        let counts = HostCallbackCounts::default();
+        let host = test_host_with_callback_counts(&counts);
+        let (base, _) = HostContext::detect_current(None);
+        let mut identity = base.host();
+        identity.process_name = name.to_owned();
+        identity.family = family;
+        let (context, writer) = HostContext::new(
+            identity,
+            format,
+            SystemContext {
+                os,
+                arch: "test",
+                os_version: None,
+            },
+        );
+        let mut instance = PluginInstanceState::new(
+            &REQUEST_HOST_LIFECYCLE_REGISTRATION,
+            0,
+            TEST_DESCRIPTOR.id,
+            &host,
+            None,
+            context,
+            writer,
+        )
+        .expect("test plugin instance");
+        instance.plugin.plugin_data = (&mut *instance as *mut PluginInstanceState).cast();
+        assert!(unsafe { plugin_init(&instance.plugin) });
+        assert!(unsafe { plugin_activate(&instance.plugin, 48_000.0, 1, 512) });
+        assert_eq!(
+            counts.request_restart.load(Ordering::Relaxed),
+            restarts,
+            "{os}/{format:?}/{name}"
+        );
+        assert_eq!(counts.request_process.load(Ordering::Relaxed), 1);
+        assert_eq!(counts.request_callback.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[test]
 fn plugin_on_main_thread_calls_instance_hook() {
     ON_MAIN_THREAD_COUNT.store(0, Ordering::Relaxed);
     let instance = test_instance(&ZERO_LATENCY_REGISTRATION, ptr::null());
