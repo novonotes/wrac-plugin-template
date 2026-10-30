@@ -221,6 +221,8 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
     _gesturedparameters.reserve(8192);
 
     _active = true;
+    if (_plugin->_ext._latency)
+      _cachedLatencySamples = _plugin->_ext._latency->get(_plugin->_plugin);
     _processAdapter = new Clap::ProcessAdapter();
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->_ext._params, this->audioInputs, this->audioOutputs,
@@ -458,12 +460,22 @@ uint32 PLUGIN_API ClapAsVst3::getLatencySamples()
   }
   if (!_active)
   {
+    // Studio Pro 8.1.2 on Windows deactivates the VST3, calls setupProcessing
+    // with kOffline, and queries latency before reactivation. It renders
+    // without re-querying after kLatencyChanged, so returning zero here leaves
+    // the offline mix delayed (observed at 256 and 4096 samples, 44.1 kHz).
+    // CLAP permits latency.get only during activation or while active. Return
+    // the last active value instead; before the first activation it is zero.
+    // If state or sample rate changes while inactive, the next activation may
+    // have a different latency. Keep the restart notification so hosts can
+    // re-query that value, although Studio Pro's offline render does not.
     _missedLatencyRequest = true;
-    return 0;
+    return _cachedLatencySamples;
   }
 
   _missedLatencyRequest = false;
-  return _plugin->_ext._latency->get(_plugin->_plugin);
+  _cachedLatencySamples = _plugin->_ext._latency->get(_plugin->_plugin);
+  return _cachedLatencySamples;
 }
 
 uint32 PLUGIN_API ClapAsVst3::getTailSamples()
