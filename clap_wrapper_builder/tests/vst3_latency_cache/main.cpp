@@ -1,3 +1,6 @@
+// Studio Pro 8.1.2 on Windows queries latency after switching to offline mode
+// and before reactivation, then renders without another query. Exercise that
+// sequence and latency changes with the WRAC Gain state and a VST3 SDK host.
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/common/memorystream.h"

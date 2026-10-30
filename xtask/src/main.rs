@@ -5,6 +5,8 @@
 //! task enum and dependencies live here so products can extend the workflow
 //! without changing the template libraries.
 
+mod wrapper_tests;
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -53,6 +55,7 @@ fn main() -> Result<()> {
         Command::Install(args) => execute_install(&config, args),
         Command::Uninstall(args) => execute_uninstall(&config, args),
         Command::Validate(args) => execute_validate(&config, args),
+        Command::TestWrapper => wrapper_tests::run(&config.root),
         Command::Launch(args) => execute_launch(&config, args),
         Command::Clean(args) => execute_clean(&config, args),
         Command::Quality => wrac_build_ops::run_quality(&config.root),
@@ -79,6 +82,8 @@ Examples:
   xtask validate --target=clap,vst3 --checks build-artifacts
   xtask validate --target=clap,vst3 --checks build-artifacts,external-validators")]
     Validate(ValidateArgs),
+    /// Run the wrapper regression tests against the release WRAC Gain bundle.
+    TestWrapper,
     Launch(LaunchArgs),
     Clean(CleanArgs),
     Quality,
