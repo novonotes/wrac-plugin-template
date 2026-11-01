@@ -74,9 +74,10 @@ pub(super) fn rotate_logs(log_dir: &Path, file_stem: &str) {
         return;
     }
 
-    // Rotate by modification time so the newest archived logs survive even if a
-    // timestamped filename was created by a system clock with low precision.
-    log_files.sort_by_key(|entry| {
+    // Snapshot each timestamp once: concurrent plugin scans may update or remove
+    // these files, which would violate sort's total-order contract if keys were reread.
+    // Modification time keeps the newest logs even with low-precision filenames.
+    log_files.sort_by_cached_key(|entry| {
         entry
             .metadata()
             .and_then(|metadata| metadata.modified())

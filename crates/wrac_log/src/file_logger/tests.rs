@@ -105,7 +105,17 @@ fn rotate_logs_keeps_max_archived_logs() {
         let file = temp_dir
             .path()
             .join(format!("TestApp 20260101_000000_{index:03}.log"));
-        std::fs::write(file, format!("log {index}")).unwrap();
+        std::fs::write(&file, format!("log {index}")).unwrap();
+        // Give every archive a distinct age without relying on filesystem clock resolution.
+        std::fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_times(
+                std::fs::FileTimes::new()
+                    .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(index as u64)),
+            )
+            .unwrap();
     }
     std::fs::write(temp_dir.path().join("TestApp Latest.log"), "latest").unwrap();
 
@@ -116,6 +126,12 @@ fn rotate_logs_keeps_max_archived_logs() {
         .filter(|path| path.file_name().unwrap().to_string_lossy() != "TestApp Latest.log")
         .collect::<Vec<_>>();
     assert_eq!(archived.len(), MAX_LOG_FILES);
+    for index in 0..(MAX_LOG_FILES + 2) {
+        let path = temp_dir
+            .path()
+            .join(format!("TestApp 20260101_000000_{index:03}.log"));
+        assert_eq!(path.exists(), index >= 2);
+    }
     assert!(temp_dir.path().join("TestApp Latest.log").exists());
 }
 
