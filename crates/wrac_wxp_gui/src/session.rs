@@ -36,8 +36,11 @@ pub enum WxpFrontendSource {
 /// Configuration needed to create a native WebView session.
 ///
 /// `plugin_id` is also used to isolate WebView user-data directories, so pass the same
-/// reverse-DNS ID used by the host descriptor. Size limits use the same unit as the
-/// host GUI size callbacks selected by `host_size_unit`.
+/// reverse-DNS ID used by the host descriptor. On Windows, browser storage is further
+/// isolated by DPI awareness; it must not be the source of cross-host product state.
+/// Existing Windows cookies and local storage in the unpartitioned directory are
+/// not migrated to these separate browser profiles.
+/// Size limits use the same unit as the host GUI size callbacks selected by `host_size_unit`.
 pub struct WxpWebViewConfig {
     pub plugin_id: &'static str,
     pub initial_size: GuiSize,
@@ -78,7 +81,7 @@ impl WxpWebViewSession {
             config.initial_size.height
         );
 
-        let data_dir = webview_data_dir(config.plugin_id);
+        let data_dir = webview_data_dir(config.plugin_id)?;
         std::fs::create_dir_all(&data_dir)
             .map_err(|_| PluginError::Message("failed to create GUI data directory".into()))?;
         log::debug!("using GUI data directory: {}", data_dir.display());
@@ -536,16 +539,44 @@ fn clamp_size(size: GuiSize, limits: GuiSizeLimits) -> GuiSize {
     }
 }
 
-fn webview_data_dir(plugin_id: &str) -> PathBuf {
+fn webview_data_dir(plugin_id: &str) -> PluginResult<PathBuf> {
     let plugin_dir = sanitize_plugin_data_dir(plugin_id);
     // Derive the user-data path from plugin_id so a plugin created from the template
     // does not share cookies, cache, or storage with the original template plugin.
-    match project_dirs_from_plugin_id(plugin_id) {
+    let data_dir = match project_dirs_from_plugin_id(plugin_id) {
         Some(dirs) => dirs.data_dir().join("webview").join(plugin_dir),
         None => std::env::temp_dir()
             .join(plugin_dir)
             .join("webview")
             .join("data"),
+    };
+
+    // WebView2 shares a browser process for each user-data directory. Hosts with
+    // different DPI awareness cannot join that process (ERROR_INVALID_STATE).
+    // Partition by the creating thread's awareness, not PID: editor reopenings
+    // and compatible hosts can reuse persistent storage without unbounded caches.
+    #[cfg(windows)]
+    let data_dir = data_dir.join(webview_dpi_directory()?);
+
+    Ok(data_dir)
+}
+
+#[cfg(windows)]
+fn webview_dpi_directory() -> PluginResult<&'static str> {
+    use windows_sys::Win32::UI::HiDpi::{
+        DPI_AWARENESS_PER_MONITOR_AWARE, DPI_AWARENESS_SYSTEM_AWARE, DPI_AWARENESS_UNAWARE,
+        GetAwarenessFromDpiAwarenessContext, GetThreadDpiAwarenessContext,
+    };
+
+    // SAFETY: These queries inspect the calling thread and borrow no resources.
+    let awareness = unsafe { GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext()) };
+    match awareness {
+        DPI_AWARENESS_UNAWARE => Ok("dpi-unaware"),
+        DPI_AWARENESS_SYSTEM_AWARE => Ok("dpi-system-aware"),
+        DPI_AWARENESS_PER_MONITOR_AWARE => Ok("dpi-per-monitor-aware"),
+        _ => Err(PluginError::Message(
+            "failed to query WebView DPI awareness".into(),
+        )),
     }
 }
 
@@ -576,6 +607,42 @@ fn sanitize_plugin_data_dir(plugin_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn webview_storage_is_stable_within_and_isolated_between_dpi_modes() {
+        use windows_sys::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+            DPI_AWARENESS_CONTEXT_UNAWARE, SetThreadDpiAwarenessContext,
+        };
+
+        // Use a dedicated thread so the DPI changes cannot affect other tests or
+        // their windows. This covers the real Windows query used before creation.
+        std::thread::spawn(|| {
+            let mut paths = Vec::new();
+            for context in [
+                DPI_AWARENESS_CONTEXT_UNAWARE,
+                DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+                DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            ] {
+                // SAFETY: Only this test thread's DPI context is changed.
+                assert!(!unsafe { SetThreadDpiAwarenessContext(context) }.is_null());
+                let path = webview_data_dir("org.example.plugin").unwrap();
+                assert_eq!(
+                    path,
+                    webview_data_dir("org.example.plugin").unwrap(),
+                    "reopening an editor must reuse its browser profile"
+                );
+                assert!(
+                    !paths.contains(&path),
+                    "incompatible DPI modes must not share a browser profile"
+                );
+                paths.push(path);
+            }
+        })
+        .join()
+        .unwrap();
+    }
 
     #[test]
     fn clamps_host_size_with_physical_limits() {
