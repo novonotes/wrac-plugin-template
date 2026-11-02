@@ -56,6 +56,7 @@ pub struct WxpWebViewConfig {
 pub struct WxpWebViewSession {
     // WebView teardown can touch the context, so Drop sequences these fields explicitly.
     web_view: Option<WxpWebView>,
+    page_load: wxp::PageLoadMonitor,
     wxp_context: Option<WebContext>,
     // wxp expects the command handler to be owned externally, so keep it alive with the WebView.
     command_handler: Rc<WxpCommandHandler>,
@@ -144,6 +145,7 @@ impl WxpWebViewSession {
 
         log::debug!("creating wxp WebView session completed");
         Ok(Self {
+            page_load: web_view.page_load_monitor(),
             web_view: Some(web_view),
             wxp_context: Some(wxp_context),
             command_handler,
@@ -177,10 +179,8 @@ impl WxpWebViewSession {
     }
 
     /// Returns a handle for reading how far the page has loaded.
-    pub fn page_load_monitor(&self) -> Option<wxp::PageLoadMonitor> {
-        self.web_view
-            .as_ref()
-            .map(wxp::WxpWebView::page_load_monitor)
+    pub fn page_load_monitor(&self) -> wxp::PageLoadMonitor {
+        self.page_load.clone()
     }
 
     pub fn show(&mut self) -> PluginResult<()> {
