@@ -15,6 +15,8 @@ resolver = "2"
 
 [workspace.dependencies]
 clap-sys = "0.5.0"
+# Update all wxp git dependencies from novonotes-internal, not main.
+# Keep their revisions aligned with consuming workspaces to avoid duplicate WebView types and run loops.
 novonotes_run_loop = { git = "https://github.com/novonotes/wxp.git", package = "novonotes_run_loop", rev = "de6975a0c9e06f21c3f77fe9ce32c47b252756ce" }
 run_loop_timer = { git = "https://github.com/novonotes/wxp.git", package = "run_loop_timer", rev = "de6975a0c9e06f21c3f77fe9ce32c47b252756ce" }
 wrac_clap_adapter = { path = "crates/wrac_clap_adapter" }
