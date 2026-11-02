@@ -176,6 +176,13 @@ impl WxpWebViewSession {
         self.apply_bounds()
     }
 
+    /// Returns a handle for reading how far the page has loaded.
+    pub fn page_load_monitor(&self) -> Option<wxp::PageLoadMonitor> {
+        self.web_view
+            .as_ref()
+            .map(wxp::WxpWebView::page_load_monitor)
+    }
+
     pub fn show(&mut self) -> PluginResult<()> {
         log::debug!("showing wxp WebView session");
         if let Some(web_view) = &self.web_view {
