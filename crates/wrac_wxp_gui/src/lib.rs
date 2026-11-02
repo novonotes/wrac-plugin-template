@@ -20,3 +20,4 @@ pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
 pub use session::{WxpFrontendSource, WxpWebViewConfig, WxpWebViewSession};
 pub use window::ParentWindowHandle;
+pub use wxp::{PageLoadMonitor, PageLoadState};
