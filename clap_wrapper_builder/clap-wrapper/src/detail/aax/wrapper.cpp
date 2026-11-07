@@ -12,6 +12,7 @@
 */
 
 #include "wrapper.h"
+#include "parameter_sync.h"
 // #include "clap_proxy.h"
 #include "AAX.h"
 #include "AAX_ICollection.h"
@@ -1132,13 +1133,19 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
 
 void ClapAsAAX::param_rescan(clap_param_rescan_flags flags)
 {
-  // AAX does not support adding/removing parameters at runtime, so only the TEXT
-  // flag (display name changes) can be honoured — via AAX_CParameter::SetName(),
-  // which calls mAutomationDelegate->ParameterNameChanged() internally and triggers
-  // Pro Tools to refresh the name everywhere it is displayed.
-  if (!(flags & CLAP_PARAM_RESCAN_TEXT)) return;
-
   if (!_plugin || !_plugin->_ext._params) return;
+
+  if (flags & CLAP_PARAM_RESCAN_VALUES)
+  {
+    // State recall changes the CLAP values without passing through AAX's
+    // automation manager. Update its cache and listeners without issuing a
+    // touch or recording restored values as new automation gestures.
+    syncAAXParameterValues(_plugin->_plugin, _plugin->_ext._params, _parameterMapCLAP,
+                           mParameterManager);
+  }
+
+  // AAX cannot add or remove parameters at runtime, but it can refresh names.
+  if (!(flags & CLAP_PARAM_RESCAN_TEXT)) return;
 
   uint32_t count = _plugin->_ext._params->count(_plugin->_plugin);
   for (uint32_t i = 0; i < count; ++i)

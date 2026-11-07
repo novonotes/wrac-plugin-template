@@ -8,6 +8,20 @@ endif()
 
 enable_testing()
 
+set(WRAC_TEST_AAX_SDK "" CACHE PATH "Optional AAX SDK root for the AAX parameter rescan test")
+if(WRAC_TEST_AAX_SDK)
+  set(AAX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(AAX_BUILD_PTSL_EXAMPLES OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${WRAC_TEST_AAX_SDK}" aaxsdk EXCLUDE_FROM_ALL)
+  add_executable(aax_parameter_rescan aax_parameter_rescan.cpp)
+  target_compile_features(aax_parameter_rescan PRIVATE cxx_std_17)
+  target_include_directories(aax_parameter_rescan PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src"
+    "${CMAKE_CURRENT_LIST_DIR}/../clap/include")
+  target_link_libraries(aax_parameter_rescan PRIVATE AAX_SDK::AAXLibrary)
+  add_test(NAME aax_parameter_rescan COMMAND aax_parameter_rescan)
+endif()
+
 if(APPLE)
   find_library(AUDIO_TOOLBOX AudioToolbox REQUIRED)
   find_library(CORE_FOUNDATION CoreFoundation REQUIRED)
