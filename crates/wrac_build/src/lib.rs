@@ -206,6 +206,10 @@ fn write_plugin_products(
             rust.push_str(&format!(
                 "            get_stem_config: plugin_{index}_aax_get_stem_config,\n"
             ));
+            rust.push_str(&format!(
+                "            midi_input_name: {:?},\n",
+                plugin.aax_midi_input_name
+            ));
             rust.push_str("        }),\n");
         } else {
             rust.push_str("        aax: None,\n");
