@@ -221,6 +221,13 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   err = outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mCurrentStateNum),
                                sizeof(uint64_t));
 
+  if (businfo.sidechain_input_port)
+    err = outDesc->AddSideChainIn(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mSideChainInput));
+  else
+    // AAX requires a field at every context offset, even when the input is not declared.
+    err = outDesc->AddPrivateData(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mSideChainInput),
+                                  sizeof(void *), AAX_ePrivateDataOptions_DefaultOptions);
+
   // Register processing callbacks
   //
   // Create a property map
@@ -250,6 +257,8 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   err = properties->AddProperty(AAX_eProperty_ManufacturerID, manu_id);
   err = properties->AddProperty(AAX_eProperty_ProductID, prod_id);
   err = properties->AddProperty(AAX_eProperty_CanBypass, true);
+  if (businfo.sidechain_input_port)
+    err = properties->AddProperty(AAX_eProperty_SupportsSideChainInput, true);
   // err = properties->AddProperty(AAX_eProperty_UsesClientGUI, true);  // true means that it uses auto-GUI by the host, CLAPs have their own UI
 
   err = properties->AddProperty(AAX_eProperty_RequiresChunkCallsOnMainThread,
@@ -567,12 +576,25 @@ AAX_Result ClapAsAAX::EffectInit()
   if (AAX_SUCCESS == _aax_ctrl->GetHostName(&hostname)) _underlying_hostname = hostname.StdString();
 
   _library = CLAPAAX::guarantee_clap();
+  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, m.StdString().c_str());
   _plugin = Clap::Plugin::createInstance(_library->_pluginFactory, m.StdString(), this);
 
   if (_plugin)
   {
     if (_plugin->initialize())
     {
+      if (_sidechain_input_port)
+      {
+        auto *ports = _plugin->_ext._audioports;
+        clap_audio_port_info_t sidechain{};
+        if (!ports || _sidechain_input_port >= ports->count(_plugin->_plugin, true) ||
+            !ports->get(_plugin->_plugin, _sidechain_input_port, true, &sidechain) ||
+            sidechain.channel_count == 0)
+        {
+          LOGINFO("AAX sidechain was declared without the corresponding CLAP input port");
+          return AAX_ERROR_NOT_INITIALIZED;
+        }
+      }
       // TODO: initialize calls wrapper specifics and sets up all busses etc.
       {
         if (_plugin->_ext._configurable_audio_ports)
@@ -1503,7 +1525,8 @@ bool ClapAsAAX::activatePlugin()
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
         this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_input_port_index,
-        _midi_prefer_mididialect, _midi_output_declared, placeholderInChannels, placeholderOutChannels);
+        _midi_prefer_mididialect, _midi_output_declared, _sidechain_input_port, placeholderInChannels,
+        placeholderOutChannels);
     _outputChannelCount = _processAdapter->outputChannelCount();
 
     // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()

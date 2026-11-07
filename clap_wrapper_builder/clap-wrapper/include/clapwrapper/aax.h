@@ -18,6 +18,17 @@
 // the factory extension
 static const CLAP_CONSTEXPR char CLAP_PLUGIN_FACTORY_INFO_AAX[] = "clap.plugin-factory-info-as-aax/1";
 
+// A separate factory keeps sidechain metadata optional without changing the AAX info ABI.
+static const CLAP_CONSTEXPR char CLAP_PLUGIN_FACTORY_AAX_SIDECHAIN[] =
+    "dev.wrac.clap-factory-aax-sidechain/1";
+
+typedef struct clap_plugin_factory_aax_sidechain
+{
+  // Returns the CLAP auxiliary input port index, or 0 when no AAX sidechain is declared.
+  uint32_t(CLAP_ABI *get_input_port_index)(const struct clap_plugin_factory_aax_sidechain *factory,
+                                           uint32_t plugin_index);
+} clap_plugin_factory_aax_sidechain_t;
+
 // the plugin extension
 static const CLAP_CONSTEXPR char CLAP_PLUGIN_AS_AAX[] = "clap.plugin-info-as-aax/1";
 

@@ -34,6 +34,7 @@ if(WRAC_TEST_AAX_SDK)
   endfunction()
 
   add_aax_process_test(aax_midi_input)
+  add_aax_process_test(aax_audio_input)
   add_executable(aax_parameter_rescan aax_parameter_rescan.cpp)
   target_compile_features(aax_parameter_rescan PRIVATE cxx_std_17)
   target_include_directories(aax_parameter_rescan PRIVATE

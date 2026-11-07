@@ -30,11 +30,16 @@ struct plugin_bus_info_t
   std::vector<stemformat_combi_t> stemformats;
   bool has_midi_in = false;
   bool has_midi_out = false;
+  // Zero means no sidechain; CLAP main input is always port zero.
+  uint32_t sidechain_input_port = 0;
   std::string midi_in_name;
   std::string midi_out_name;
 };
 
 plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index);
+
+// Query the same factory-time declaration when describing and running an instance.
+uint32_t sidechainInputPort(const Clap::Library *factory, const char *pluginid);
 
 // The MIDI nodes the AAX description registers for a plugin. A context field that is not
 // registered as a MIDI node holds placeholder private data, so the running instance must use

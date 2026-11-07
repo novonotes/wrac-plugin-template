@@ -48,6 +48,9 @@ struct SAAX_Wrapper_AlgorithmicContext
 
   int64_t *mCurrentStateNum = nullptr;  ///< State counter
 
+  // This is a host-owned channel index only when the component declared a sidechain.
+  int32_t *mSideChainInput = nullptr;
+
   // perhaps we need more, later
 };
 

@@ -86,7 +86,7 @@ static bool run(bool preferMidi, bool declared = true)
   std::vector<clap_id> gestures;
   AAXProcessAdapter adapter;
   adapter.setupProcessing(&plugin, 48000, nullptr, &audioPorts, nullptr, gestures, queue, nullptr,
-                          declared ? 0 : CLAP_INVALID_ID, preferMidi, false, 0, 0);
+                          declared ? 0 : CLAP_INVALID_ID, preferMidi, false, 0, 0, 0);
   int32_t frames = 32;
   SAAX_Wrapper_AlgorithmicContext context;
   context.mNumSamples = &frames;

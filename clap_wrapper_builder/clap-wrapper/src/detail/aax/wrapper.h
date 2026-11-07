@@ -84,8 +84,9 @@ class AAXProcessAdapter
                        const clap_plugin_params_t *ext_param, const clap_plugin_audio_ports *ext_audio,
                        Clap::IAutomation *automation, std::vector<clap_id> &gesturedParameters,
                        ParamChangeQueue &inqueue,
-                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportindex,
-                       bool preferMIDI, bool midiOutputDeclared, uint32_t placeholderInChannels,
+                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter,
+                       uint32_t midiportindex, bool preferMIDI, bool midiOutputDeclared,
+                       uint32_t sidechainInputPort, uint32_t placeholderInChannels,
                        uint32_t placeholderOutChannels);
   void process(SAAX_Wrapper_AlgorithmicContext *context);
   // Zero every output channel of this render context. Used in place of
@@ -128,6 +129,8 @@ class AAXProcessAdapter
   double _samplerate = 44100;
   float *_silent_input = nullptr;
   std::vector<float *> _silent_input_channels;
+  std::vector<float *> _sidechain_input_channels;
+  uint32_t _sidechain_input_port = 0;
   float *_silent_output = nullptr;
 
   ParamChangeQueue *_inqueue;
@@ -368,6 +371,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
   uint32_t _midi_input_port_index = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
   bool _midi_output_declared = false;
+  uint32_t _sidechain_input_port = 0;
 
   ParamChangeQueue _paramsToProcess;
 

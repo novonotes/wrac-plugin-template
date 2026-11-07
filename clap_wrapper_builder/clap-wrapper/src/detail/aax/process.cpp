@@ -167,7 +167,8 @@ void AAXProcessAdapter::setupProcessing(
     const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
     std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
     std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportindex, bool preferMIDI,
-    bool midiOutputDeclared, uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
+    bool midiOutputDeclared, uint32_t sidechainInputPort, uint32_t placeholderInChannels,
+    uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
   _ext_param = ext_param;
@@ -180,6 +181,7 @@ void AAXProcessAdapter::setupProcessing(
   _midi_input_port_index = midiportindex;
   _midi_prefer_mididialect = preferMIDI;
   _midi_output_declared = midiOutputDeclared;
+  _sidechain_input_port = sidechainInputPort;
 
   _placeholderInChannels = placeholderInChannels;
   _placeholderOutChannels = placeholderOutChannels;
@@ -256,6 +258,8 @@ void AAXProcessAdapter::setupProcessing(
     _silent_input = new float[gAAXMaxBlockSizeInSamples]();
     _silent_input_channels.assign(maxAuxChannels, _silent_input);
   }
+  if (_sidechain_input_port > 0 && _sidechain_input_port < numinputs)
+    _sidechain_input_channels.resize(_input_ports[_sidechain_input_port].channel_count, _silent_input);
 
   // setup process structure
   _proc.steady_time = -1;  // change later
@@ -454,9 +458,22 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
 
   // distribute the pointers to the audio channels pointer arrays to the
   // appropriate audio ports
+  if (_sidechain_input_port > 0 && _sidechain_input_port < _proc.audio_inputs_count)
+  {
+    auto *sidechain = _silent_input;
+    // AAX supplies the sidechain's index; it need not be adjacent to the main stem.
+    // An undeclared context field contains private data and must never be dereferenced.
+    if (context->mSideChainInput && context->mAudioInputs && *context->mSideChainInput > 0 &&
+        context->mAudioInputs[*context->mSideChainInput])
+      sidechain = context->mAudioInputs[*context->mSideChainInput];
+    // Replicate the mono host signal when the CLAP auxiliary port is multichannel.
+    std::fill(_sidechain_input_channels.begin(), _sidechain_input_channels.end(), sidechain);
+  }
   for (uint32_t i = 0; i < _proc.audio_inputs_count; ++i)
   {
-    this->_input_ports[i].data32 = i == 0 ? context->mAudioInputs : _silent_input_channels.data();
+    this->_input_ports[i].data32 = i == 0                       ? context->mAudioInputs
+                                   : i == _sidechain_input_port ? _sidechain_input_channels.data()
+                                                                : _silent_input_channels.data();
   }
   uint32_t offset = 0;
   for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i)
