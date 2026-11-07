@@ -1,4 +1,5 @@
 #include "process.h"
+#include "silence.h"
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstmidicontrollers.h>
@@ -468,7 +469,8 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
     auto inbusses = _audioinputs->size();
     for (auto i = 0U; i < inbusses; ++i)
     {
-      if (_vstdata->inputs[i].numChannels == (Steinberg::int32)_input_ports[i].channel_count)
+      if (_vstdata->inputs && i < (size_t)_vstdata->numInputs &&
+          _vstdata->inputs[i].numChannels == (Steinberg::int32)_input_ports[i].channel_count)
       {
         // CLAP requires exactly one sample pointer representation per port. Mapping the
         // host-selected representation directly preserves 64-bit samples end to end.
@@ -492,7 +494,8 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
     auto outbusses = _audiooutputs->size();
     for (auto i = 0U; i < outbusses; ++i)
     {
-      if (_vstdata->outputs[i].numChannels == (Steinberg::int32)_output_ports[i].channel_count)
+      if (_vstdata->outputs && i < (size_t)_vstdata->numOutputs &&
+          _vstdata->outputs[i].numChannels == (Steinberg::int32)_output_ports[i].channel_count)
       {
         if (_vstdata->symbolicSampleSize == Steinberg::Vst::kSample64)
         {
@@ -511,9 +514,18 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
       }
     }
     if (doProcess)
-      _plugin->process(_plugin, &_processData);
+    {
+      // Do not clear samples before processing: input and output may alias.
+      for (Steinberg::int32 bus = 0; bus < data.numOutputs; ++bus)
+        data.outputs[bus].silenceFlags = 0;
+      if (_plugin->process(_plugin, &_processData) == CLAP_PROCESS_ERROR)
+        silenceOutputBuffers(data);
+    }
     else
     {
+      // A temporarily incompatible bus layout must never expose the host's
+      // original input or previous output while a restart is being applied.
+      silenceOutputBuffers(data);
       if (_ext_params)
       {
         _ext_params->flush(_plugin, _processData.in_events, _processData.out_events);

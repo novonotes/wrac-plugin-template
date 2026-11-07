@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
 project(wrapper_regression_tests LANGUAGES CXX)
 
+add_executable(vst3_silence vst3_silence.cpp)
+target_compile_features(vst3_silence PRIVATE cxx_std_17)
+target_include_directories(vst3_silence PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../vst3sdk")
+add_test(NAME vst3_silence COMMAND vst3_silence)
+
 set(WRAC_TEST_PLUGIN "" CACHE PATH "Built WRAC Gain bundle used by the tests")
 if(NOT IS_DIRECTORY "${WRAC_TEST_PLUGIN}")
   message(FATAL_ERROR "WRAC_TEST_PLUGIN must point to a built WRAC Gain bundle: ${WRAC_TEST_PLUGIN}")
