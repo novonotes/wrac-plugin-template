@@ -33,9 +33,9 @@ mod tail_extension;
 mod vst3_extension;
 
 pub(crate) use self::entry_callbacks::{
-    aax_get_info, auv2_get_info, entry_deinit, entry_get_factory, entry_init,
-    factory_create_plugin, factory_get_plugin_count, factory_get_plugin_descriptor,
-    main_thread_hook_attach, main_thread_hook_detach, vst3_get_info,
+    aax_get_info, aax_sidechain_get_input_port_index, auv2_get_info, entry_deinit,
+    entry_get_factory, entry_init, factory_create_plugin, factory_get_plugin_count,
+    factory_get_plugin_descriptor, main_thread_hook_attach, main_thread_hook_detach, vst3_get_info,
 };
 use self::plugin_callbacks::{
     plugin_activate, plugin_deactivate, plugin_destroy, plugin_get_extension, plugin_init,
@@ -65,6 +65,7 @@ const CLAP_PLUGIN_AS_VST3: &CStr = c"clap.plugin-info-as-vst3/0";
 // AAX declares manufacturer/product/stem IDs at factory time, so commercial
 // products must provide this extension rather than relying on wrapper-generated IDs.
 const CLAP_PLUGIN_FACTORY_INFO_AAX: &CStr = c"clap.plugin-factory-info-as-aax/1";
+const CLAP_PLUGIN_FACTORY_AAX_SIDECHAIN: &CStr = c"dev.wrac.clap-factory-aax-sidechain/1";
 const WRAC_PLUGIN_MAIN_THREAD_HOOK: &CStr = c"com.novonotes.wrac.plugin-main-thread-hook/0";
 
 /// Tracks one kind of realtime callback (`process` or `params.flush`) of one instance.

@@ -72,6 +72,17 @@ pub struct PluginFormatDefinition {
     pub distribution: FormatDistribution,
 }
 
+/// AAX must declare its sidechain before any plugin instance is created.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AaxSidechainInput {
+    /// Do not declare a host sidechain input.
+    #[default]
+    None,
+    /// Map the host's mono sidechain to the first auxiliary CLAP input port.
+    FirstAuxiliary,
+}
+
 impl PluginFormat {
     pub fn display(self) -> &'static str {
         match self {
@@ -105,6 +116,9 @@ pub struct PluginProduct {
     /// should receive MIDI in Pro Tools: AAX only routes MIDI to nodes declared when the plugin is
     /// described, so the wrapper ignores note input ports that are not declared here.
     pub aax_midi_input_name: Option<String>,
+    /// Selects the CLAP input that receives the AAX host's mono sidechain.
+    #[serde(default)]
+    pub aax_sidechain_input: AaxSidechainInput,
 }
 
 fn default_true() -> bool {
