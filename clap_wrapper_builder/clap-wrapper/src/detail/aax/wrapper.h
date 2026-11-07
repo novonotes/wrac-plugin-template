@@ -366,6 +366,11 @@ class ClapAsAAX : public AAX_CEffectParameters,
   ParamChangeQueue _paramsToProcess;
 
  private:
+  // A plugin may request a value rescan from within state.load(), which already
+  // syncs AAX's values; SetChunk only syncs when that did not happen.
+  bool _paramValuesSyncedDuringLoad = false;
+  void syncParameterValuesFromClap();
+
   std::string _predetermined_effectid;
   int _predetermined_busconfig = 0;
 
