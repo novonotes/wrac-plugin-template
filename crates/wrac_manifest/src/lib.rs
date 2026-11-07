@@ -79,7 +79,9 @@ pub enum AaxSidechainInput {
     /// Do not declare a host sidechain input.
     #[default]
     None,
-    /// Map the host's mono sidechain to the first auxiliary CLAP input port.
+    /// Map the host's mono sidechain to every channel of CLAP input port 1.
+    /// After applying the selected AAX configuration, port 0 must be a main input
+    /// and port 1 an auxiliary input, both with channels.
     FirstAuxiliary,
 }
 

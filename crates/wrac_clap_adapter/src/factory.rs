@@ -107,7 +107,7 @@ impl PluginRegistrationStorage {
                 registration,
             },
             aax_sidechain_factory: AaxSidechainFactoryState {
-                factory: ClapPluginFactoryAaxSidechain {
+                factory: WracPluginFactoryAaxSidechain {
                     get_input_port_index: Some(crate::abi::aax_sidechain_get_input_port_index),
                 },
                 registration,
@@ -166,7 +166,7 @@ unsafe impl Send for AaxFactoryState {}
 
 #[repr(C)]
 pub(crate) struct AaxSidechainFactoryState {
-    pub factory: ClapPluginFactoryAaxSidechain,
+    pub factory: WracPluginFactoryAaxSidechain,
     pub registration: &'static EntryRegistration,
 }
 
@@ -266,16 +266,17 @@ pub(crate) struct ClapPluginFactoryAsAax {
 unsafe impl Sync for ClapPluginFactoryAsAax {}
 unsafe impl Send for ClapPluginFactoryAsAax {}
 
-// This optional factory is separate so that adding sidechains does not alter the existing AAX ABI.
+// Matches wrac_plugin_factory_aax_sidechain_t in clapwrapper/wrac.h. Keeping the WRAC
+// metadata separate avoids changing the upstream AAX factory ABI during subtree updates.
 #[repr(C)]
-pub(crate) struct ClapPluginFactoryAaxSidechain {
+pub(crate) struct WracPluginFactoryAaxSidechain {
     pub get_input_port_index: Option<
-        unsafe extern "C" fn(factory: *const ClapPluginFactoryAaxSidechain, index: u32) -> u32,
+        unsafe extern "C" fn(factory: *const WracPluginFactoryAaxSidechain, index: u32) -> u32,
     >,
 }
 
-unsafe impl Sync for ClapPluginFactoryAaxSidechain {}
-unsafe impl Send for ClapPluginFactoryAaxSidechain {}
+unsafe impl Sync for WracPluginFactoryAaxSidechain {}
+unsafe impl Send for WracPluginFactoryAaxSidechain {}
 
 #[repr(C)]
 pub(crate) struct WracPluginMainThreadHook {
@@ -332,7 +333,7 @@ pub(crate) fn aax_factory_state(
 }
 
 pub(crate) fn aax_sidechain_factory_state(
-    factory: *const ClapPluginFactoryAaxSidechain,
+    factory: *const WracPluginFactoryAaxSidechain,
 ) -> Option<&'static AaxSidechainFactoryState> {
     if factory.is_null() {
         return None;
@@ -363,5 +364,5 @@ pub(crate) fn aax_factory_ptr(storage: &'static PluginRegistrationStorage) -> *c
 pub(crate) fn aax_sidechain_factory_ptr(
     storage: &'static PluginRegistrationStorage,
 ) -> *const c_void {
-    &storage.aax_sidechain_factory.factory as *const ClapPluginFactoryAaxSidechain as *const c_void
+    &storage.aax_sidechain_factory.factory as *const WracPluginFactoryAaxSidechain as *const c_void
 }

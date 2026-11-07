@@ -79,7 +79,10 @@ pub struct Vst3Descriptor {
 pub enum AaxSidechainInput {
     /// No sidechain input is declared to AAX.
     None,
-    /// The first auxiliary CLAP input receives the host's mono sidechain.
+    /// CLAP input port 1 receives the host's mono sidechain on each channel.
+    /// The selected AAX configuration must expose a main input at port 0 and an
+    /// auxiliary input at port 1, both with channels. Sidechains without a main input
+    /// are unsupported.
     FirstAuxiliary,
 }
 

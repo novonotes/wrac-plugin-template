@@ -576,7 +576,9 @@ AAX_Result ClapAsAAX::EffectInit()
   if (AAX_SUCCESS == _aax_ctrl->GetHostName(&hostname)) _underlying_hostname = hostname.StdString();
 
   _library = CLAPAAX::guarantee_clap();
-  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, m.StdString().c_str());
+  _pluginIndex = CLAPAAX::findPluginIndex(_library, m.StdString().c_str());
+  if (_pluginIndex == CLAP_INVALID_ID) return AAX_ERROR_NOT_INITIALIZED;
+  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, _pluginIndex);
   _plugin = Clap::Plugin::createInstance(_library->_pluginFactory, m.StdString(), this);
 
   if (_plugin)
@@ -1065,7 +1067,7 @@ void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_n
   // its AAX info does not declare; the matching context field then holds placeholder private
   // data, and treating it as a MIDI node makes the host crash in process().
   auto declared =
-      CLAPAAX::declaredMidiNodes(CLAPAAX::findAaxInfo(_library, plugin->desc->id), plugin, noteports);
+      CLAPAAX::declaredMidiNodes(_library->get_aax_info(_pluginIndex), plugin, noteports);
   this->_midi_output_declared = declared.has_midi_out;
   if (!declared.has_midi_in)
   {

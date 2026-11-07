@@ -65,7 +65,8 @@ const CLAP_PLUGIN_AS_VST3: &CStr = c"clap.plugin-info-as-vst3/0";
 // AAX declares manufacturer/product/stem IDs at factory time, so commercial
 // products must provide this extension rather than relying on wrapper-generated IDs.
 const CLAP_PLUGIN_FACTORY_INFO_AAX: &CStr = c"clap.plugin-factory-info-as-aax/1";
-const CLAP_PLUGIN_FACTORY_AAX_SIDECHAIN: &CStr = c"dev.wrac.clap-factory-aax-sidechain/1";
+// Match clapwrapper/wrac.h: WRAC metadata must not extend the upstream AAX info ABI.
+const WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN: &CStr = c"com.novonotes.wrac.aax-sidechain/0";
 const WRAC_PLUGIN_MAIN_THREAD_HOOK: &CStr = c"com.novonotes.wrac.plugin-main-thread-hook/0";
 
 /// Tracks one kind of realtime callback (`process` or `params.flush`) of one instance.
@@ -588,3 +589,6 @@ impl Drop for LifecycleGuard<'_> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod aax_factory_tests;
