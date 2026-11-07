@@ -127,6 +127,7 @@ class AAXProcessAdapter
   std::vector<size_t> _eventindices;
   double _samplerate = 44100;
   float *_silent_input = nullptr;
+  std::vector<float *> _silent_input_channels;
   float *_silent_output = nullptr;
 
   ParamChangeQueue *_inqueue;

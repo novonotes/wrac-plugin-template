@@ -247,6 +247,16 @@ void AAXProcessAdapter::setupProcessing(
     }
   }
 
+  // Unmapped CLAP input ports need silence rather than pointers beyond the AAX input array.
+  uint32_t maxAuxChannels = 0;
+  for (uint32_t i = 1; i < numinputs; ++i)
+    maxAuxChannels = std::max(maxAuxChannels, _input_ports[i].channel_count);
+  if (maxAuxChannels > 0)
+  {
+    _silent_input = new float[gAAXMaxBlockSizeInSamples]();
+    _silent_input_channels.assign(maxAuxChannels, _silent_input);
+  }
+
   // setup process structure
   _proc.steady_time = -1;  // change later
   _proc.frames_count =
@@ -444,13 +454,11 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
 
   // distribute the pointers to the audio channels pointer arrays to the
   // appropriate audio ports
-  uint32_t offset = 0;
   for (uint32_t i = 0; i < _proc.audio_inputs_count; ++i)
   {
-    this->_input_ports[i].data32 = context->mAudioInputs + offset;
-    offset += this->_input_ports[i].channel_count;
+    this->_input_ports[i].data32 = i == 0 ? context->mAudioInputs : _silent_input_channels.data();
   }
-  offset = 0;
+  uint32_t offset = 0;
   for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i)
   {
     this->_output_ports[i].data32 = context->mAudioOutputs + offset;
