@@ -356,11 +356,11 @@ void Plugin::setBlockSizes(uint32_t minFrames, uint32_t maxFrames)
   _audioSetup.maxFrames = maxFrames;
 }
 
-void Plugin::setBusActivation(bool isInput, uint32_t busIndex, bool active)
+void Plugin::setBusActivation(bool isInput, uint32_t busIndex, bool active, uint32_t sampleSize)
 {
   if (_ext._audio_ports_activation)
   {
-    _ext._audio_ports_activation->set_active(_plugin, isInput, busIndex, active, 32);
+    _ext._audio_ports_activation->set_active(_plugin, isInput, busIndex, active, sampleSize);
   }
 }
 

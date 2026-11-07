@@ -13,9 +13,27 @@ endif()
 
 enable_testing()
 
+set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+set(SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../vst3sdk")
+add_subdirectory("${SDK_ROOT}" vst3sdk EXCLUDE_FROM_ALL)
+
+# Exercise the production adapter, not just the buffer helper: an inactive optional
+# bus must never turn otherwise valid main audio into silence.
+add_executable(vst3_inactive_buses
+  vst3_inactive_buses.cpp
+  "../clap-wrapper/src/detail/vst3/process.cpp"
+)
+target_compile_features(vst3_inactive_buses PRIVATE cxx_std_17)
+target_include_directories(vst3_inactive_buses PRIVATE "${SDK_ROOT}" "../clap/include")
+target_link_libraries(vst3_inactive_buses PRIVATE sdk)
+add_test(NAME vst3_inactive_buses COMMAND vst3_inactive_buses)
+
 if(APPLE)
   find_library(AUDIO_TOOLBOX AudioToolbox REQUIRED)
   find_library(CORE_FOUNDATION CoreFoundation REQUIRED)
+  target_link_libraries(vst3_inactive_buses PRIVATE "${CORE_FOUNDATION}")
   foreach(test IN ITEMS au_state_recall au_latency_restart)
     add_executable(${test} "${test}.cpp")
     target_compile_features(${test} PRIVATE cxx_std_17)
@@ -26,12 +44,6 @@ if(APPLE)
     set_tests_properties(${test} PROPERTIES TIMEOUT 30)
   endforeach()
 elseif(WIN32)
-  set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
-  set(SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../vst3sdk")
-  add_subdirectory("${SDK_ROOT}" vst3sdk EXCLUDE_FROM_ALL)
-
   add_executable(vst3_latency_cache
     vst3_latency_cache/main.cpp
     "${SDK_ROOT}/public.sdk/source/common/memorystream.cpp"

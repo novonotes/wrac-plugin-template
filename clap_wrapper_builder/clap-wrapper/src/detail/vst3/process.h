@@ -33,6 +33,7 @@
 #include <memory>
 
 #include "../clap/automation.h"
+#include "audio_buffer.h"
 
 namespace Clap
 {
@@ -130,8 +131,9 @@ class ProcessAdapter
   clap_input_events_t _in_events = {};
   clap_output_events_t _out_events = {};
 
-  std::unique_ptr<float[]> _silent_input;
-  std::unique_ptr<float[]> _silent_output;
+  std::unique_ptr<AudioBusBuffer[]> _inputBuffers;
+  std::unique_ptr<AudioBusBuffer[]> _outputBuffers;
+  uint32_t _maxFrames = 0;
 
   // A bounded block-local buffer keeps SysEx forwarding realtime-safe; try_push() reports
   // backpressure instead of allocating if a block exceeds this capacity.

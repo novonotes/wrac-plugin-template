@@ -426,7 +426,6 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   Vst::SpeakerArrangement speakerArrangementFor(uint32_t index, const clap_audio_port_info_t *info,
                                                 bool is_input);
   void addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t index, bool is_input);
-  void updateAudioBusses();
 
   Vst::UnitID getOrCreateUnitInfo(const char *modulename);
   std::map<std::string, Vst::UnitID> _moduleToUnit;
@@ -555,6 +554,7 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   bool _IMidiMappingEasy = true;
   uint8_t _numMidiChannels = 16;
   uint32_t _largestBlocksize = 0;
+  uint32_t _sampleSize = 32;
 
   // for timer
   struct TimerObject

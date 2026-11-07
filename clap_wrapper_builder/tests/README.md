@@ -18,5 +18,10 @@ c++ -std=c++17 -I clap_wrapper_builder/vst3sdk \
 /tmp/vst3_silence
 ```
 
+`vst3_inactive_buses` exercises the production VST3 process adapter with a strict
+CLAP processor: inactive/null or omitted optional buses, bus reactivation, invalid
+active buffers, error recovery, and parameter-only flushes. It checks both sample
+precisions and in-place audio, and rejects allocations during processing.
+
 CTest registrations live in [CMakeLists.txt](CMakeLists.txt). Each test source
 documents its purpose and any partial skips.

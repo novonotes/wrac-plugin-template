@@ -207,7 +207,7 @@ class Plugin
   void schnick();
   bool initialize();
   void terminate();
-  void setBusActivation(bool isInput, uint32_t busIndex, bool active);
+  void setBusActivation(bool isInput, uint32_t busIndex, bool active, uint32_t sampleSize);
   void setSampleRate(double sampleRate);
   double getSampleRate() const
   {

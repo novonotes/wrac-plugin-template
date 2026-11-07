@@ -209,12 +209,12 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
 
     for (auto i = 0U; i < audioInputs.size(); ++i)
     {
-      _plugin->setBusActivation(true, i, audioInputs[i]->isActive());
+      _plugin->setBusActivation(true, i, audioInputs[i]->isActive(), _sampleSize);
     }
 
     for (auto i = 0U; i < audioOutputs.size(); ++i)
     {
-      _plugin->setBusActivation(false, i, audioOutputs[i]->isActive());
+      _plugin->setBusActivation(false, i, audioOutputs[i]->isActive(), _sampleSize);
     }
 
     if (!_plugin->activate()) return kResultFalse;
@@ -231,9 +231,6 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
         componentHandler, this, _gesturedparameters,
         _expressionmap & clap_supported_note_expressions::AS_VST3_NOTE_EXPRESSION_PRESSURE,
         _expressionmap & clap_supported_note_expressions::AS_VST3_NOTE_EXPRESSION_TUNING);
-
-    // the freshly created ProcessAdapter needs the current bus activation states
-    updateAudioBusses();
 
     if (_missedLatencyRequest)
     {
@@ -529,6 +526,8 @@ tresult PLUGIN_API ClapAsVst3::setupProcessing(Vst::ProcessSetup &newSetup)
   _plugin->setBlockSizes(minSampleFrames, newSetup.maxSamplesPerBlock);
 
   _largestBlocksize = newSetup.maxSamplesPerBlock;
+  // The activation extension must describe the same precision as process().
+  _sampleSize = newSetup.symbolicSampleSize == Vst::kSample64 ? 64 : 32;
 
   return kResultOk;
 }
@@ -836,7 +835,10 @@ tresult PLUGIN_API ClapAsVst3::activateBus(Vst::MediaType type, Vst::BusDirectio
   // [main-thread] -- must not run while the Linux helper thread is inside this
   // plug-in's idle. \see _mainThreadLock
   std::lock_guard<std::recursive_mutex> mainThreadGuard(_mainThreadLock);
-  return super::activateBus(type, dir, index, state);
+  const auto result = super::activateBus(type, dir, index, state);
+  if (result == kResultOk && type == Vst::kAudio && _processAdapter)
+    _processAdapter->activateAudioBus(dir, index, state);
+  return result;
 }
 
 tresult PLUGIN_API ClapAsVst3::setIoMode(Vst::IoMode mode)
@@ -1175,18 +1177,6 @@ void ClapAsVst3::addMIDIBusFrom(const clap_note_port_info_t *info, uint32_t inde
     {
       addEventOutput(name16, numchannels, Vst::BusTypes::kMain, Vst::BusInfo::kDefaultActive);
     }
-  }
-}
-
-void ClapAsVst3::updateAudioBusses()
-{
-  for (auto i = 0U; i < audioInputs.size(); ++i)
-  {
-    _processAdapter->activateAudioBus(Vst::kInput, i, audioInputs[i]->isActive());
-  }
-  for (auto i = 0U; i < audioOutputs.size(); ++i)
-  {
-    _processAdapter->activateAudioBus(Vst::kOutput, i, audioOutputs[i]->isActive());
   }
 }
 

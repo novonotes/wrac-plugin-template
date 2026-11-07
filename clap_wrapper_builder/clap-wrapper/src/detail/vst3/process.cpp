@@ -93,16 +93,13 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
   _automation = automation;
   _gesturedParameters = &gesturedParameters;
 
-  if (numSamples > 0)
-  {
-    _silent_input = std::make_unique<float[]>(numSamples);
-    _silent_output = std::make_unique<float[]>(numSamples);
-  }
+  _maxFrames = numSamples;
 
   auto numInputs = (uint32_t)_audioinputs->size();
   auto numOutputs = (uint32_t)_audiooutputs->size();
 
   _processData.audio_inputs_count = numInputs;
+  _inputBuffers = std::make_unique<AudioBusBuffer[]>(numInputs);
 
   if (numInputs > 0)
   {
@@ -118,6 +115,9 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
         bus.latency = 0;
         bus.data64 = nullptr;
         bus.data32 = nullptr;
+        _inputBuffers[i].prepare(
+            info.channelCount, numSamples,
+            _audioinputs->at(i)->isActive() ? AudioBusActivity::Active : AudioBusActivity::Inactive);
       }
     }
     _processData.audio_inputs = _input_ports.get();
@@ -129,6 +129,7 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
   }
 
   _processData.audio_outputs_count = numOutputs;
+  _outputBuffers = std::make_unique<AudioBusBuffer[]>(numOutputs);
 
   if (numOutputs > 0)
   {
@@ -144,6 +145,9 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
         bus.latency = 0;
         bus.data64 = nullptr;
         bus.data32 = nullptr;
+        _outputBuffers[i].prepare(
+            info.channelCount, numSamples,
+            _audiooutputs->at(i)->isActive() ? AudioBusActivity::Active : AudioBusActivity::Inactive);
       }
     }
     _processData.audio_outputs = _output_ports.get();
@@ -184,24 +188,12 @@ void ProcessAdapter::setupProcessing(const clap_plugin_t *plugin, const clap_plu
 
 void ProcessAdapter::activateAudioBus(Steinberg::Vst::BusDirection dir, int32 index, TBool state)
 {
-  /*
-    if (dir == Vst::kInput)
-    {
-      auto& map = _bogus_buffers->_in_channelmap[index];
-      if (state)
-        _bogus_buffers->_active_mask_in |= map._bitmap;
-      else
-        _bogus_buffers->_active_mask_in &= ~map._bitmap;
-    }
-    if (dir == Vst::kOutput)
-    {
-      auto& map = _bogus_buffers->_out_channelmap[index];
-      if (state)
-        _bogus_buffers->_active_mask_out |= map._bitmap;
-      else
-        _bogus_buffers->_active_mask_out &= ~map._bitmap;
-    }
-    */
+  if (index < 0) return;
+  const auto activity = state ? AudioBusActivity::Active : AudioBusActivity::Inactive;
+  if (dir == Vst::kInput && static_cast<uint32_t>(index) < _processData.audio_inputs_count)
+    _inputBuffers[index].setActivity(activity);
+  if (dir == Vst::kOutput && static_cast<uint32_t>(index) < _processData.audio_outputs_count)
+    _outputBuffers[index].setActivity(activity);
 }
 
 inline clap_beattime doubleToBeatTime(double t)
@@ -461,57 +453,33 @@ void ProcessAdapter::process(Steinberg::Vst::ProcessData &data)
 
   sortEventIndices();
 
-  bool doProcess = true;
-
   if (_vstdata->numSamples > 0)
   {
-    // setting the buffers
+    bool doProcess =
+        static_cast<uint32_t>(data.numSamples) <= _maxFrames &&
+        (data.symbolicSampleSize == Vst::kSample32 || data.symbolicSampleSize == Vst::kSample64) &&
+        data.numInputs >= 0 && data.numOutputs >= 0 &&
+        static_cast<uint32_t>(data.numInputs) <= _processData.audio_inputs_count &&
+        static_cast<uint32_t>(data.numOutputs) <= _processData.audio_outputs_count &&
+        (data.numInputs == 0 || data.inputs) && (data.numOutputs == 0 || data.outputs);
+    // A host may omit trailing inactive buses. Keep CLAP's port count stable
+    // and supply scratch buffers only for buses explicitly marked inactive.
     auto inbusses = _audioinputs->size();
     for (auto i = 0U; i < inbusses; ++i)
     {
-      if (_vstdata->inputs && i < (size_t)_vstdata->numInputs &&
-          _vstdata->inputs[i].numChannels == (Steinberg::int32)_input_ports[i].channel_count)
-      {
-        // CLAP requires exactly one sample pointer representation per port. Mapping the
-        // host-selected representation directly preserves 64-bit samples end to end.
-        if (_vstdata->symbolicSampleSize == Steinberg::Vst::kSample64)
-        {
-          _input_ports[i].data32 = nullptr;
-          _input_ports[i].data64 = _vstdata->inputs[i].channelBuffers64;
-        }
-        else
-        {
-          _input_ports[i].data64 = nullptr;
-          _input_ports[i].data32 = _vstdata->inputs[i].channelBuffers32;
-        }
-      }
-      else
-      {
+      const auto *host =
+          data.inputs && data.numInputs > static_cast<int32>(i) ? &data.inputs[i] : nullptr;
+      if (!_inputBuffers[i].map(host, data.symbolicSampleSize, data.numSamples, _input_ports[i]))
         doProcess = false;
-      }
     }
 
     auto outbusses = _audiooutputs->size();
     for (auto i = 0U; i < outbusses; ++i)
     {
-      if (_vstdata->outputs && i < (size_t)_vstdata->numOutputs &&
-          _vstdata->outputs[i].numChannels == (Steinberg::int32)_output_ports[i].channel_count)
-      {
-        if (_vstdata->symbolicSampleSize == Steinberg::Vst::kSample64)
-        {
-          _output_ports[i].data32 = nullptr;
-          _output_ports[i].data64 = _vstdata->outputs[i].channelBuffers64;
-        }
-        else
-        {
-          _output_ports[i].data64 = nullptr;
-          _output_ports[i].data32 = _vstdata->outputs[i].channelBuffers32;
-        }
-      }
-      else
-      {
+      const auto *host =
+          data.outputs && data.numOutputs > static_cast<int32>(i) ? &data.outputs[i] : nullptr;
+      if (!_outputBuffers[i].map(host, data.symbolicSampleSize, data.numSamples, _output_ports[i]))
         doProcess = false;
-      }
     }
     if (doProcess)
     {
