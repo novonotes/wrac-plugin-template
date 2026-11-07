@@ -236,10 +236,6 @@ WrapAsAUV2::~WrapAsAUV2()
     _plugin->terminate();
     _plugin.reset();
   }
-  if (_current_program_name)
-  {
-    CFRelease(_current_program_name);
-  }
   // AUBase must not retain a pointer to a member-owned lock during base destruction.
   SetMutex(nullptr);
 }
@@ -2354,13 +2350,18 @@ OSStatus WrapAsAUV2::SaveState(CFPropertyListRef *ptPList)
     CFRelease(tData);
     chunk.clear();
 
-    if (_current_program_name == nullptr)
+    AUPreset current{};
+    auto presetStatus = DispatchGetProperty(kAudioUnitProperty_PresentPreset,
+                                            kAudioUnitScope_Global, 0, &current);
+    if (presetStatus == noErr && current.presetName)
     {
-      _current_program_name = CFStringCreateWithCString(NULL, "Program", kCFStringEncodingUTF8);
+      // PresentPreset is the source of truth for names set by both hosts and
+      // factory preset changes; a separate cached name can silently go stale.
+      CFDictionarySetValue(*dict, CFSTR(kAUPresetNameKey), current.presetName);
+      CFRelease(current.presetName);
     }
-    // const char  *name = "blarb";
-    // mPlugin->getProgramName(name);
-    CFDictionarySetValue(*dict, CFSTR(kAUPresetNameKey), _current_program_name);
+    else
+      CFDictionarySetValue(*dict, CFSTR(kAUPresetNameKey), CFSTR("Program"));
 
     *ptPList = static_cast<CFPropertyListRef>(dict.release());  // transfer ownership
 #endif
@@ -2390,6 +2391,19 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
   };
 
   CFDictionaryRef tDict = CFDictionaryRef(plist);
+  const void *pName = CFDictionaryGetValue(tDict, CFSTR(kAUPresetNameKey));
+  auto restoreStateWithName = [&](Clap::StateMemento &chunk) -> OSStatus
+  {
+    const auto result = restoreClapState(chunk);
+    if (result == noErr && pName && CFGetTypeID(CFTypeRef(pName)) == CFStringGetTypeID())
+    {
+      // Do not change the host's preset name when CLAP rejects the state.
+      const AUPreset restoredPreset{-1, CFStringRef(pName)};
+      NewCustomPresetSet(restoredPreset);
+      PropertyChanged(kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0);
+    }
+    return result;
+  };
 
   // Find 'data' key
   const void *pData = CFDictionaryGetValue(tDict, CFSTR(kAUPresetDataKey));
@@ -2423,17 +2437,11 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
       UInt8 *streamData = (UInt8 *)(CFDataGetBytePtr(juceData));
 
       chunk.setData(streamData, numBytes);
-      return restoreClapState(chunk);
+      return restoreStateWithName(chunk);
     }
     return noErr;
   }
 #endif
-
-  const void *pName = CFDictionaryGetValue(tDict, CFSTR(kAUPresetNameKey));
-  if (pName)
-  {
-    _current_program_name = CFStringCreateCopy(NULL, (CFStringRef)pName);
-  }
 
   CFDataRef tData = CFDataRef(pData);
 
@@ -2446,7 +2454,7 @@ OSStatus WrapAsAUV2::RestoreState(CFPropertyListRef plist)
     {
       Clap::StateMemento chunk;
       chunk.setData(pData, lLen);
-      return restoreClapState(chunk);
+      return restoreStateWithName(chunk);
     }
   }
   return noErr;
