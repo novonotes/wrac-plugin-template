@@ -167,7 +167,7 @@ void AAXProcessAdapter::setupProcessing(
     const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
     std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
     std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid, bool preferMIDI,
-    uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
+    bool midiOutputDeclared, uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
   _ext_param = ext_param;
@@ -179,6 +179,7 @@ void AAXProcessAdapter::setupProcessing(
 
   _midi_first_portid = midiportid;
   _midi_prefer_mididialect = preferMIDI;
+  _midi_output_declared = midiOutputDeclared;
 
   _placeholderInChannels = placeholderInChannels;
   _placeholderOutChannels = placeholderOutChannels;
@@ -272,7 +273,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   // capture the MIDI output node for this cycle. enqueueOutputEvent() posts to
   // it directly while the plugin is inside _plugin->process() (the CLAP event
   // buffers are only guaranteed valid during that call). Reset afterwards.
-  _outputNode = context->mOutputNode;
+  _outputNode = _midi_output_declared ? context->mOutputNode : nullptr;
 
   // this clears the vectors (which do not resize to smaller)
   this->_events.clear();

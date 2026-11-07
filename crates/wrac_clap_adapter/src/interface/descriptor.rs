@@ -88,6 +88,9 @@ pub struct AaxDescriptor {
     /// Keep these callbacks independent from product runtime state.
     pub get_num_stem_configs: unsafe extern "C" fn() -> u32,
     pub get_stem_config: unsafe extern "C" fn(index: u32) -> *const AaxStemConfig,
+    /// Name of the AAX MIDI input node, or `None` when the plugin receives no MIDI in AAX.
+    /// AAX routes MIDI only to nodes declared here, before plugin instances exist.
+    pub midi_input_name: Option<&'static str>,
 }
 
 #[repr(C)]

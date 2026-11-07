@@ -91,6 +91,7 @@ pub(crate) struct ClapDescriptorStorage {
     // AAX package info is returned through a factory extension before any plugin
     // instance exists, so the raw pointer owner must live with descriptor storage.
     _aax_package_name: Option<CString>,
+    _aax_midi_input_name: Option<CString>,
     aax_info: Option<ClapPluginInfoAsAax>,
     clap_descriptor: clap_plugin_descriptor,
 }
@@ -126,6 +127,10 @@ impl ClapDescriptorStorage {
         let vst3_subcategories = descriptor.vst3.map(|vst3| cstring(vst3.subcategories));
         let vst3_component_id = descriptor.vst3.map(|vst3| Box::new(vst3.component_id));
         let aax_package_name = descriptor.aax.map(|aax| cstring(aax.package_name));
+        let aax_midi_input_name = descriptor
+            .aax
+            .and_then(|aax| aax.midi_input_name)
+            .map(cstring);
         let vst3_info = descriptor.vst3.map(|_| ClapPluginInfoAsVst3 {
             vendor: vendor.as_ptr(),
             component_id: vst3_component_id
@@ -140,9 +145,16 @@ impl ClapDescriptorStorage {
             aax_features: aax.categories,
             id_manufacturer: aax.manufacturer_id,
             id_product: aax.product_id,
-            midi_in_name: ptr::null(),
+            midi_in_name: aax_midi_input_name
+                .as_ref()
+                .map_or(ptr::null(), |name| name.as_ptr()),
             midi_out_name: ptr::null(),
-            midi_in_channel_mask: 0,
+            // Accept all 16 MIDI channels; a zero mask would declare a node that receives nothing.
+            midi_in_channel_mask: if aax_midi_input_name.is_some() {
+                0xFFFF
+            } else {
+                0
+            },
             midi_out_channel_mask: 0,
             get_num_stem_configs: Some(aax.get_num_stem_configs),
             get_stem_config: Some(aax.get_stem_config),
@@ -178,6 +190,7 @@ impl ClapDescriptorStorage {
             _vst3_component_id: vst3_component_id,
             vst3_info,
             _aax_package_name: aax_package_name,
+            _aax_midi_input_name: aax_midi_input_name,
             aax_info,
             clap_descriptor,
         }

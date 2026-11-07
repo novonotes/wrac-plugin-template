@@ -101,6 +101,10 @@ pub struct PluginProduct {
     pub aax_product_id: Option<String>,
     #[serde(default)]
     pub aax_stem_configs: Vec<AaxStemConfig>,
+    /// Name of the AAX MIDI input node. Required for a plugin that exposes a note input port and
+    /// should receive MIDI in Pro Tools: AAX only routes MIDI to nodes declared when the plugin is
+    /// described, so the wrapper ignores note input ports that are not declared here.
+    pub aax_midi_input_name: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -284,6 +288,15 @@ impl PluginManifest {
                     return Err(
                         format!("{label}.plugins.aax_stem_configs must not be empty").into(),
                     );
+                }
+                if let Some(name) = plugin.aax_midi_input_name.as_deref() {
+                    validate_required(&format!("{label}.plugins.aax_midi_input_name"), name)?;
+                    if !name.is_ascii() {
+                        return Err(format!(
+                            "{label}.plugins.aax_midi_input_name must be ASCII: {name}"
+                        )
+                        .into());
+                    }
                 }
             }
             let mut aax_plugin_ids = HashSet::new();

@@ -1027,6 +1027,20 @@ void ClapAsAAX::setupAudioBusses(const clap_plugin_t *plugin,
 
 void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_note_ports_t *noteports)
 {
+  // Use only the MIDI nodes the AAX description registered. A plugin can expose note ports that
+  // its AAX info does not declare; the matching context field then holds placeholder private
+  // data, and treating it as a MIDI node makes the host crash in process().
+  auto declared =
+      CLAPAAX::declaredMidiNodes(CLAPAAX::findAaxInfo(_library, plugin->desc->id), plugin, noteports);
+  this->_midi_output_declared = declared.has_midi_out;
+  if (!declared.has_midi_in)
+  {
+    if (noteports->count(plugin, true) > 0)
+    {
+      LOGINFO("plugin has a note input port but no AAX MIDI input was declared; MIDI input is ignored");
+    }
+    return;
+  }
   if (noteports->count(plugin, true) > 0)
   {
     clap_note_port_info_t info;
@@ -1488,7 +1502,7 @@ bool ClapAsAAX::activatePlugin()
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
         this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
-        _midi_prefer_mididialect, placeholderInChannels, placeholderOutChannels);
+        _midi_prefer_mididialect, _midi_output_declared, placeholderInChannels, placeholderOutChannels);
     _outputChannelCount = _processAdapter->outputChannelCount();
 
     // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()

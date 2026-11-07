@@ -36,4 +36,24 @@ struct plugin_bus_info_t
 
 plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index);
 
+// The MIDI nodes the AAX description registers for a plugin. A context field that is not
+// registered as a MIDI node holds placeholder private data, so the running instance must use
+// exactly the nodes declared here: the description and the instance both call this function.
+struct midi_node_declaration_t
+{
+  bool has_midi_in = false;
+  bool has_midi_out = false;
+  std::string midi_in_name;
+  std::string midi_out_name;
+};
+
+// With AAX info from the plugin factory, only its MIDI names declare nodes. Without it, a note
+// port that supports the MIDI dialect does. `plugin` and `noteports` may be null.
+midi_node_declaration_t declaredMidiNodes(const clap_plugin_info_as_aax_t *aaxinfo,
+                                          const clap_plugin_t *plugin,
+                                          const clap_plugin_note_ports_t *noteports);
+
+// AAX info the plugin factory provides for the plugin with this CLAP id, or nullptr.
+const clap_plugin_info_as_aax_t *findAaxInfo(const Clap::Library *factory, const char *pluginid);
+
 }  // namespace CLAPAAX
