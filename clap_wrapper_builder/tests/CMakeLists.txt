@@ -42,6 +42,7 @@ if(WRAC_TEST_AAX_SDK)
   add_test(NAME aax_parameter_rescan COMMAND aax_parameter_rescan)
   add_aax_process_test(aax_midi_input)
   add_aax_process_test(aax_audio_input)
+  add_aax_process_test(aax_transport)
 endif()
 
 if(APPLE)
