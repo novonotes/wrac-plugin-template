@@ -166,7 +166,7 @@ void AAXProcessAdapter::setupProcessing(
     const clap_plugin_t *plugin, double samplerate, const clap_plugin_params_t *ext_param,
     const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
     std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
-    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid, bool preferMIDI,
+    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportindex, bool preferMIDI,
     bool midiOutputDeclared, uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
@@ -177,7 +177,7 @@ void AAXProcessAdapter::setupProcessing(
   _bypassParameter = bypassParameter;
   _lastBypassState = -1;
 
-  _midi_first_portid = midiportid;
+  _midi_input_port_index = midiportindex;
   _midi_prefer_mididialect = preferMIDI;
   _midi_output_declared = midiOutputDeclared;
 
@@ -354,7 +354,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   }
 
   // check MIDI IN
-  if (_midi_first_portid != CLAP_INVALID_ID && context->mInputNode)
+  if (_midi_input_port_index != CLAP_INVALID_ID && context->mInputNode)
   {
     auto midiInputStream = context->mInputNode->GetNodeBuffer();
     const AAX_CMidiPacket *midiInPacketPtr = midiInputStream->mBuffer;
@@ -375,8 +375,9 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
         n.note.header.type = CLAP_EVENT_NOTE_OFF;
         n.note.channel = midiInPacketPtr->mData[0] & 0x0F;  // channel
         n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
-        n.note.velocity = midiInPacketPtr->mData[2];
+        n.note.port_index = _midi_input_port_index;
+        // CLAP note velocities are normalized, unlike MIDI's 7-bit values.
+        n.note.velocity = (midiInPacketPtr->mData[2] & 0x7F) / 127.0;
         n.note.key = midiInPacketPtr->mData[1];
         _eventindices.push_back(_events.size());
         _events.emplace_back(n);
@@ -386,8 +387,8 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
         n.note.header.type = CLAP_EVENT_NOTE_ON;
         n.note.channel = midiInPacketPtr->mData[0] & 0x0F;  // channel
         n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
-        n.note.velocity = midiInPacketPtr->mData[2];
+        n.note.port_index = _midi_input_port_index;
+        n.note.velocity = (midiInPacketPtr->mData[2] & 0x7F) / 127.0;
         n.note.key = midiInPacketPtr->mData[1];
         _eventindices.push_back(_events.size());
         _events.emplace_back(n);
@@ -395,8 +396,10 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
       else if ((midiInPacketPtr->mData[0] & 0XF0) < 0xF0)
       {
         n.midi.header.type = CLAP_EVENT_MIDI;
-        n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
+        n.midi.header.size = sizeof(clap_event_midi_t);
+        // MIDI and note events place their port indices at different offsets; using
+        // the note member here makes the receiving plugin discard the MIDI event.
+        n.midi.port_index = _midi_input_port_index;
         n.midi.data[0] = midiInPacketPtr->mData[0];
         n.midi.data[1] = midiInPacketPtr->mData[1];
         n.midi.data[2] = midiInPacketPtr->mData[2];

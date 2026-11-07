@@ -1046,7 +1046,8 @@ void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_n
     clap_note_port_info_t info;
     if (noteports->get(plugin, 0, true, &info))
     {
-      this->_midi_first_portid = info.id;
+      // CLAP events address ports by index, which need not match the persistent port ID.
+      this->_midi_input_port_index = 0;
       this->_midi_prefer_mididialect = (info.preferred_dialect & CLAP_NOTE_DIALECT_MIDI);
     }
   }
@@ -1501,7 +1502,7 @@ bool ClapAsAAX::activatePlugin()
     _processAdapter = std::make_unique<AAXProcessAdapter>();
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
-        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
+        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_input_port_index,
         _midi_prefer_mididialect, _midi_output_declared, placeholderInChannels, placeholderOutChannels);
     _outputChannelCount = _processAdapter->outputChannelCount();
 

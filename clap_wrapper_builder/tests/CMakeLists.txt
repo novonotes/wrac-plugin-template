@@ -8,11 +8,32 @@ endif()
 
 enable_testing()
 
-set(WRAC_TEST_AAX_SDK "" CACHE PATH "Optional AAX SDK root for the AAX parameter rescan test")
+set(WRAC_TEST_AAX_SDK "" CACHE PATH "Optional AAX SDK root for the AAX regression tests")
 if(WRAC_TEST_AAX_SDK)
   set(AAX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(AAX_BUILD_PTSL_EXAMPLES OFF CACHE BOOL "" FORCE)
   add_subdirectory("${WRAC_TEST_AAX_SDK}" aaxsdk EXCLUDE_FROM_ALL)
+
+  function(add_aax_process_test test)
+    add_executable(${test} ${test}.cpp
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src/detail/aax/process.cpp")
+    target_compile_features(${test} PRIVATE cxx_std_23)
+    target_compile_definitions(${test} PRIVATE CLAP_WRAPPER_LOGLEVEL=0)
+    if(APPLE)
+      target_compile_definitions(${test} PRIVATE MAC=1 MACOS_USE_STD_FILESYSTEM=1)
+    elseif(WIN32)
+      target_compile_definitions(${test} PRIVATE WIN=1)
+    endif()
+    target_include_directories(${test} PRIVATE
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src"
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/include"
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/libs/fmt"
+      "${CMAKE_CURRENT_LIST_DIR}/../clap/include")
+    target_link_libraries(${test} PRIVATE AAX_SDK::AAXLibrary)
+    add_test(NAME ${test} COMMAND ${test})
+  endfunction()
+
+  add_aax_process_test(aax_midi_input)
   add_executable(aax_parameter_rescan aax_parameter_rescan.cpp)
   target_compile_features(aax_parameter_rescan PRIVATE cxx_std_17)
   target_include_directories(aax_parameter_rescan PRIVATE

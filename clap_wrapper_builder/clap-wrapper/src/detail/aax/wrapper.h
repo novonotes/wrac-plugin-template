@@ -84,7 +84,7 @@ class AAXProcessAdapter
                        const clap_plugin_params_t *ext_param, const clap_plugin_audio_ports *ext_audio,
                        Clap::IAutomation *automation, std::vector<clap_id> &gesturedParameters,
                        ParamChangeQueue &inqueue,
-                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid,
+                       std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportindex,
                        bool preferMIDI, bool midiOutputDeclared, uint32_t placeholderInChannels,
                        uint32_t placeholderOutChannels);
   void process(SAAX_Wrapper_AlgorithmicContext *context);
@@ -162,7 +162,7 @@ class AAXProcessAdapter
                                                               uint32_t index);
 
   // MIDI
-  uint32_t _midi_first_portid = CLAP_INVALID_ID;
+  uint32_t _midi_input_port_index = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
   // Whether the AAX description registered the local MIDI output node. Otherwise the context
   // field holds placeholder private data and must never be used as a node.
@@ -364,7 +364,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
 
   std::vector<clap_audio_port_configuration_request> _configuration_requests;
 
-  uint32_t _midi_first_portid = CLAP_INVALID_ID;
+  uint32_t _midi_input_port_index = CLAP_INVALID_ID;
   bool _midi_prefer_mididialect = true;
   bool _midi_output_declared = false;
 
