@@ -12,6 +12,7 @@
 */
 
 #include "wrapper.h"
+#include "parameter_sync.h"
 // #include "clap_proxy.h"
 #include "AAX.h"
 #include "AAX_ICollection.h"
@@ -954,11 +955,16 @@ AAX_Result ClapAsAAX::SetChunk(AAX_CTypeID iChunkID, const AAX_SPlugInChunk *iCh
   if (iChunkID != CLAP_STATE_CHUNK_ID) return AAX_ERROR_INVALID_CHUNK_ID;
 
   _paramsToProcess.clear();
+  _paramValuesSyncedDuringLoad = false;
 
   auto data = (const uint8_t *)(iChunk->fData);
   _state.setData(data, iChunk->fSize);
   if (_plugin->_ext._state->load(_plugin->_plugin, _state))
   {
+    // The loaded state changed the CLAP values behind AAX's back. Not every
+    // plugin requests a value rescan after load, so sync here as a fallback,
+    // mirroring the VST3 wrapper's setState().
+    if (!_paramValuesSyncedDuringLoad) syncParameterValuesFromClap();
     return AAX_SUCCESS;
   }
   return AAX_ERROR_MALFORMED_CHUNK;
@@ -1130,12 +1136,28 @@ void ClapAsAAX::setupParameters(const clap_plugin_t *plugin, const clap_plugin_p
   AAX_ASSERT(_activated == false);
 }
 
+void ClapAsAAX::syncParameterValuesFromClap()
+{
+  if (!_plugin || !_plugin->_ext._params) return;
+  // State recall changes the CLAP values without passing through AAX's
+  // automation manager. Update its cache and listeners without issuing a
+  // touch or recording restored values as new automation gestures.
+  syncAAXParameterValues(_plugin->_plugin, _plugin->_ext._params, _parameterMapCLAP, mParameterManager);
+}
+
 void ClapAsAAX::param_rescan(clap_param_rescan_flags flags)
 {
-  // AAX does not support adding/removing parameters at runtime, so only the TEXT
-  // flag (display name changes) can be honoured — via AAX_CParameter::SetName(),
-  // which calls mAutomationDelegate->ParameterNameChanged() internally and triggers
-  // Pro Tools to refresh the name everywhere it is displayed.
+  // INFO and ALL may change values too; the VST3 wrapper treats INFO the same way.
+  if (flags & (CLAP_PARAM_RESCAN_VALUES | CLAP_PARAM_RESCAN_INFO | CLAP_PARAM_RESCAN_ALL))
+  {
+    _paramValuesSyncedDuringLoad = true;
+    syncParameterValuesFromClap();
+  }
+
+  // AAX does not support adding/removing parameters at runtime, so beyond the
+  // value sync above only the TEXT flag (display name changes) can be honoured — via
+  // AAX_CParameter::SetName(), which calls mAutomationDelegate->ParameterNameChanged()
+  // internally and triggers Pro Tools to refresh the name everywhere it is displayed.
   if (!(flags & CLAP_PARAM_RESCAN_TEXT)) return;
 
   if (!_plugin || !_plugin->_ext._params) return;
