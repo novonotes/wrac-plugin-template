@@ -390,7 +390,8 @@ class WrapAsAUV2 : public ausdk::AUBase,
   virtual Float64 GetTailTime() override;
   virtual bool SupportsTail() override
   {
-    return false;
+    // Hosts can only query the tail when the AU advertises the CLAP extension.
+    return _plugin && _plugin->_ext._tail;
   }
 
   bool StreamFormatWritable(AudioUnitScope, AudioUnitElement) override
