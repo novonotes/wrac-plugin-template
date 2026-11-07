@@ -34,6 +34,7 @@ if(WRAC_TEST_AAX_SDK)
   endfunction()
 
   add_executable(aax_parameter_rescan aax_parameter_rescan.cpp)
+  add_aax_process_test(aax_transport)
   target_compile_features(aax_parameter_rescan PRIVATE cxx_std_17)
   target_include_directories(aax_parameter_rescan PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src"
@@ -42,7 +43,6 @@ if(WRAC_TEST_AAX_SDK)
   add_test(NAME aax_parameter_rescan COMMAND aax_parameter_rescan)
   add_aax_process_test(aax_midi_input)
   add_aax_process_test(aax_audio_input)
-  add_aax_process_test(aax_transport)
 endif()
 
 if(APPLE)
