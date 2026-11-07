@@ -33,8 +33,6 @@ if(WRAC_TEST_AAX_SDK)
     add_test(NAME ${test} COMMAND ${test})
   endfunction()
 
-  add_aax_process_test(aax_midi_input)
-  add_aax_process_test(aax_audio_input)
   add_executable(aax_parameter_rescan aax_parameter_rescan.cpp)
   target_compile_features(aax_parameter_rescan PRIVATE cxx_std_17)
   target_include_directories(aax_parameter_rescan PRIVATE
@@ -42,6 +40,8 @@ if(WRAC_TEST_AAX_SDK)
     "${CMAKE_CURRENT_LIST_DIR}/../clap/include")
   target_link_libraries(aax_parameter_rescan PRIVATE AAX_SDK::AAXLibrary)
   add_test(NAME aax_parameter_rescan COMMAND aax_parameter_rescan)
+  add_aax_process_test(aax_midi_input)
+  add_aax_process_test(aax_audio_input)
 endif()
 
 if(APPLE)
