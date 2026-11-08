@@ -117,6 +117,26 @@ int main(int argc, char **argv)
     ok(AudioUnitSetProperty(unit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0,
                             &callback, sizeof(callback)));
     ok(AudioUnitInitialize(unit));
+    // Hosts use PresentPreset as the display name for the saved class data.
+    AUPreset originalName{-1, CFSTR("Recall test preset")};
+    ok(AudioUnitSetProperty(unit, kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                            &originalName, sizeof(originalName)));
+    auto namedState = save(unit);
+    auto savedName = CFDictionaryGetValue(static_cast<CFDictionaryRef>(namedState), CFSTR("name"));
+    require(savedName && CFEqual(savedName, originalName.presetName), "ClassInfo lost preset name");
+    AUPreset changedName{-1, CFSTR("Different preset")};
+    ok(AudioUnitSetProperty(unit, kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                            &changedName, sizeof(changedName)));
+    ok(AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0,
+                            &namedState, sizeof(namedState)));
+    AUPreset recalledName{};
+    UInt32 presetSize = sizeof(recalledName);
+    ok(AudioUnitGetProperty(unit, kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                            &recalledName, &presetSize));
+    require(recalledName.presetName && CFEqual(recalledName.presetName, originalName.presetName),
+            "ClassInfo recall did not restore preset name");
+    CFRelease(recalledName.presetName);
+    CFRelease(namedState);
     UInt32 size = 0;
     Boolean writable = false;
     ok(AudioUnitGetPropertyInfo(unit, kAudioUnitProperty_ParameterList, kAudioUnitScope_Global, 0, &size,
@@ -189,12 +209,21 @@ int main(int argc, char **argv)
     ok(recall());
     auto invalidData = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>("invalid"), 7);
     CFDictionarySetValue(invalid, CFSTR("data"), invalidData);
+    // A rejected CLAP payload must not change the current preset name either.
+    CFDictionarySetValue(invalid, CFSTR("name"), CFSTR("Rejected preset"));
     CFRelease(invalidData);
     change();
     auto status = AudioUnitSetProperty(unit, kAudioUnitProperty_ClassInfo, kAudioUnitScope_Global, 0,
                                        &invalid, sizeof(invalid));
     CFRelease(invalid);
     require(status != noErr, "Failed CLAP recall reported success");
+    AUPreset nameAfterFailure{};
+    presetSize = sizeof(nameAfterFailure);
+    ok(AudioUnitGetProperty(unit, kAudioUnitProperty_PresentPreset, kAudioUnitScope_Global, 0,
+                            &nameAfterFailure, &presetSize));
+    require(nameAfterFailure.presetName && CFEqual(nameAfterFailure.presetName, originalName.presetName),
+            "Rejected CLAP recall changed preset name");
+    CFRelease(nameAfterFailure.presetName);
     render();
     require(!sameState(unit, baseline), "Rejected CLAP load discarded pending parameters");
     ok(recall());
