@@ -529,6 +529,12 @@ ClapAsAAX::~ClapAsAAX()
     this->removeInstance();
   }
   ClapAsAAXRegistry::Unregister(this);
+  // Destroy the CLAP instance while the main-thread attachment is still held.
+  // _mainThreadAttachment is declared after _plugin, so implicit member
+  // destruction would detach first and call plugin.destroy() afterwards. The
+  // AUv2 and VST3 wrappers already release the plugin before detaching. Doing
+  // it after Unregister() keeps the idle timer from reaching a released plugin.
+  _plugin.reset();
 }
 
 static void build_config_request(clap_audio_port_configuration_request *req, uint32_t numchannels,
