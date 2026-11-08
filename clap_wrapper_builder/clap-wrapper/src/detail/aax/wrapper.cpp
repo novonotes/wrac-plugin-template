@@ -221,6 +221,13 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   err = outDesc->AddDataInPort(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mCurrentStateNum),
                                sizeof(uint64_t));
 
+  if (businfo.sidechain_input_port)
+    err = outDesc->AddSideChainIn(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mSideChainInput));
+  else
+    // AAX requires a field at every context offset, even when the input is not declared.
+    err = outDesc->AddPrivateData(AAX_FIELD_INDEX(SAAX_Wrapper_AlgorithmicContext, mSideChainInput),
+                                  sizeof(void *), AAX_ePrivateDataOptions_DefaultOptions);
+
   // Register processing callbacks
   //
   // Create a property map
@@ -250,6 +257,8 @@ static void DescribeAlgorithmComponent(AAX_IComponentDescriptor *outDesc,
   err = properties->AddProperty(AAX_eProperty_ManufacturerID, manu_id);
   err = properties->AddProperty(AAX_eProperty_ProductID, prod_id);
   err = properties->AddProperty(AAX_eProperty_CanBypass, true);
+  if (businfo.sidechain_input_port)
+    err = properties->AddProperty(AAX_eProperty_SupportsSideChainInput, true);
   // err = properties->AddProperty(AAX_eProperty_UsesClientGUI, true);  // true means that it uses auto-GUI by the host, CLAPs have their own UI
 
   err = properties->AddProperty(AAX_eProperty_RequiresChunkCallsOnMainThread,
@@ -567,6 +576,9 @@ AAX_Result ClapAsAAX::EffectInit()
   if (AAX_SUCCESS == _aax_ctrl->GetHostName(&hostname)) _underlying_hostname = hostname.StdString();
 
   _library = CLAPAAX::guarantee_clap();
+  _pluginIndex = CLAPAAX::findPluginIndex(_library, m.StdString().c_str());
+  if (_pluginIndex == CLAP_INVALID_ID) return AAX_ERROR_NOT_INITIALIZED;
+  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, _pluginIndex);
   _plugin = Clap::Plugin::createInstance(_library->_pluginFactory, m.StdString(), this);
 
   if (_plugin)
@@ -585,6 +597,13 @@ AAX_Result ClapAsAAX::EffectInit()
           auto numInChannels = AAX_STEM_FORMAT_CHANNEL_COUNT(stem_in);
           auto numOutChannels = AAX_STEM_FORMAT_CHANNEL_COUNT(stem_out);
           auto audioports = _plugin->_ext._audioports;
+          // Sidechain validation runs after configuration, but building the request
+          // already requires the audio-port extension.
+          if (!audioports)
+          {
+            LOGINFO("AAX audio port configuration requires the CLAP audio ports extension");
+            return AAX_ERROR_NOT_INITIALIZED;
+          }
 
           auto numInPorts = audioports->count(_plugin->_plugin, true);
           auto numOutPorts = audioports->count(_plugin->_plugin, false);
@@ -627,7 +646,24 @@ AAX_Result ClapAsAAX::EffectInit()
         }
       }
 
-      // set samplerate
+      // Validate the selected layout, not the plugin's default layout. An unconnected
+      // host sidechain is normal and renders silence; a missing declared port is a
+      // plugin configuration error and must not silently disable sidechain processing.
+      if (_sidechain_input_port)
+      {
+        auto *ports = _plugin->_ext._audioports;
+        clap_audio_port_info_t main{}, sidechain{};
+        if (!ports || _sidechain_input_port >= ports->count(_plugin->_plugin, true) ||
+            !ports->get(_plugin->_plugin, 0, true, &main) ||
+            !(main.flags & CLAP_AUDIO_PORT_IS_MAIN) || main.channel_count == 0 ||
+            !ports->get(_plugin->_plugin, _sidechain_input_port, true, &sidechain) ||
+            sidechain.channel_count == 0)
+        {
+          LOGINFO("AAX sidechain requires a nonempty main input at port 0 and a declared auxiliary "
+                  "input with channels in the selected configuration");
+          return AAX_ERROR_NOT_INITIALIZED;
+        }
+      }
 
       // set samplerate
       AAX_CSampleRate sr;
@@ -1027,12 +1063,27 @@ void ClapAsAAX::setupAudioBusses(const clap_plugin_t *plugin,
 
 void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_note_ports_t *noteports)
 {
+  // Use only the MIDI nodes the AAX description registered. A plugin can expose note ports that
+  // its AAX info does not declare; the matching context field then holds placeholder private
+  // data, and treating it as a MIDI node makes the host crash in process().
+  auto declared =
+      CLAPAAX::declaredMidiNodes(_library->get_aax_info(_pluginIndex), plugin, noteports);
+  this->_midi_output_declared = declared.has_midi_out;
+  if (!declared.has_midi_in)
+  {
+    if (noteports->count(plugin, true) > 0)
+    {
+      LOGINFO("plugin has a note input port but no AAX MIDI input was declared; MIDI input is ignored");
+    }
+    return;
+  }
   if (noteports->count(plugin, true) > 0)
   {
     clap_note_port_info_t info;
     if (noteports->get(plugin, 0, true, &info))
     {
-      this->_midi_first_portid = info.id;
+      // CLAP events address ports by index, which need not match the persistent port ID.
+      this->_midi_input_port_index = 0;
       this->_midi_prefer_mididialect = (info.preferred_dialect & CLAP_NOTE_DIALECT_MIDI);
     }
   }
@@ -1487,8 +1538,9 @@ bool ClapAsAAX::activatePlugin()
     _processAdapter = std::make_unique<AAXProcessAdapter>();
     _processAdapter->setupProcessing(
         _plugin->_plugin, _plugin->getSampleRate(), _plugin->_ext._params, _plugin->_ext._audioports,
-        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_first_portid,
-        _midi_prefer_mididialect, placeholderInChannels, placeholderOutChannels);
+        this, _gesturedparameters, _paramsToProcess, _bypassParameter, _midi_input_port_index,
+        _midi_prefer_mididialect, _midi_output_declared, _sidechain_input_port, placeholderInChannels,
+        placeholderOutChannels);
     _outputChannelCount = _processAdapter->outputChannelCount();
 
     // Latch on the plugin's answer, not ahead of it: CLAP forbids deactivate()

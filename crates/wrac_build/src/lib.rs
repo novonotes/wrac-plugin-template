@@ -206,6 +206,17 @@ fn write_plugin_products(
             rust.push_str(&format!(
                 "            get_stem_config: plugin_{index}_aax_get_stem_config,\n"
             ));
+            rust.push_str(&format!(
+                "            midi_input_name: {:?},\n",
+                plugin.aax_midi_input_name
+            ));
+            let sidechain = match plugin.aax_sidechain_input {
+                wrac_manifest::AaxSidechainInput::None => "None",
+                wrac_manifest::AaxSidechainInput::FirstAuxiliary => "FirstAuxiliary",
+            };
+            rust.push_str(&format!(
+                "            sidechain_input: wrac_clap_adapter::interface::AaxSidechainInput::{sidechain},\n"
+            ));
             rust.push_str("        }),\n");
         } else {
             rust.push_str("        aax: None,\n");
@@ -444,6 +455,9 @@ mod tests {
         );
         assert!(generated.contains("pub(crate) const AAX_MANUFACTURER_ID: u32 = 0x5972436F;"));
         assert!(generated.contains("pub(crate) const AAX_PACKAGE_VERSION: u32 = 0x01020300;"));
+        assert!(generated.contains(
+            "sidechain_input: wrac_clap_adapter::interface::AaxSidechainInput::FirstAuxiliary"
+        ));
         assert!(generated.contains("component_id: [202, 17, 32, 130, 236, 55, 239, 92, 146, 215, 236, 126, 103, 32, 113, 149],"));
         assert!(generated.contains("product_id: 0x5774476E,"));
         assert!(generated.contains("plugin_id: 0x5774474D"));
@@ -536,6 +550,7 @@ auv2_type = "aufx"
 auv2_subtype = "WtGn"
 aax_categories = ["effect"]
 aax_product_id = "WtGn"
+aax_sidechain_input = "first-auxiliary"
 
 [[plugins.aax_stem_configs]]
 name = "Mono"

@@ -30,10 +30,36 @@ struct plugin_bus_info_t
   std::vector<stemformat_combi_t> stemformats;
   bool has_midi_in = false;
   bool has_midi_out = false;
+  // Zero means no sidechain; this mapping requires a main input at port zero.
+  uint32_t sidechain_input_port = 0;
   std::string midi_in_name;
   std::string midi_out_name;
 };
 
 plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index);
+
+// Query the same factory-time declaration when describing and running an instance.
+uint32_t sidechainInputPort(const Clap::Library *factory, uint32_t index);
+
+// The MIDI nodes the AAX description registers for a plugin. A context field that is not
+// registered as a MIDI node holds placeholder private data, so the running instance must use
+// exactly the nodes declared here: the description and the instance both call this function.
+struct midi_node_declaration_t
+{
+  bool has_midi_in = false;
+  bool has_midi_out = false;
+  std::string midi_in_name;
+  std::string midi_out_name;
+};
+
+// With AAX info from the plugin factory, only its MIDI names declare nodes. Without it, a note
+// port that supports the MIDI dialect does. `plugin` and `noteports` may be null.
+midi_node_declaration_t declaredMidiNodes(const clap_plugin_info_as_aax_t *aaxinfo,
+                                          const clap_plugin_t *plugin,
+                                          const clap_plugin_note_ports_t *noteports);
+
+// Resolve the effect ID once so instance metadata uses the same index as the description.
+// Returns CLAP_INVALID_ID when the effect is not in the library.
+uint32_t findPluginIndex(const Clap::Library *factory, const char *pluginid);
 
 }  // namespace CLAPAAX

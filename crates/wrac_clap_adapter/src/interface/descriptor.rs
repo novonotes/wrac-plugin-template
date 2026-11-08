@@ -76,6 +76,17 @@ pub struct Vst3Descriptor {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum AaxSidechainInput {
+    /// No sidechain input is declared to AAX.
+    None,
+    /// CLAP input port 1 receives the host's mono sidechain on each channel.
+    /// The selected AAX configuration must expose a main input at port 0 and an
+    /// auxiliary input at port 1, both with channels. Sidechains without a main input
+    /// are unsupported.
+    FirstAuxiliary,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct AaxDescriptor {
     pub package_name: &'static str,
     /// AAX package version encoded as 0xMMmmppbb.
@@ -88,6 +99,11 @@ pub struct AaxDescriptor {
     /// Keep these callbacks independent from product runtime state.
     pub get_num_stem_configs: unsafe extern "C" fn() -> u32,
     pub get_stem_config: unsafe extern "C" fn(index: u32) -> *const AaxStemConfig,
+    /// Name of the AAX MIDI input node, or `None` when the plugin receives no MIDI in AAX.
+    /// AAX routes MIDI only to nodes declared here, before plugin instances exist.
+    pub midi_input_name: Option<&'static str>,
+    /// AAX must know which input is a sidechain before plugin instances exist.
+    pub sidechain_input: AaxSidechainInput,
 }
 
 #[repr(C)]

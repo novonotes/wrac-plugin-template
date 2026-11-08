@@ -72,6 +72,19 @@ pub struct PluginFormatDefinition {
     pub distribution: FormatDistribution,
 }
 
+/// AAX must declare its sidechain before any plugin instance is created.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AaxSidechainInput {
+    /// Do not declare a host sidechain input.
+    #[default]
+    None,
+    /// Map the host's mono sidechain to every channel of CLAP input port 1.
+    /// After applying the selected AAX configuration, port 0 must be a main input
+    /// and port 1 an auxiliary input, both with channels.
+    FirstAuxiliary,
+}
+
 impl PluginFormat {
     pub fn display(self) -> &'static str {
         match self {
@@ -101,6 +114,13 @@ pub struct PluginProduct {
     pub aax_product_id: Option<String>,
     #[serde(default)]
     pub aax_stem_configs: Vec<AaxStemConfig>,
+    /// Name of the AAX MIDI input node. Required for a plugin that exposes a note input port and
+    /// should receive MIDI in Pro Tools: AAX only routes MIDI to nodes declared when the plugin is
+    /// described, so the wrapper ignores note input ports that are not declared here.
+    pub aax_midi_input_name: Option<String>,
+    /// Selects the CLAP input that receives the AAX host's mono sidechain.
+    #[serde(default)]
+    pub aax_sidechain_input: AaxSidechainInput,
 }
 
 fn default_true() -> bool {
@@ -284,6 +304,15 @@ impl PluginManifest {
                     return Err(
                         format!("{label}.plugins.aax_stem_configs must not be empty").into(),
                     );
+                }
+                if let Some(name) = plugin.aax_midi_input_name.as_deref() {
+                    validate_required(&format!("{label}.plugins.aax_midi_input_name"), name)?;
+                    if !name.is_ascii() {
+                        return Err(format!(
+                            "{label}.plugins.aax_midi_input_name must be ASCII: {name}"
+                        )
+                        .into());
+                    }
                 }
             }
             let mut aax_plugin_ids = HashSet::new();

@@ -7,23 +7,25 @@ use clap_sys::plugin::{clap_plugin, clap_plugin_descriptor};
 use clap_sys::version::clap_version_is_compatible;
 use wrac_host_context::{HostContext, PluginFormat};
 
-use super::ffi::{ffi_bool, ffi_ptr, ffi_unit, four_char_code};
+use super::ffi::{ffi_bool, ffi_ptr, ffi_u32, ffi_unit, four_char_code};
 use super::{
     CLAP_PLUGIN_FACTORY_INFO_AAX, CLAP_PLUGIN_FACTORY_INFO_AUV2, CLAP_PLUGIN_FACTORY_INFO_VST3,
-    PluginInstanceState, WRAC_PLUGIN_MAIN_THREAD_HOOK,
+    PluginInstanceState, WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN, WRAC_PLUGIN_MAIN_THREAD_HOOK,
 };
 use crate::entry::{
     EntryRegistration, decrement_entry_init_count, entry_init_count, increment_entry_init_count,
     reset_entry_init_count, retain_entry_instance,
 };
 use crate::factory::{
-    AaxFactoryState, Auv2FactoryState, ClapPluginFactoryAsAax, ClapPluginFactoryAsAuv2,
-    ClapPluginFactoryAsVst3, ClapPluginInfoAsAax, ClapPluginInfoAsAuv2, ClapPluginInfoAsVst3,
-    Vst3FactoryState, WracPluginMainThreadHook, aax_factory_ptr, aax_factory_state,
-    auv2_factory_ptr, auv2_factory_state, clap_factory_state, factory_ptr, main_thread_hook_ptr,
-    main_thread_hook_state, vst3_factory_ptr, vst3_factory_state,
+    AaxFactoryState, AaxSidechainFactoryState, Auv2FactoryState, ClapPluginFactoryAsAax,
+    ClapPluginFactoryAsAuv2, ClapPluginFactoryAsVst3, ClapPluginInfoAsAax, ClapPluginInfoAsAuv2,
+    ClapPluginInfoAsVst3, Vst3FactoryState, WracPluginFactoryAaxSidechain,
+    WracPluginMainThreadHook, aax_factory_ptr, aax_factory_state, aax_sidechain_factory_ptr,
+    aax_sidechain_factory_state, auv2_factory_ptr, auv2_factory_state, clap_factory_state,
+    factory_ptr, main_thread_hook_ptr, main_thread_hook_state, vst3_factory_ptr,
+    vst3_factory_state,
 };
-use crate::interface::EntryContext;
+use crate::interface::{AaxSidechainInput, EntryContext};
 
 unsafe fn clap_host_name(host: *const clap_host) -> Option<String> {
     if host.is_null() {
@@ -137,8 +139,39 @@ pub(crate) unsafe extern "C" fn entry_get_factory(
                 .any(|descriptor| descriptor.descriptor().aax.is_some())
         {
             aax_factory_ptr(storage)
+        } else if factory_id == WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN
+            && storage.descriptors.iter().any(|descriptor| {
+                matches!(
+                    descriptor.descriptor().aax.map(|aax| aax.sidechain_input),
+                    Some(AaxSidechainInput::FirstAuxiliary)
+                )
+            })
+        {
+            aax_sidechain_factory_ptr(storage)
         } else {
             ptr::null()
+        }
+    })
+}
+
+pub(crate) unsafe extern "C" fn aax_sidechain_get_input_port_index(
+    factory: *const WracPluginFactoryAaxSidechain,
+    index: u32,
+) -> u32 {
+    ffi_u32(|| {
+        let Some(AaxSidechainFactoryState { registration, .. }) =
+            aax_sidechain_factory_state(factory)
+        else {
+            log::warn!("aax_sidechain.get_input_port_index: invalid factory pointer");
+            return 0;
+        };
+        let Some(descriptor) = registration.storage().descriptors.get(index as usize) else {
+            log::warn!("aax_sidechain.get_input_port_index: descriptor not found index={index}");
+            return 0;
+        };
+        match descriptor.descriptor().aax.map(|aax| aax.sidechain_input) {
+            Some(AaxSidechainInput::FirstAuxiliary) => 1,
+            Some(AaxSidechainInput::None) | None => 0,
         }
     })
 }

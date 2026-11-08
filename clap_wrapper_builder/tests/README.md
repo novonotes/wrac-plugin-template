@@ -13,7 +13,7 @@ cargo xtask test-wrapper
 CTest registrations live in [CMakeLists.txt](CMakeLists.txt). Each test source
 documents its purpose and any partial skips.
 
-To include the AAX parameter-rescan test, configure CMake with the local AAX SDK
+To include the AAX regression tests, configure CMake with the local AAX SDK
 and the built WRAC Gain bundle, then build and run the tests:
 
 ```sh
@@ -25,4 +25,4 @@ ctest --test-dir target/wrapper-tests -C Release --output-on-failure
 ```
 
 On Windows, point `WRAC_TEST_PLUGIN` to the VST3 bundle instead. The optional
-AAX test is omitted when no SDK path is supplied.
+AAX tests are omitted when no SDK path is supplied.

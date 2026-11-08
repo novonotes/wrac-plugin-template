@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <clap/private/macros.h>
 
@@ -8,6 +9,20 @@
 extern "C"
 {
 #endif
+
+  // AAX needs sidechain metadata before creating instances. Keep WRAC-specific
+  // metadata here instead of extending the upstream AAX info ABI during subtree updates.
+  static const CLAP_CONSTEXPR char WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN[] =
+      "com.novonotes.wrac.aax-sidechain/0";
+
+  typedef struct wrac_plugin_factory_aax_sidechain
+  {
+    // Returns an auxiliary CLAP input index, or 0 when no AAX sidechain is declared.
+    // A declared port must have channels after the selected AAX configuration is applied.
+    // Port 0 must be a main input with channels; sidechains without it are unsupported.
+    uint32_t(CLAP_ABI *get_input_port_index)(const struct wrac_plugin_factory_aax_sidechain *factory,
+                                           uint32_t plugin_index);
+  } wrac_plugin_factory_aax_sidechain_t;
 
   static const CLAP_CONSTEXPR char WRAC_PLUGIN_MAIN_THREAD_HOOK[] =
       "com.novonotes.wrac.plugin-main-thread-hook/0";

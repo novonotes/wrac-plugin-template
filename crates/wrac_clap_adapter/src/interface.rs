@@ -45,7 +45,8 @@ pub use core::{
     ActivateContext, ActivateNotifications, ActivateResult, PluginInstance, PluginInstanceContext,
 };
 pub use descriptor::{
-    AaxDescriptor, AaxStemConfig, Auv2Descriptor, PluginDescriptor, PluginFeature, Vst3Descriptor,
+    AaxDescriptor, AaxSidechainInput, AaxStemConfig, Auv2Descriptor, PluginDescriptor,
+    PluginFeature, Vst3Descriptor,
 };
 pub use entry::{EntryContext, LogConfig, LogOutput, PluginEntry};
 pub use error::{PluginError, PluginResult};

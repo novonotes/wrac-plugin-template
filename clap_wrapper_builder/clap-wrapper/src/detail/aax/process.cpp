@@ -166,8 +166,9 @@ void AAXProcessAdapter::setupProcessing(
     const clap_plugin_t *plugin, double samplerate, const clap_plugin_params_t *ext_param,
     const clap_plugin_audio_ports *ext_audio, Clap::IAutomation *automation,
     std::vector<clap_id> &gesturedparameters, ParamChangeQueue &inqueue,
-    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportid, bool preferMIDI,
-    uint32_t placeholderInChannels, uint32_t placeholderOutChannels)
+    std::shared_ptr<AAXWrappedParameterInfo_t> bypassParameter, uint32_t midiportindex, bool preferMIDI,
+    bool midiOutputDeclared, uint32_t sidechainInputPort, uint32_t placeholderInChannels,
+    uint32_t placeholderOutChannels)
 {
   _plugin = plugin;
   _ext_param = ext_param;
@@ -177,8 +178,10 @@ void AAXProcessAdapter::setupProcessing(
   _bypassParameter = bypassParameter;
   _lastBypassState = -1;
 
-  _midi_first_portid = midiportid;
+  _midi_input_port_index = midiportindex;
   _midi_prefer_mididialect = preferMIDI;
+  _midi_output_declared = midiOutputDeclared;
+  _sidechain_input_port = sidechainInputPort;
 
   _placeholderInChannels = placeholderInChannels;
   _placeholderOutChannels = placeholderOutChannels;
@@ -246,6 +249,18 @@ void AAXProcessAdapter::setupProcessing(
     }
   }
 
+  // Unmapped CLAP input ports need silence rather than pointers beyond the AAX input array.
+  uint32_t maxAuxChannels = 0;
+  for (uint32_t i = 1; i < numinputs; ++i)
+    maxAuxChannels = std::max(maxAuxChannels, _input_ports[i].channel_count);
+  if (maxAuxChannels > 0)
+  {
+    _silent_input = new float[gAAXMaxBlockSizeInSamples]();
+    _silent_input_channels.assign(maxAuxChannels, _silent_input);
+  }
+  if (_sidechain_input_port > 0 && _sidechain_input_port < numinputs)
+    _sidechain_input_channels.resize(_input_ports[_sidechain_input_port].channel_count, _silent_input);
+
   // setup process structure
   _proc.steady_time = -1;  // change later
   _proc.frames_count =
@@ -272,7 +287,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   // capture the MIDI output node for this cycle. enqueueOutputEvent() posts to
   // it directly while the plugin is inside _plugin->process() (the CLAP event
   // buffers are only guaranteed valid during that call). Reset afterwards.
-  _outputNode = context->mOutputNode;
+  _outputNode = _midi_output_declared ? context->mOutputNode : nullptr;
 
   // this clears the vectors (which do not resize to smaller)
   this->_events.clear();
@@ -353,7 +368,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   }
 
   // check MIDI IN
-  if (_midi_first_portid != CLAP_INVALID_ID && context->mInputNode)
+  if (_midi_input_port_index != CLAP_INVALID_ID && context->mInputNode)
   {
     auto midiInputStream = context->mInputNode->GetNodeBuffer();
     const AAX_CMidiPacket *midiInPacketPtr = midiInputStream->mBuffer;
@@ -374,8 +389,9 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
         n.note.header.type = CLAP_EVENT_NOTE_OFF;
         n.note.channel = midiInPacketPtr->mData[0] & 0x0F;  // channel
         n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
-        n.note.velocity = midiInPacketPtr->mData[2];
+        n.note.port_index = _midi_input_port_index;
+        // CLAP note velocities are normalized, unlike MIDI's 7-bit values.
+        n.note.velocity = (midiInPacketPtr->mData[2] & 0x7F) / 127.0;
         n.note.key = midiInPacketPtr->mData[1];
         _eventindices.push_back(_events.size());
         _events.emplace_back(n);
@@ -385,8 +401,8 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
         n.note.header.type = CLAP_EVENT_NOTE_ON;
         n.note.channel = midiInPacketPtr->mData[0] & 0x0F;  // channel
         n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
-        n.note.velocity = midiInPacketPtr->mData[2];
+        n.note.port_index = _midi_input_port_index;
+        n.note.velocity = (midiInPacketPtr->mData[2] & 0x7F) / 127.0;
         n.note.key = midiInPacketPtr->mData[1];
         _eventindices.push_back(_events.size());
         _events.emplace_back(n);
@@ -394,8 +410,10 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
       else if ((midiInPacketPtr->mData[0] & 0XF0) < 0xF0)
       {
         n.midi.header.type = CLAP_EVENT_MIDI;
-        n.note.note_id = -1;
-        n.note.port_index = _midi_first_portid;
+        n.midi.header.size = sizeof(clap_event_midi_t);
+        // MIDI and note events place their port indices at different offsets; using
+        // the note member here makes the receiving plugin discard the MIDI event.
+        n.midi.port_index = _midi_input_port_index;
         n.midi.data[0] = midiInPacketPtr->mData[0];
         n.midi.data[1] = midiInPacketPtr->mData[1];
         n.midi.data[2] = midiInPacketPtr->mData[2];
@@ -440,13 +458,24 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
 
   // distribute the pointers to the audio channels pointer arrays to the
   // appropriate audio ports
-  uint32_t offset = 0;
+  if (_sidechain_input_port > 0 && _sidechain_input_port < _proc.audio_inputs_count)
+  {
+    auto *sidechain = _silent_input;
+    // AAX supplies the sidechain's index; it need not be adjacent to the main stem.
+    // An undeclared context field contains private data and must never be dereferenced.
+    if (context->mSideChainInput && context->mAudioInputs && *context->mSideChainInput > 0 &&
+        context->mAudioInputs[*context->mSideChainInput])
+      sidechain = context->mAudioInputs[*context->mSideChainInput];
+    // Replicate the mono host signal when the CLAP auxiliary port is multichannel.
+    std::fill(_sidechain_input_channels.begin(), _sidechain_input_channels.end(), sidechain);
+  }
   for (uint32_t i = 0; i < _proc.audio_inputs_count; ++i)
   {
-    this->_input_ports[i].data32 = context->mAudioInputs + offset;
-    offset += this->_input_ports[i].channel_count;
+    this->_input_ports[i].data32 = i == 0                       ? context->mAudioInputs
+                                   : i == _sidechain_input_port ? _sidechain_input_channels.data()
+                                                                : _silent_input_channels.data();
   }
-  offset = 0;
+  uint32_t offset = 0;
   for (uint32_t i = 0; i < _proc.audio_outputs_count; ++i)
   {
     this->_output_ports[i].data32 = context->mAudioOutputs + offset;

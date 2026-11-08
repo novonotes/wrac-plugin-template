@@ -14,6 +14,7 @@ pub(crate) struct PluginRegistrationStorage {
     pub auv2_factory: Auv2FactoryState,
     pub vst3_factory: Vst3FactoryState,
     pub aax_factory: AaxFactoryState,
+    pub aax_sidechain_factory: AaxSidechainFactoryState,
     pub descriptors: Vec<ClapDescriptorStorage>,
 }
 
@@ -105,6 +106,12 @@ impl PluginRegistrationStorage {
                 },
                 registration,
             },
+            aax_sidechain_factory: AaxSidechainFactoryState {
+                factory: WracPluginFactoryAaxSidechain {
+                    get_input_port_index: Some(crate::abi::aax_sidechain_get_input_port_index),
+                },
+                registration,
+            },
             descriptors,
         }
     }
@@ -156,6 +163,15 @@ pub(crate) struct AaxFactoryState {
 
 unsafe impl Sync for AaxFactoryState {}
 unsafe impl Send for AaxFactoryState {}
+
+#[repr(C)]
+pub(crate) struct AaxSidechainFactoryState {
+    pub factory: WracPluginFactoryAaxSidechain,
+    pub registration: &'static EntryRegistration,
+}
+
+unsafe impl Sync for AaxSidechainFactoryState {}
+unsafe impl Send for AaxSidechainFactoryState {}
 
 #[repr(C)]
 pub(crate) struct ClapPluginInfoAsAuv2 {
@@ -250,6 +266,18 @@ pub(crate) struct ClapPluginFactoryAsAax {
 unsafe impl Sync for ClapPluginFactoryAsAax {}
 unsafe impl Send for ClapPluginFactoryAsAax {}
 
+// Matches wrac_plugin_factory_aax_sidechain_t in clapwrapper/wrac.h. Keeping the WRAC
+// metadata separate avoids changing the upstream AAX factory ABI during subtree updates.
+#[repr(C)]
+pub(crate) struct WracPluginFactoryAaxSidechain {
+    pub get_input_port_index: Option<
+        unsafe extern "C" fn(factory: *const WracPluginFactoryAaxSidechain, index: u32) -> u32,
+    >,
+}
+
+unsafe impl Sync for WracPluginFactoryAaxSidechain {}
+unsafe impl Send for WracPluginFactoryAaxSidechain {}
+
 #[repr(C)]
 pub(crate) struct WracPluginMainThreadHook {
     pub attach_main_thread: Option<unsafe extern "C" fn(hook: *const WracPluginMainThreadHook)>,
@@ -304,6 +332,15 @@ pub(crate) fn aax_factory_state(
     Some(unsafe { &*(factory as *const AaxFactoryState) })
 }
 
+pub(crate) fn aax_sidechain_factory_state(
+    factory: *const WracPluginFactoryAaxSidechain,
+) -> Option<&'static AaxSidechainFactoryState> {
+    if factory.is_null() {
+        return None;
+    }
+    Some(unsafe { &*(factory as *const AaxSidechainFactoryState) })
+}
+
 pub(crate) fn factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
     &storage.clap_factory.factory as *const clap_plugin_factory as *const c_void
 }
@@ -322,4 +359,10 @@ pub(crate) fn vst3_factory_ptr(storage: &'static PluginRegistrationStorage) -> *
 
 pub(crate) fn aax_factory_ptr(storage: &'static PluginRegistrationStorage) -> *const c_void {
     &storage.aax_factory.factory as *const ClapPluginFactoryAsAax as *const c_void
+}
+
+pub(crate) fn aax_sidechain_factory_ptr(
+    storage: &'static PluginRegistrationStorage,
+) -> *const c_void {
+    &storage.aax_sidechain_factory.factory as *const WracPluginFactoryAaxSidechain as *const c_void
 }

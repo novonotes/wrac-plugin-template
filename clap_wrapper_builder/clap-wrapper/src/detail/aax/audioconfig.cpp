@@ -1,5 +1,8 @@
 #include "audioconfig.h"
 
+#include <cstring>
+
+#include "clapwrapper/wrac.h"
 #include "AAX_IEffectDescriptor.h"
 #include "AAX_IComponentDescriptor.h"
 #include "AAX_IPropertyMap.h"
@@ -153,6 +156,7 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
 {
   plugin_bus_info_t result;
   const auto pdesc = factory->plugins[index];
+  result.sidechain_input_port = sidechainInputPort(factory, index);
 
   // add an EffectDescription for each plugin available via factory
   const clap_plugin_info_as_aax_t *plug_aax_info = nullptr;
@@ -174,16 +178,11 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
       result.stemformats.push_back(
           {steminfo->name, steminfo->format_in, steminfo->format_out, steminfo->plugin_id});
     }
-    if (plug_aax_info->midi_in_name)
-    {
-      result.has_midi_in = true;
-      result.midi_in_name = plug_aax_info->midi_in_name;
-    }
-    if (plug_aax_info->midi_out_name)
-    {
-      result.has_midi_out = true;
-      result.midi_out_name = plug_aax_info->midi_out_name;
-    }
+    auto midi = declaredMidiNodes(plug_aax_info, nullptr, nullptr);
+    result.has_midi_in = midi.has_midi_in;
+    result.midi_in_name = midi.midi_in_name;
+    result.has_midi_out = midi.has_midi_out;
+    result.midi_out_name = midi.midi_out_name;
     return result;
   }
 
@@ -365,36 +364,12 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
       }
 
       // probe MIDI note port support
-      if (ext_notes)
       {
-        uint32_t n_in = ext_notes->count(tmpplug, true);
-        for (uint32_t i = 0; i < n_in; ++i)
-        {
-          clap_note_port_info_t ninfo;
-          if (ext_notes->get(tmpplug, i, true, &ninfo))
-          {
-            if (ninfo.supported_dialects & CLAP_NOTE_DIALECT_MIDI)
-            {
-              result.has_midi_in = true;
-              result.midi_in_name = ninfo.name;
-              break;
-            }
-          }
-        }
-        uint32_t n_out = ext_notes->count(tmpplug, false);
-        for (uint32_t i = 0; i < n_out; ++i)
-        {
-          clap_note_port_info_t ninfo;
-          if (ext_notes->get(tmpplug, i, false, &ninfo))
-          {
-            if (ninfo.supported_dialects & CLAP_NOTE_DIALECT_MIDI)
-            {
-              result.has_midi_out = true;
-              result.midi_out_name = ninfo.name;
-              break;
-            }
-          }
-        }
+        auto midi = declaredMidiNodes(nullptr, tmpplug, ext_notes);
+        result.has_midi_in = midi.has_midi_in;
+        result.midi_in_name = midi.midi_in_name;
+        result.has_midi_out = midi.has_midi_out;
+        result.midi_out_name = midi.midi_out_name;
       }
 
       // Pure-MIDI plugin (no audio ports) with MIDI: Pro Tools MIDI-effect
@@ -437,5 +412,67 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
     LOGINFO("exception thrown: {}", e.what());
   }
   return result;
+}
+
+uint32_t sidechainInputPort(const Clap::Library *factory, uint32_t index)
+{
+  if (!factory || !factory->_pluginEntry || !factory->_pluginEntry->get_factory ||
+      index >= factory->plugins.size())
+    return 0;
+  auto *info = static_cast<const wrac_plugin_factory_aax_sidechain_t *>(
+      factory->_pluginEntry->get_factory(WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN));
+  if (!info || !info->get_input_port_index) return 0;
+  return info->get_input_port_index(info, index);
+}
+
+midi_node_declaration_t declaredMidiNodes(const clap_plugin_info_as_aax_t *aaxinfo,
+                                          const clap_plugin_t *plugin,
+                                          const clap_plugin_note_ports_t *noteports)
+{
+  midi_node_declaration_t result;
+  if (aaxinfo)
+  {
+    if (aaxinfo->midi_in_name)
+    {
+      result.has_midi_in = true;
+      result.midi_in_name = aaxinfo->midi_in_name;
+    }
+    if (aaxinfo->midi_out_name)
+    {
+      result.has_midi_out = true;
+      result.midi_out_name = aaxinfo->midi_out_name;
+    }
+    return result;
+  }
+  if (!plugin || !noteports)
+  {
+    return result;
+  }
+  for (bool isInput : {true, false})
+  {
+    uint32_t count = noteports->count(plugin, isInput);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+      clap_note_port_info_t ninfo;
+      if (noteports->get(plugin, i, isInput, &ninfo) &&
+          (ninfo.supported_dialects & CLAP_NOTE_DIALECT_MIDI))
+      {
+        (isInput ? result.has_midi_in : result.has_midi_out) = true;
+        (isInput ? result.midi_in_name : result.midi_out_name) = ninfo.name;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+uint32_t findPluginIndex(const Clap::Library *factory, const char *pluginid)
+{
+  if (!factory || !pluginid) return CLAP_INVALID_ID;
+  for (uint32_t i = 0; i < factory->plugins.size(); ++i)
+  {
+    if (std::strcmp(factory->plugins[i]->id, pluginid) == 0) return i;
+  }
+  return CLAP_INVALID_ID;
 }
 }  // namespace CLAPAAX
