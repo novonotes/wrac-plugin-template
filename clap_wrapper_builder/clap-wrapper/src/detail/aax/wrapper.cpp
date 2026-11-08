@@ -576,25 +576,15 @@ AAX_Result ClapAsAAX::EffectInit()
   if (AAX_SUCCESS == _aax_ctrl->GetHostName(&hostname)) _underlying_hostname = hostname.StdString();
 
   _library = CLAPAAX::guarantee_clap();
-  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, m.StdString().c_str());
+  _pluginIndex = CLAPAAX::findPluginIndex(_library, m.StdString().c_str());
+  if (_pluginIndex == CLAP_INVALID_ID) return AAX_ERROR_NOT_INITIALIZED;
+  _sidechain_input_port = CLAPAAX::sidechainInputPort(_library, _pluginIndex);
   _plugin = Clap::Plugin::createInstance(_library->_pluginFactory, m.StdString(), this);
 
   if (_plugin)
   {
     if (_plugin->initialize())
     {
-      if (_sidechain_input_port)
-      {
-        auto *ports = _plugin->_ext._audioports;
-        clap_audio_port_info_t sidechain{};
-        if (!ports || _sidechain_input_port >= ports->count(_plugin->_plugin, true) ||
-            !ports->get(_plugin->_plugin, _sidechain_input_port, true, &sidechain) ||
-            sidechain.channel_count == 0)
-        {
-          LOGINFO("AAX sidechain was declared without the corresponding CLAP input port");
-          return AAX_ERROR_NOT_INITIALIZED;
-        }
-      }
       // TODO: initialize calls wrapper specifics and sets up all busses etc.
       {
         if (_plugin->_ext._configurable_audio_ports)
@@ -607,6 +597,13 @@ AAX_Result ClapAsAAX::EffectInit()
           auto numInChannels = AAX_STEM_FORMAT_CHANNEL_COUNT(stem_in);
           auto numOutChannels = AAX_STEM_FORMAT_CHANNEL_COUNT(stem_out);
           auto audioports = _plugin->_ext._audioports;
+          // Sidechain validation runs after configuration, but building the request
+          // already requires the audio-port extension.
+          if (!audioports)
+          {
+            LOGINFO("AAX audio port configuration requires the CLAP audio ports extension");
+            return AAX_ERROR_NOT_INITIALIZED;
+          }
 
           auto numInPorts = audioports->count(_plugin->_plugin, true);
           auto numOutPorts = audioports->count(_plugin->_plugin, false);
@@ -649,7 +646,24 @@ AAX_Result ClapAsAAX::EffectInit()
         }
       }
 
-      // set samplerate
+      // Validate the selected layout, not the plugin's default layout. An unconnected
+      // host sidechain is normal and renders silence; a missing declared port is a
+      // plugin configuration error and must not silently disable sidechain processing.
+      if (_sidechain_input_port)
+      {
+        auto *ports = _plugin->_ext._audioports;
+        clap_audio_port_info_t main{}, sidechain{};
+        if (!ports || _sidechain_input_port >= ports->count(_plugin->_plugin, true) ||
+            !ports->get(_plugin->_plugin, 0, true, &main) ||
+            !(main.flags & CLAP_AUDIO_PORT_IS_MAIN) || main.channel_count == 0 ||
+            !ports->get(_plugin->_plugin, _sidechain_input_port, true, &sidechain) ||
+            sidechain.channel_count == 0)
+        {
+          LOGINFO("AAX sidechain requires a nonempty main input at port 0 and a declared auxiliary "
+                  "input with channels in the selected configuration");
+          return AAX_ERROR_NOT_INITIALIZED;
+        }
+      }
 
       // set samplerate
       AAX_CSampleRate sr;
@@ -1053,7 +1067,7 @@ void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_n
   // its AAX info does not declare; the matching context field then holds placeholder private
   // data, and treating it as a MIDI node makes the host crash in process().
   auto declared =
-      CLAPAAX::declaredMidiNodes(CLAPAAX::findAaxInfo(_library, plugin->desc->id), plugin, noteports);
+      CLAPAAX::declaredMidiNodes(_library->get_aax_info(_pluginIndex), plugin, noteports);
   this->_midi_output_declared = declared.has_midi_out;
   if (!declared.has_midi_in)
   {

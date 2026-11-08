@@ -308,6 +308,7 @@ class ClapAsAAX : public AAX_CEffectParameters,
   void silenceAllOutputs(SAAX_Wrapper_AlgorithmicContext *context) const;
 
   Clap::Library *_library = nullptr;
+  uint32_t _pluginIndex = CLAP_INVALID_ID;
   std::shared_ptr<Clap::Plugin> _plugin;
   Clap::MainThreadAttachment _mainThreadAttachment;
 

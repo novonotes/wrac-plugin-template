@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "clapwrapper/wrac.h"
 #include "AAX_IEffectDescriptor.h"
 #include "AAX_IComponentDescriptor.h"
 #include "AAX_IPropertyMap.h"
@@ -155,7 +156,7 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
 {
   plugin_bus_info_t result;
   const auto pdesc = factory->plugins[index];
-  result.sidechain_input_port = sidechainInputPort(factory, pdesc->id);
+  result.sidechain_input_port = sidechainInputPort(factory, index);
 
   // add an EffectDescription for each plugin available via factory
   const clap_plugin_info_as_aax_t *plug_aax_info = nullptr;
@@ -413,19 +414,15 @@ plugin_bus_info_t getAvailableBusConfigs(Clap::Library *factory, uint32_t index)
   return result;
 }
 
-uint32_t sidechainInputPort(const Clap::Library *factory, const char *pluginid)
+uint32_t sidechainInputPort(const Clap::Library *factory, uint32_t index)
 {
-  if (!factory || !factory->_pluginEntry || !factory->_pluginEntry->get_factory || !pluginid) return 0;
-  auto *info = static_cast<const clap_plugin_factory_aax_sidechain_t *>(
-      factory->_pluginEntry->get_factory(CLAP_PLUGIN_FACTORY_AAX_SIDECHAIN));
-  // Some CLAP entries return the ordinary plugin factory for every identifier.
-  if (!info ||
-      reinterpret_cast<const void *>(info) == reinterpret_cast<const void *>(factory->_pluginFactory) ||
-      !info->get_input_port_index)
+  if (!factory || !factory->_pluginEntry || !factory->_pluginEntry->get_factory ||
+      index >= factory->plugins.size())
     return 0;
-  for (uint32_t i = 0; i < factory->plugins.size(); ++i)
-    if (std::strcmp(factory->plugins[i]->id, pluginid) == 0) return info->get_input_port_index(info, i);
-  return 0;
+  auto *info = static_cast<const wrac_plugin_factory_aax_sidechain_t *>(
+      factory->_pluginEntry->get_factory(WRAC_PLUGIN_FACTORY_AAX_SIDECHAIN));
+  if (!info || !info->get_input_port_index) return 0;
+  return info->get_input_port_index(info, index);
 }
 
 midi_node_declaration_t declaredMidiNodes(const clap_plugin_info_as_aax_t *aaxinfo,
@@ -469,19 +466,13 @@ midi_node_declaration_t declaredMidiNodes(const clap_plugin_info_as_aax_t *aaxin
   return result;
 }
 
-const clap_plugin_info_as_aax_t *findAaxInfo(const Clap::Library *factory, const char *pluginid)
+uint32_t findPluginIndex(const Clap::Library *factory, const char *pluginid)
 {
-  if (!factory || !factory->_pluginFactoryAAXInfo || !pluginid)
-  {
-    return nullptr;
-  }
+  if (!factory || !pluginid) return CLAP_INVALID_ID;
   for (uint32_t i = 0; i < factory->plugins.size(); ++i)
   {
-    if (strcmp(factory->plugins[i]->id, pluginid) == 0)
-    {
-      return factory->get_aax_info(i);
-    }
+    if (std::strcmp(factory->plugins[i]->id, pluginid) == 0) return i;
   }
-  return nullptr;
+  return CLAP_INVALID_ID;
 }
 }  // namespace CLAPAAX
