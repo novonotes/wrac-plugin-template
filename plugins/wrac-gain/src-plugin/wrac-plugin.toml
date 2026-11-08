@@ -40,6 +40,3 @@ aax_stem_configs = [
   { name = "Mono", input = "mono", output = "mono", plugin_id = "WtGM" },
   { name = "Stereo", input = "stereo", output = "stereo", plugin_id = "WtGS" },
 ]
-# A plugin with a note input port declares its AAX MIDI input here. AAX routes MIDI only to
-# nodes declared when the plugin is described, so undeclared note inputs receive no MIDI.
-# aax_midi_input_name = "MIDI In"
