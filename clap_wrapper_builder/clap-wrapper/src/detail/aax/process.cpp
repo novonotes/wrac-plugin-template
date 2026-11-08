@@ -282,7 +282,13 @@ void AAXProcessAdapter::setupProcessing(
 void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
 {
   // transport
-  auto aax_transport = context->mTransportNode->GetTransport();
+  auto aax_transport = context->mTransportNode ? context->mTransportNode->GetTransport() : nullptr;
+
+  // Availability and playback/loop state can change on every block; retaining
+  // flags from a previous block makes a stopped transport look like playback.
+  const auto transportHeader = _transport.header;
+  _transport = {};
+  _transport.header = transportHeader;
 
   // capture the MIDI output node for this cycle. enqueueOutputEvent() posts to
   // it directly while the plugin is inside _plugin->process() (the CLAP event
@@ -296,50 +302,62 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
   // check transport
   if (aax_transport)
   {
-    bool tmp;
+    bool playing = false;
 
     if (aax_transport->GetCurrentTempo(&_transport.tempo) == AAX_SUCCESS)
       _transport.flags |= CLAP_TRANSPORT_HAS_TEMPO;
-    if (aax_transport->IsTransportPlaying(&tmp) == AAX_SUCCESS)
+    if (aax_transport->IsTransportPlaying(&playing) == AAX_SUCCESS && playing)
       _transport.flags |= CLAP_TRANSPORT_IS_PLAYING;
 
+    int32_t numerator = 0, denominator = 0;
+    const bool hasMeter = aax_transport->GetCurrentMeter(&numerator, &denominator) == AAX_SUCCESS &&
+                          numerator > 0 && denominator > 0;
+    if (hasMeter)
     {
-      int64_t samplelocation;
-      if (aax_transport->GetCurrentNativeSampleLocation(&samplelocation) == AAX_SUCCESS)
+      _transport.tsig_num = (uint16_t)numerator;
+      _transport.tsig_denom = (uint16_t)denominator;
+      _transport.flags |= CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
+    }
+
+    // AAX_ITransport::GetCurrentTickPosition documents 960,000 ticks per quarter note.
+    constexpr double ticksPerQuarter = 960000.0;
+    int64_t samplelocation = 0;
+    if (aax_transport->GetCurrentNativeSampleLocation(&samplelocation) == AAX_SUCCESS)
+    {
+      _transport.song_pos_seconds = doubleToSecTime((double)samplelocation / _samplerate);
+      _transport.flags |= CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
+      int32_t bars = 0, beats = 0;
+      int64_t beatTicks = 0, ticks = 0;
+      // CLAP has no separate availability flag for bar_start. Keep the beat timeline
+      // unavailable if these queries fail, rather than publish a fabricated bar at zero.
+      if (hasMeter && aax_transport->GetCustomTickPosition(&ticks, samplelocation) == AAX_SUCCESS &&
+          aax_transport->GetBarBeatPosition(&bars, &beats, &beatTicks, samplelocation) == AAX_SUCCESS)
       {
-        double loc = (double)samplelocation;
-        _transport.song_pos_seconds = doubleToSecTime(loc / this->_samplerate);
-        _transport.flags |= CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
-        int32_t bars, beats;
-        int64_t displayticks;
-        if (aax_transport->GetBarBeatPosition(&bars, &beats, &displayticks, samplelocation) ==
-            AAX_SUCCESS)
+        // GetBarBeatPosition's DisplayTicks uses the same high-resolution ticks in
+        // Pro Tools (verified against Developer 23.6), not the UI's 960-tick grid.
+        // Subtract in ticks before converting so fractional positions cancel exactly.
+        const double ticksPerBeat = 4.0 * ticksPerQuarter / denominator;
+        // Invalid within-bar coordinates can put the bar after the song position.
+        // Negative song/bar positions are valid during pre-roll and must remain valid.
+        if (beats > 0 && beats <= numerator && beatTicks >= 0 && (double)beatTicks < ticksPerBeat)
         {
-          int32_t numerator = 4, denominator = 4;
-          aax_transport->GetCurrentMeter(&numerator, &denominator);
-          // bars and beats from AAX are 1-based; convert to beat count from song start
-          double bar_start_beats = (double)(bars - 1) * numerator;
-          double song_pos_beats = bar_start_beats + (double)(beats - 1);
-          _transport.song_pos_beats = doubleToBeatTime(song_pos_beats);
-          _transport.bar_start = doubleToBeatTime(bar_start_beats);
+          const double inBarTicks = (double)(beats - 1) * ticksPerBeat + (double)beatTicks;
+          _transport.song_pos_beats = doubleToBeatTime((double)ticks / ticksPerQuarter);
+          _transport.bar_start = doubleToBeatTime(((double)ticks - inBarTicks) / ticksPerQuarter);
           _transport.bar_number = bars - 1;
-          _transport.tsig_num = (uint16_t)numerator;
-          _transport.tsig_denom = (uint16_t)denominator;
-          _transport.flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE | CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
-        }
-        // loop position
-        bool loops;
-        int64_t loopstart, loopend;
-        if (aax_transport->GetCurrentLoopPosition(&loops, &loopstart, &loopend) == AAX_SUCCESS)
-        {
-          if (loops)
-          {
-            _transport.flags |= CLAP_TRANSPORT_IS_LOOP_ACTIVE;
-          }
-          _transport.loop_start_seconds = doubleToSecTime((double)(loopstart) / _samplerate);
-          _transport.loop_end_seconds = doubleToSecTime((double)(loopend) / _samplerate);
+          _transport.flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
         }
       }
+    }
+
+    bool loops = false;
+    int64_t loopstart = 0, loopend = 0;
+    if (aax_transport->GetCurrentLoopPosition(&loops, &loopstart, &loopend) == AAX_SUCCESS)
+    {
+      if (loops) _transport.flags |= CLAP_TRANSPORT_IS_LOOP_ACTIVE;
+      _transport.loop_start_beats = doubleToBeatTime((double)loopstart / ticksPerQuarter);
+      _transport.loop_end_beats = doubleToBeatTime((double)loopend / ticksPerQuarter);
+      // No sample positions are provided for these ticks, so seconds stay unavailable.
     }
     // TODO: More flags when appropriate
   }

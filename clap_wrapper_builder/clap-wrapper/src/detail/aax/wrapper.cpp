@@ -601,7 +601,7 @@ AAX_Result ClapAsAAX::EffectInit()
           // already requires the audio-port extension.
           if (!audioports)
           {
-            LOGINFO("AAX audio port configuration requires the CLAP audio ports extension");
+            LOGINFO("[ERROR] AAX audio port configuration requires the CLAP audio ports extension");
             return AAX_ERROR_NOT_INITIALIZED;
           }
 
@@ -659,8 +659,8 @@ AAX_Result ClapAsAAX::EffectInit()
             !ports->get(_plugin->_plugin, _sidechain_input_port, true, &sidechain) ||
             sidechain.channel_count == 0)
         {
-          LOGINFO("AAX sidechain requires a nonempty main input at port 0 and a declared auxiliary "
-                  "input with channels in the selected configuration");
+          LOGINFO("[ERROR] AAX sidechain requires a nonempty main input at port 0 and a declared "
+                  "auxiliary input with channels in the selected configuration");
           return AAX_ERROR_NOT_INITIALIZED;
         }
       }
@@ -1073,7 +1073,8 @@ void ClapAsAAX::setupMIDIBusses(const clap_plugin_t *plugin, const clap_plugin_n
   {
     if (noteports->count(plugin, true) > 0)
     {
-      LOGINFO("plugin has a note input port but no AAX MIDI input was declared; MIDI input is ignored");
+      LOGINFO("[WARN] plugin has a note input port but no AAX MIDI input was declared; "
+              "MIDI input is ignored");
     }
     return;
   }
