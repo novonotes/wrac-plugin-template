@@ -15,8 +15,11 @@ struct Transport : AAX_ITransport
   bool sampleAvailable = false;
   bool tickAvailable = true;
   bool meterAvailable = true;
+  bool barBeatAvailable = true;
   int32_t numerator = 4, denominator = 4, bars = 4, beats = 1;
-  int64_t sample = 12 * 48000, ticks = 12000000, displayTicks = 480;
+  // GetBarBeatPosition returns the host's high-resolution tick remainder, not
+  // the 960-tick grid shown in the Pro Tools counter.
+  int64_t sample = 12 * 48000, ticks = 12000000, beatTicks = 480000;
   int64_t loopStart = 4 * 960000, loopEnd = 16 * 960000;
 
   AAX_Result GetCurrentTempo(double *v) const override
@@ -63,10 +66,10 @@ struct Transport : AAX_ITransport
   AAX_Result GetBarBeatPosition(int32_t *bar, int32_t *beat, int64_t *tick,
                                 int64_t position) const override
   {
-    if (position != sample) return AAX_ERROR_UNIMPLEMENTED;
+    if (!barBeatAvailable || position != sample) return AAX_ERROR_UNIMPLEMENTED;
     *bar = bars;
     *beat = beats;
-    *tick = displayTicks;
+    *tick = beatTicks;
     return AAX_SUCCESS;
   }
   AAX_Result GetTicksPerQuarter(uint32_t *) const override
@@ -206,15 +209,29 @@ int main()
     return 1;
   }
 
-  // Beat numbers are denominator-based, while AAX display ticks are quarter-note based.
+  // Sub-display-tick positions must not move the bar boundary or lose song precision.
   node.transport.playing = true;
   node.transport.sampleAvailable = true;
+  for (int64_t offset : {1, 250, 500, 750, 999})
+  {
+    node.transport.ticks = 11520000 + offset;
+    node.transport.beatTicks = offset;
+    adapter.process(&context);
+    if (!sameBeat(captured.bar_start, 12.0) ||
+        !sameBeat(captured.song_pos_beats, 12.0 + (double)offset / 960000.0))
+    {
+      std::fprintf(stderr, "Fractional tick moved the bar start\n");
+      return 1;
+    }
+  }
+
+  // Beat numbers follow the meter denominator; tick units remain quarter-note based.
   node.transport.numerator = 6;
   node.transport.denominator = 8;
   node.transport.bars = 3;
   node.transport.beats = 2;
   node.transport.ticks = 6480000;
-  node.transport.displayTicks = 240;
+  node.transport.beatTicks = 240000;
   adapter.process(&context);
   if (!sameBeat(captured.song_pos_beats, 6.75) || !sameBeat(captured.bar_start, 6.0) ||
       captured.tsig_num != 6 || captured.tsig_denom != 8)
@@ -223,12 +240,74 @@ int main()
     return 1;
   }
 
-  node.transport.meterAvailable = false;
+  // Bar numbers alone cannot locate a bar after a meter change: two 4/4 bars
+  // followed by 6/8 put bar 3 at quarter note 8, not quarter note 6.
+  node.transport.ticks = 8400000;
   adapter.process(&context);
-  if ((captured.flags & (CLAP_TRANSPORT_HAS_TIME_SIGNATURE | CLAP_TRANSPORT_HAS_BEATS_TIMELINE)) != 0)
+  if (!sameBeat(captured.bar_start, 8.0) || captured.bar_number != 2)
   {
-    std::fprintf(stderr, "Unavailable meter was reported as valid\n");
+    std::fprintf(stderr, "Meter change moved the bar start\n");
     return 1;
+  }
+
+  node.transport.numerator = node.transport.denominator = 4;
+  struct Boundary
+  {
+    int32_t bar, beat;
+    int64_t ticks, beatTicks;
+    double start;
+  };
+  for (const auto &position : {Boundary{4, 4, 15359999, 959999, 12.0},
+                               Boundary{5, 1, 15360000, 0, 16.0},
+                               Boundary{0, 4, -240000, 720000, -4.0}})
+  {
+    node.transport.bars = position.bar;
+    node.transport.beats = position.beat;
+    node.transport.ticks = position.ticks;
+    node.transport.beatTicks = position.beatTicks;
+    adapter.process(&context);
+    if (!(captured.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) ||
+        !sameBeat(captured.bar_start, position.start) || captured.bar_number != position.bar - 1 ||
+        captured.bar_start > captured.song_pos_beats)
+    {
+      std::fprintf(stderr, "Incorrect bar boundary or pre-roll position\n");
+      return 1;
+    }
+  }
+
+  // CLAP cannot mark bar_start unavailable independently of the beat timeline.
+  // A failed query must not publish a fabricated bar or retain the previous one.
+  for (bool *available : {&node.transport.meterAvailable, &node.transport.tickAvailable,
+                          &node.transport.barBeatAvailable})
+  {
+    adapter.process(&context);
+    *available = false;
+    adapter.process(&context);
+    if ((captured.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) || captured.bar_start != 0 ||
+        captured.song_pos_beats != 0 || !(captured.flags & CLAP_TRANSPORT_HAS_SECONDS_TIMELINE) ||
+        (!node.transport.meterAvailable && (captured.flags & CLAP_TRANSPORT_HAS_TIME_SIGNATURE)))
+    {
+      std::fprintf(stderr, "Unavailable musical position was reported as valid\n");
+      return 1;
+    }
+    *available = true;
+  }
+
+  for (const auto &invalid : {Boundary{4, 0, 12000000, 480000, 0},
+                              Boundary{4, 5, 12000000, 480000, 0},
+                              Boundary{4, 1, 12000000, -1, 0},
+                              Boundary{4, 1, 12000000, 960000, 0}})
+  {
+    node.transport.bars = invalid.bar;
+    node.transport.beats = invalid.beat;
+    node.transport.ticks = invalid.ticks;
+    node.transport.beatTicks = invalid.beatTicks;
+    adapter.process(&context);
+    if (captured.flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE)
+    {
+      std::fprintf(stderr, "Inconsistent bar/beat data was reported as valid\n");
+      return 1;
+    }
   }
   context.mTransportNode = nullptr;
   adapter.process(&context);

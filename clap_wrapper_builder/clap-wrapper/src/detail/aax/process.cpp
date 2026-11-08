@@ -319,7 +319,7 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
       _transport.flags |= CLAP_TRANSPORT_HAS_TIME_SIGNATURE;
     }
 
-    // AAX positions use 960,000 ticks per quarter note, not audio samples.
+    // AAX_ITransport::GetCurrentTickPosition documents 960,000 ticks per quarter note.
     constexpr double ticksPerQuarter = 960000.0;
     int64_t samplelocation = 0;
     if (aax_transport->GetCurrentNativeSampleLocation(&samplelocation) == AAX_SUCCESS)
@@ -327,17 +327,26 @@ void AAXProcessAdapter::process(SAAX_Wrapper_AlgorithmicContext *context)
       _transport.song_pos_seconds = doubleToSecTime((double)samplelocation / _samplerate);
       _transport.flags |= CLAP_TRANSPORT_HAS_SECONDS_TIMELINE;
       int32_t bars = 0, beats = 0;
-      int64_t displayticks = 0, ticks = 0;
+      int64_t beatTicks = 0, ticks = 0;
+      // CLAP has no separate availability flag for bar_start. Keep the beat timeline
+      // unavailable if these queries fail, rather than publish a fabricated bar at zero.
       if (hasMeter && aax_transport->GetCustomTickPosition(&ticks, samplelocation) == AAX_SUCCESS &&
-          aax_transport->GetBarBeatPosition(&bars, &beats, &displayticks, samplelocation) == AAX_SUCCESS)
+          aax_transport->GetBarBeatPosition(&bars, &beats, &beatTicks, samplelocation) == AAX_SUCCESS)
       {
-        const double songBeats = (double)ticks / ticksPerQuarter;
-        // Display ticks are 1/960 of a quarter note; the meter's beat can be shorter.
-        const double inBar = (double)(beats - 1) * 4.0 / denominator + (double)displayticks / 960.0;
-        _transport.song_pos_beats = doubleToBeatTime(songBeats);
-        _transport.bar_start = doubleToBeatTime(songBeats - inBar);
-        _transport.bar_number = bars - 1;
-        _transport.flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+        // GetBarBeatPosition's DisplayTicks uses the same high-resolution ticks in
+        // Pro Tools (verified against Developer 23.6), not the UI's 960-tick grid.
+        // Subtract in ticks before converting so fractional positions cancel exactly.
+        const double ticksPerBeat = 4.0 * ticksPerQuarter / denominator;
+        // Invalid within-bar coordinates can put the bar after the song position.
+        // Negative song/bar positions are valid during pre-roll and must remain valid.
+        if (beats > 0 && beats <= numerator && beatTicks >= 0 && (double)beatTicks < ticksPerBeat)
+        {
+          const double inBarTicks = (double)(beats - 1) * ticksPerBeat + (double)beatTicks;
+          _transport.song_pos_beats = doubleToBeatTime((double)ticks / ticksPerQuarter);
+          _transport.bar_start = doubleToBeatTime(((double)ticks - inBarTicks) / ticksPerQuarter);
+          _transport.bar_number = bars - 1;
+          _transport.flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
+        }
       }
     }
 
