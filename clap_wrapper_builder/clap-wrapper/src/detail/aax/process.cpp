@@ -250,9 +250,10 @@ void AAXProcessAdapter::setupProcessing(
   }
 
   // Unmapped CLAP input ports need silence rather than pointers beyond the AAX input array.
+  // Explicit template arguments prevent the Windows SDK's max macro from expanding.
   uint32_t maxAuxChannels = 0;
   for (uint32_t i = 1; i < numinputs; ++i)
-    maxAuxChannels = std::max(maxAuxChannels, _input_ports[i].channel_count);
+    maxAuxChannels = std::max<uint32_t>(maxAuxChannels, _input_ports[i].channel_count);
   if (maxAuxChannels > 0)
   {
     _silent_input = new float[gAAXMaxBlockSizeInSamples]();
