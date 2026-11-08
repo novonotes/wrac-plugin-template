@@ -995,10 +995,12 @@ Float64 WrapAsAUV2::GetTailTime()
   if (_plugin && _plugin->_ext._tail)
   {
     auto samplerate = this->GetStreamFormat(kAudioUnitScope_Output, 0).mSampleRate;
-    auto tailtime_in_samples = (double)(_plugin->_ext._tail->get(_plugin->_plugin));
-    Float64 tailtime = tailtime_in_samples / samplerate;
-
-    return tailtime;
+    const auto tailSamples = _plugin->_ext._tail->get(_plugin->_plugin);
+    // CLAP reserves values >= INT32_MAX for an unbounded tail, not a finite
+    // number of frames. Preserve that contract when converting to AU seconds.
+    if (tailSamples >= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
+      return std::numeric_limits<Float64>::infinity();
+    return samplerate > 0.0 ? static_cast<Float64>(tailSamples) / samplerate : 0.0;
   }
   return 0.0;
 }
