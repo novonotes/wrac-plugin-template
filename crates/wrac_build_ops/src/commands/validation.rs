@@ -273,9 +273,15 @@ fn run_aax_validator_dtt(
             .arg("--logdir")
             .arg(&log_dir)
             .arg("--arg")
-            .arg(format!("pi_path={}", aax_search_dir.display()))
+            .arg(format!(
+                "pi_path={}",
+                aax_validator_path_arg(aax_search_dir, ctx.platform)
+            ))
             .arg("--arg")
-            .arg(format!("out_path={}", test_dir.display()))
+            .arg(format!(
+                "out_path={}",
+                aax_validator_path_arg(&test_dir, ctx.platform)
+            ))
             .arg("--arg")
             .arg("result_format=json")
             .arg("--arg")
@@ -587,6 +593,19 @@ fn aax_validator_result_status(path: &Path) -> Result<String> {
             )
             .into()
         })
+}
+
+/// Formats a path for DTT script arguments.
+///
+/// CI target directories such as `C:/nnp` produce mixed separators once joined on
+/// Windows, and DigiShell's `findaaxplugins` returns no plug-ins for such paths.
+fn aax_validator_path_arg(path: &Path, platform: Platform) -> String {
+    let path = path.display().to_string();
+    if platform == Platform::Windows {
+        path.replace('/', "\\")
+    } else {
+        path
+    }
 }
 
 fn ensure_aax_validator_dtt(ctx: &Context) -> Result<PathBuf> {
