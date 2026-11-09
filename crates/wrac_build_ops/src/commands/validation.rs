@@ -280,6 +280,11 @@ fn run_aax_validator_dtt(
             .arg("result_format=json")
             .arg("--arg")
             .arg(format!("test_id={test_id}"))
+            // DTT's Ruby scripts parse system profiler output that can contain non-ASCII
+            // text. Without a UTF-8 locale, Ruby reads it as US-ASCII and aborts before
+            // writing any result, which happens under CI services that leave LANG unset.
+            .env("LANG", "en_US.UTF-8")
+            .env("LC_ALL", "en_US.UTF-8")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(dtt.parent().unwrap_or(&ctx.root))
