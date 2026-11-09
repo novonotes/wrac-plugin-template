@@ -57,6 +57,37 @@ if(APPLE)
     # A state-recall regression can deadlock, so CTest must bound execution.
     set_tests_properties(${test} PROPERTIES TIMEOUT 30)
   endforeach()
+
+  # The usual macOS test bundle is AUv2; exercise VST3 as well when it was built beside it.
+  get_filename_component(WRAC_TEST_PLUGIN_DIR "${WRAC_TEST_PLUGIN}" DIRECTORY)
+  set(WRAC_TEST_VST3_PLUGIN "${WRAC_TEST_PLUGIN_DIR}/WRAC Gain.vst3")
+  if(IS_DIRECTORY "${WRAC_TEST_VST3_PLUGIN}")
+    enable_language(OBJCXX)
+    set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+    set(SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/../vst3sdk")
+    add_subdirectory("${SDK_ROOT}" vst3sdk EXCLUDE_FROM_ALL)
+    add_executable(vst3_param_edit
+      vst3_param_edit.cpp
+      "${SDK_ROOT}/public.sdk/source/vst/hosting/module_mac.mm"
+      "${SDK_ROOT}/public.sdk/samples/vst-hosting/validator/source/usediids.cpp")
+    set_source_files_properties("${SDK_ROOT}/public.sdk/source/vst/hosting/module_mac.mm"
+      PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    set_source_files_properties(vst3_param_edit.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+    target_compile_features(vst3_param_edit PRIVATE cxx_std_17)
+    target_compile_definitions(vst3_param_edit PRIVATE MAC=1 MACOS_USE_STD_FILESYSTEM=1)
+    # Keep strict warnings for the regression test without promoting SDK header warnings
+    # to errors when newer compilers add diagnostics for third-party declarations.
+    target_include_directories(vst3_param_edit SYSTEM PRIVATE "${SDK_ROOT}")
+    target_include_directories(vst3_param_edit PRIVATE
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src"
+      "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/libs/fmt"
+      "${CMAKE_CURRENT_LIST_DIR}/../clap/include")
+    target_link_libraries(vst3_param_edit PRIVATE sdk_hosting sdk_common base pluginterfaces "-framework Cocoa")
+    add_test(NAME vst3_param_edit COMMAND vst3_param_edit "${WRAC_TEST_VST3_PLUGIN}")
+    set_tests_properties(vst3_param_edit PROPERTIES TIMEOUT 30)
+  endif()
 elseif(WIN32)
   set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
   set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
