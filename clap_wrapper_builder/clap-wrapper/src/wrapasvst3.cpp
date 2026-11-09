@@ -2137,8 +2137,10 @@ void ClapAsVst3::onIdle()
       case queueEvent::type_t::editvalue:
       {
         auto param = (Vst3Parameter *)(parameters.getParameter(n._data._value.param_id & 0x7FFFFFFF));
-        auto v = n._data._value.value;
-        performEdit(param->getInfo().id, param->asVst3Value(v));
+        auto v = param->asVst3Value(n._data._value.value);
+        // A host may query the controller during performEdit and replay a stale value.
+        param->setNormalized(v);
+        performEdit(param->getInfo().id, v);
       }
       break;
       case queueEvent::type_t::editend:

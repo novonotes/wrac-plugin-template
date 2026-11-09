@@ -12,3 +12,6 @@ cargo xtask test-wrapper
 
 テストの登録先は [CMakeLists.txt](CMakeLists.txt) です。各テストの目的と
 一部の検証が SKIP される条件は、それぞれのソースに記載しています。
+
+macOS では `--target=vst3,au` で両形式をビルドすると、AUv2 に加えて VST3 の
+パラメーター編集の回帰テストも実行します。

@@ -13,6 +13,9 @@ cargo xtask test-wrapper
 CTest registrations live in [CMakeLists.txt](CMakeLists.txt). Each test source
 documents its purpose and any partial skips.
 
+On macOS, building both formats with `--target=vst3,au` also enables the VST3
+parameter-edit regression test alongside the AUv2 tests.
+
 To include the AAX regression tests, configure CMake with the local AAX SDK
 and the built WRAC Gain bundle, then build and run the tests:
 
