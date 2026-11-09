@@ -217,14 +217,27 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
             "https://github.com/free-audio/clap-validator/releases/download/{version}/{}",
             archives.download
         );
+        // Download into a temporary file and rename it only after curl succeeds.
+        // The existence check above would otherwise reuse a partial or empty archive
+        // left by an interrupted or failed download on every later run. A leftover
+        // temporary file is removed here before the next attempt.
+        let partial = validator_dir.join(format!("{}.download", archives.download));
+        if partial.exists() {
+            fs::remove_file(&partial)?;
+        }
         run_with_language(
             Command::new("curl")
-                .args(["-L", "--fail", "-o"])
-                .arg(&archive)
+                .args(["-L", "--fail"])
+                // GitHub release downloads occasionally fail with transient errors
+                // such as HTTP 504. Retry them instead of failing the whole validation.
+                .args(["--retry", "5", "--retry-all-errors", "--retry-delay", "5"])
+                .arg("-o")
+                .arg(&partial)
                 .arg(url)
                 .current_dir(&ctx.root),
             ctx.output_language,
         )?;
+        fs::rename(&partial, &archive)?;
     }
 
     if ctx.platform == Platform::Linux {
