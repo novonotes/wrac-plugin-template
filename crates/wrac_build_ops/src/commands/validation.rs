@@ -84,10 +84,7 @@ pub fn validate_plugin_target(
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
             let output = run_output_with_language(
-                Command::new(validator)
-                    .env("WRAC_PLUGIN_VALIDATOR", "1")
-                    .arg(&vst3)
-                    .current_dir(&ctx.root),
+                Command::new(validator).arg(&vst3).current_dir(&ctx.root),
                 ctx.output_language,
             )?;
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -137,11 +134,7 @@ pub fn validate_plugin_target(
 
 fn clap_validator_command(validator: &Path, clap: &Path, config: &ClapValidatorConfig) -> Command {
     let mut command = Command::new(validator);
-    command
-        .env("WRAC_PLUGIN_VALIDATOR", "1")
-        .arg("validate")
-        .arg(clap)
-        .arg("--only-failed");
+    command.arg("validate").arg(clap).arg("--only-failed");
     for exclusion in &config.test_exclusions {
         // clap-validator 0.4.1 accepts repeatable regular expressions through --exclude.
         command.arg("--exclude").arg(&exclusion.filter);
