@@ -297,7 +297,16 @@ fn run_aax_validator_dtt(
         fs::write(&stderr_path, &output.stderr)?;
 
         let result_path = aax_validator_result_path(results_dir, index, test_id);
-        let dtt_result = find_aax_validator_dtt_result(&test_dir, test_id)?;
+        let dtt_result = match find_aax_validator_dtt_result(&test_dir, test_id) {
+            Ok(path) => path,
+            Err(err) => {
+                // DTT can exit before writing any result, for example when its Ruby
+                // runtime aborts. Its own output is then the only clue in CI logs.
+                print_aax_validator_output(&output.stdout, &output.stderr);
+                print_aax_validator_dtt_logs(&log_dir)?;
+                return Err(err);
+            }
+        };
         // DTT writes result files with connection-specific suffixes. Copy each one to
         // a deterministic per-test path so CI artifacts and final pass/fail checks do
         // not depend on DigiShell connection IDs.
@@ -669,15 +678,15 @@ fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
     {
-        // Windows validator downloads are zip archives. GitHub-hosted Windows runners
-        // provide 7-Zip, and using it here avoids relying on tar implementations that
-        // only support tar streams.
+        // Windows validator downloads are zip archives. Windows ships bsdtar as `tar`
+        // with zip support, the same tool that extracts clap-validator, so self-hosted
+        // runners do not need 7-Zip installed.
         run_with_language(
-            Command::new("7z")
-                .arg("x")
+            Command::new("tar")
+                .arg("-xf")
                 .arg(&archive)
-                .arg(format!("-o{}", extracted_root.display()))
-                .arg("-y")
+                .arg("-C")
+                .arg(&extracted_root)
                 .current_dir(&ctx.root),
             ctx.output_language,
         )?;
