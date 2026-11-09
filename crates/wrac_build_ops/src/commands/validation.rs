@@ -84,10 +84,7 @@ pub fn validate_plugin_target(
             ensure_exists(&vst3, "VST3 artifact")?;
             let validator = ensure_vst3_validator(ctx)?;
             let output = run_output_with_language(
-                Command::new(validator)
-                    .env("WRAC_PLUGIN_VALIDATOR", "1")
-                    .arg(&vst3)
-                    .current_dir(&ctx.root),
+                Command::new(validator).arg(&vst3).current_dir(&ctx.root),
                 ctx.output_language,
             )?;
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -137,11 +134,7 @@ pub fn validate_plugin_target(
 
 fn clap_validator_command(validator: &Path, clap: &Path, config: &ClapValidatorConfig) -> Command {
     let mut command = Command::new(validator);
-    command
-        .env("WRAC_PLUGIN_VALIDATOR", "1")
-        .arg("validate")
-        .arg(clap)
-        .arg("--only-failed");
+    command.arg("validate").arg(clap).arg("--only-failed");
     for exclusion in &config.test_exclusions {
         // clap-validator 0.4.1 accepts repeatable regular expressions through --exclude.
         command.arg("--exclude").arg(&exclusion.filter);
@@ -217,14 +210,27 @@ fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
             "https://github.com/free-audio/clap-validator/releases/download/{version}/{}",
             archives.download
         );
+        // Download into a temporary file and rename it only after curl succeeds.
+        // The existence check above would otherwise reuse a partial or empty archive
+        // left by an interrupted or failed download on every later run. A leftover
+        // temporary file is removed here before the next attempt.
+        let partial = validator_dir.join(format!("{}.download", archives.download));
+        if partial.exists() {
+            fs::remove_file(&partial)?;
+        }
         run_with_language(
             Command::new("curl")
-                .args(["-L", "--fail", "-o"])
-                .arg(&archive)
+                .args(["-L", "--fail"])
+                // GitHub release downloads occasionally fail with transient errors
+                // such as HTTP 504. Retry them instead of failing the whole validation.
+                .args(["--retry", "5", "--retry-all-errors", "--retry-delay", "5"])
+                .arg("-o")
+                .arg(&partial)
                 .arg(url)
                 .current_dir(&ctx.root),
             ctx.output_language,
         )?;
+        fs::rename(&partial, &archive)?;
     }
 
     if ctx.platform == Platform::Linux {
