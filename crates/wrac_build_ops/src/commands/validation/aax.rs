@@ -335,12 +335,15 @@ fn print_aax_validator_dtt_logs(log_dir: &Path) -> Result<()> {
         if !file_name.ends_with(".txt") {
             continue;
         }
-        let content = fs::read_to_string(&path).map_err(|err| {
+        // DTT logs are not guaranteed to be UTF-8 on Windows. Decode them lossily so a
+        // log encoding never replaces the validation error these logs are printed for.
+        let bytes = fs::read(&path).map_err(|err| {
             format!(
                 "failed to read AAX validator DTT log {}: {err}",
                 path.display()
             )
         })?;
+        let content = String::from_utf8_lossy(&bytes);
         println!(
             "========== AAX validator DTT log ({}) ==========",
             path.display()
@@ -423,7 +426,7 @@ fn aax_validator_result_status(path: &Path) -> Result<String> {
 
 /// Formats a path for DTT script arguments.
 ///
-/// CI target directories such as `C:/nnp` produce mixed separators once joined on
+/// CI target directories such as `C:/ci-target` produce mixed separators once joined on
 /// Windows, and DigiShell's `findaaxplugins` returns no plug-ins for such paths.
 fn aax_validator_path_arg(path: &Path, platform: Platform) -> String {
     let path = path.display().to_string();
