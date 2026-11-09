@@ -77,8 +77,10 @@ if(APPLE)
     set_source_files_properties(vst3_param_edit.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
     target_compile_features(vst3_param_edit PRIVATE cxx_std_17)
     target_compile_definitions(vst3_param_edit PRIVATE MAC=1 MACOS_USE_STD_FILESYSTEM=1)
+    # Keep strict warnings for the regression test without promoting SDK header warnings
+    # to errors when newer compilers add diagnostics for third-party declarations.
+    target_include_directories(vst3_param_edit SYSTEM PRIVATE "${SDK_ROOT}")
     target_include_directories(vst3_param_edit PRIVATE
-      "${SDK_ROOT}"
       "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/src"
       "${CMAKE_CURRENT_LIST_DIR}/../clap-wrapper/libs/fmt"
       "${CMAKE_CURRENT_LIST_DIR}/../clap/include")
