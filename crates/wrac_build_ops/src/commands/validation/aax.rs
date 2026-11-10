@@ -82,6 +82,7 @@ fn run_aax_validator_dtt(
                 .join("dtt")
                 .join(format!("{:02}-{}", index + 1, test_id.replace('.', "_")));
         let log_dir = test_dir.join("logs");
+        let started_at = Instant::now();
         let mut attempt = 1;
         let output = loop {
             // Each attempt starts from empty directories so a retry cannot pick up
@@ -146,6 +147,7 @@ fn run_aax_validator_dtt(
                 result_path.display()
             )
         })?;
+        print_aax_validator_test_timing(ctx, test_id, started_at.elapsed(), &result_path);
 
         if !output.status.success() {
             print_aax_validator_output(&output.stdout, &output.stderr);
@@ -492,19 +494,93 @@ fn aax_validator_result_path(results_dir: &Path, index: usize, test_id: &str) ->
     ))
 }
 
-fn aax_validator_result_status(path: &Path) -> Result<String> {
+/// Prints how long one DTT test took, split into the whole DTT run and the time the
+/// validator itself reports for the test.
+///
+/// The gap between the two is DTT/DigiShell start-up and tear-down. Logging both per test
+/// lets slow runners be diagnosed from CI logs alone, without access to the runner's
+/// result directory.
+fn print_aax_validator_test_timing(
+    ctx: &Context,
+    test_id: &str,
+    process: Duration,
+    result_path: &Path,
+) {
+    // Timing is diagnostic only. A result that cannot be read here still fails the run
+    // in `assert_aax_validator_results`, so report the reason instead of failing twice.
+    let reported = match aax_validator_reported_seconds(result_path) {
+        Ok(seconds) if seconds.is_empty() => "not reported".to_string(),
+        Ok(seconds) => seconds
+            .iter()
+            .map(|seconds| format!("{seconds:.1}s"))
+            .collect::<Vec<_>>()
+            .join(" + "),
+        Err(err) => format!("unavailable ({err})"),
+    };
+    let process = process.as_secs_f64();
+    print_detail(
+        ctx.output_language,
+        &format!("AAX validator timing: {test_id}: DTT {process:.1}s, test {reported}"),
+        &format!("AAX validator 所要時間: {test_id}: DTT {process:.1}s, test {reported}"),
+    );
+}
+
+/// Returns every `performance_data.elapsed_time_sec` in a DTT result.
+///
+/// Some tests report one result per effect, and info tests report none, so the
+/// values are collected wherever they appear instead of from a fixed path.
+fn aax_validator_reported_seconds(path: &Path) -> Result<Vec<f64>> {
+    fn collect(value: &Value, seconds: &mut Vec<f64>) -> Result<()> {
+        match value {
+            Value::Object(map) => {
+                if let Some(elapsed) = map
+                    .get("performance_data")
+                    .and_then(|data| data.get("elapsed_time_sec"))
+                {
+                    // DTT writes numbers as strings, e.g. "300.000031".
+                    let text = elapsed.as_str().ok_or("elapsed_time_sec is not a string")?;
+                    seconds.push(
+                        text.parse::<f64>()
+                            .map_err(|err| format!("invalid elapsed_time_sec {text:?}: {err}"))?,
+                    );
+                }
+                for child in map.values() {
+                    collect(child, seconds)?;
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    collect(item, seconds)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    let mut seconds = Vec::new();
+    collect(&read_aax_validator_result(path)?, &mut seconds)?;
+    Ok(seconds)
+}
+
+fn read_aax_validator_result(path: &Path) -> Result<Value> {
     let content = fs::read_to_string(path).map_err(|err| {
         format!(
             "failed to read AAX validator result {}: {err}",
             path.display()
         )
     })?;
-    let json: Value = serde_json::from_str(&content).map_err(|err| {
+    let json = serde_json::from_str(&content).map_err(|err| {
         format!(
             "failed to parse AAX validator result {}: {err}",
             path.display()
         )
     })?;
+    Ok(json)
+}
+
+fn aax_validator_result_status(path: &Path) -> Result<String> {
+    let json = read_aax_validator_result(path)?;
     json.get("result_status")
         .and_then(Value::as_str)
         .map(str::to_string)
