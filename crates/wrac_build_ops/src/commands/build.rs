@@ -805,7 +805,7 @@ fn add_wrapper_product_args(
                         plugin.plugin_name
                     )
                 })?;
-                // Apple's tags are fixed strings without ';', so a CMake list
+                // Manifest validation rejects ';' in tags, so a CMake list
                 // carries them losslessly, including tags that contain spaces.
                 push_cmake_arg(
                     args,

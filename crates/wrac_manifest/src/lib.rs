@@ -478,6 +478,14 @@ fn validate_auv2_tag(key: &str, tag: &str) -> Result<()> {
     if tag.contains(';') {
         return Err(format!("{key} must not contain ';': {tag}").into());
     }
+    // The build stores the list in a CMake bracket argument closed by "]==]".
+    if tag.contains("]==]") {
+        return Err(format!("{key} must not contain ']==]': {tag}").into());
+    }
+    // The build writes tags through JSON with only '\' and '"' escaped.
+    if tag.chars().any(char::is_control) {
+        return Err(format!("{key} must not contain control characters: {tag:?}").into());
+    }
     Ok(())
 }
 

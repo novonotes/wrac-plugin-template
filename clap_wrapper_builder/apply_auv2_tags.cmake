@@ -56,7 +56,8 @@ while(TRUE)
         if(NOT tags_json STREQUAL "")
             string(APPEND tags_json ",")
         endif()
-        # Custom tags are free text, so escape the characters JSON reserves.
+        # Custom tags are free text. Manifest validation rejects control
+        # characters, so '\' and '"' are the only characters JSON needs escaped.
         string(REPLACE "\\" "\\\\" tag "${tag}")
         string(REPLACE "\"" "\\\"" tag "${tag}")
         string(APPEND tags_json "\"${tag}\"")

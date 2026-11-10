@@ -440,7 +440,9 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
         foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
             foreach(AUV2_FIELD IN ITEMS AUV2_TYPE AUV2_SUBTYPE AUV2_TAGS)
                 clap_wrapper_builder_product_value(${PRODUCT_INDEX} ${AUV2_FIELD} AUV2_FIELD_VALUE)
-                if(NOT AUV2_FIELD_VALUE)
+                # Compare as a string: if(NOT ...) would treat a tag such as
+                # "Off" or "No" as false and reject it.
+                if(AUV2_FIELD_VALUE STREQUAL "")
                     message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_${AUV2_FIELD} must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
                 endif()
                 # A bracket argument keeps the tag list intact, including tags
@@ -461,6 +463,9 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
         # Always copy rather than copy_if_different: the bundle plist differs from
         # the generated one once its tags are replaced, and replacing them again
         # on a fresh copy keeps the step idempotent.
+        # A tag-only manifest edit still reaches this POST_BUILD step because
+        # wrac_build reruns on manifest changes, which rebuilds the plugin
+        # library and relinks this target.
         add_custom_command(TARGET ${AUV2_TARGET} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy "${AUV2_GENERATED_PLIST}" "${AUV2_BUNDLE_PLIST}"
             COMMAND ${CMAKE_COMMAND} "-DINFO_PLIST=${AUV2_BUNDLE_PLIST}" "-DTAGS_CONFIG=${AUV2_TAGS_CONFIG}"
