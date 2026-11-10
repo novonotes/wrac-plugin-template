@@ -56,6 +56,9 @@ while(TRUE)
         if(NOT tags_json STREQUAL "")
             string(APPEND tags_json ",")
         endif()
+        # Custom tags are free text, so escape the characters JSON reserves.
+        string(REPLACE "\\" "\\\\" tag "${tag}")
+        string(REPLACE "\"" "\\\"" tag "${tag}")
         string(APPEND tags_json "\"${tag}\"")
     endforeach()
     execute_process(

@@ -45,8 +45,8 @@ project(clap_wrapper_builder)
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_SUBTYPE
 #                                           Product AUv2 type/subtype codes.
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_TAGS
-#                                           CMake list of Apple-predefined
-#                                           AudioComponents tags.
+#                                           CMake list of AudioComponents
+#                                           tags.
 #                                           AUV2_TYPE/SUBTYPE/TAGS are required
 #                                           when building AUv2.
 #
@@ -431,10 +431,10 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
     endif()
 
     if(AUV2_PRODUCT_TARGETS)
-        # clap-wrapper derives AudioComponents tags from CLAP features, which are
-        # not Apple's predefined tags. Hosts only localize and group predefined
-        # tags as categories, so each product declares its tags explicitly and
-        # they replace the generated ones after the plist is copied.
+        # clap-wrapper derives AudioComponents tags from CLAP features, which
+        # rarely match the categories hosts show (Apple's predefined tags), so
+        # each product declares its tags explicitly and they replace the
+        # generated ones after the plist is copied.
         set(AUV2_TAGS_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/auv2_tags_config.cmake")
         set(AUV2_TAGS_CONFIG_CONTENT "set(AUV2_PRODUCT_COUNT ${CLAP_WRAPPER_BUILDER_PRODUCT_COUNT})\n")
         foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})

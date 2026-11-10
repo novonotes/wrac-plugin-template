@@ -111,8 +111,9 @@ pub struct PluginProduct {
     pub auv2_type: String,
     pub auv2_subtype: String,
     /// `AudioComponents` tags written to the AUv2 `Info.plist`. Required when `formats` contains
-    /// au. Only Apple's predefined tags are accepted because hosts localize and group those as
-    /// categories, while any other string is shown as an unlocalized user tag.
+    /// au. They replace the tags clap-wrapper would derive from `clap_features`. Hosts localize
+    /// Apple's predefined tags listed in `AudioToolbox/AudioComponent.h`; a custom tag is shown
+    /// as written unless the AU localizes it itself.
     pub auv2_tags: Option<Vec<String>>,
     pub aax_categories: Option<Vec<String>>,
     pub aax_product_id: Option<String>,
@@ -297,7 +298,7 @@ impl PluginManifest {
                 }
                 let mut seen_tags = HashSet::new();
                 for tag in auv2_tags {
-                    validate_auv2_tag(tag)?;
+                    validate_auv2_tag(&format!("{label}.plugins.auv2_tags"), tag)?;
                     if !seen_tags.insert(tag.as_str()) {
                         return Err(
                             format!("duplicate {label}.plugins.auv2_tags value: {tag}").into()
@@ -469,15 +470,15 @@ pub fn vst3_component_id_bytes(value: &str) -> Result<[u8; 16]> {
     Ok(bytes)
 }
 
-/// Accepts only the predefined tags listed in Apple's `AudioToolbox/AudioComponent.h`.
-pub fn validate_auv2_tag(tag: &str) -> Result<()> {
-    match tag {
-        "Equalizer" | "Dynamics" | "Distortion" | "Synthesizer" | "Effects" | "Filter"
-        | "Dynamics Processor" | "Delay" | "Reverb" | "Pitch" | "Panner" | "Imaging"
-        | "Sampler" | "Mixer" | "Format Converter" | "Time Effect" | "Output"
-        | "Offline Effect" | "Drums" | "Guitar" | "Vocal" | "Bass" | "MIDI" => Ok(()),
-        _ => Err(format!("unsupported AUv2 tag value: {tag}").into()),
+/// Rejects only tags the build cannot carry. Which tags to use is the product's choice, so
+/// custom tags are accepted as well as Apple's predefined ones.
+fn validate_auv2_tag(key: &str, tag: &str) -> Result<()> {
+    validate_required(key, tag)?;
+    // The build passes each product's tags to CMake as a list, where ';' is the separator.
+    if tag.contains(';') {
+        return Err(format!("{key} must not contain ';': {tag}").into());
     }
+    Ok(())
 }
 
 pub fn aax_category_bits(category: &str) -> Result<u32> {
