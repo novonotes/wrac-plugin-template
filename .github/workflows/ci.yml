@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
   pull_request:
   push:
+    # novonotes-internal receives merged changes ahead of main. Jobs limited to trusted
+    # triggers, such as AAX validation, would otherwise never run on those changes.
     branches:
       - main
       - develop
+      - novonotes-internal
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
