@@ -197,7 +197,7 @@ fn run_aax_validator_dtt_test(
         .arg("--disable_digitrace")
         .arg("--verbose")
         .arg("--logdir")
-        .arg(&log_dir)
+        .arg(log_dir)
         .arg("--arg")
         .arg(format!(
             "pi_path={}",
@@ -206,7 +206,7 @@ fn run_aax_validator_dtt_test(
         .arg("--arg")
         .arg(format!(
             "out_path={}",
-            aax_validator_path_arg(&test_dir, ctx.platform)
+            aax_validator_path_arg(test_dir, ctx.platform)
         ))
         .arg("--arg")
         .arg("result_format=json")
