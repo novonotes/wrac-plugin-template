@@ -81,48 +81,44 @@ fn run_aax_validator_dtt(
                 .join("dtt")
                 .join(format!("{:02}-{}", index + 1, test_id.replace('.', "_")));
         let log_dir = test_dir.join("logs");
-        fs::create_dir_all(&test_dir)?;
-        fs::create_dir_all(&log_dir)?;
-
-        // Avid ships DTT as the automatable scripting layer for DigiShell. Use the
-        // bundled ValidatorRunAllTests script instead of scripting DigiShell stdin
-        // directly because Windows hosted CI can launch DigiShell while dropping
-        // scripted stdin. The script expects a search directory for `findaaxplugins`;
-        // passing the bundle path itself gives a different result shape on some packages.
-        let child = Command::new(&dtt)
-            .arg("--script")
-            .arg("ValidatorRunAllTests")
-            .arg("--no_pref_delete")
-            .arg("--no_move_options")
-            .arg("--disable_digitrace")
-            .arg("--verbose")
-            .arg("--logdir")
-            .arg(&log_dir)
-            .arg("--arg")
-            .arg(format!(
-                "pi_path={}",
-                aax_validator_path_arg(aax_search_dir, ctx.platform)
-            ))
-            .arg("--arg")
-            .arg(format!(
-                "out_path={}",
-                aax_validator_path_arg(&test_dir, ctx.platform)
-            ))
-            .arg("--arg")
-            .arg("result_format=json")
-            .arg("--arg")
-            .arg(format!("test_id={test_id}"))
-            // DTT's Ruby scripts parse system profiler output that can contain non-ASCII
-            // text. Without a UTF-8 locale, Ruby reads it as US-ASCII and aborts before
-            // writing any result, which happens under CI services that leave LANG unset.
-            .env("LANG", "en_US.UTF-8")
-            .env("LC_ALL", "en_US.UTF-8")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .current_dir(dtt.parent().unwrap_or(&ctx.root))
-            .spawn()?;
-        let output =
-            wait_for_aax_validator_process(child, aax_validator_timeout(config.timeout_secs)?)?;
+        let mut attempt = 1;
+        let output = loop {
+            // Each attempt starts from empty directories so a retry cannot pick up
+            // result files or logs left by the failed attempt.
+            remove_if_exists(&test_dir)?;
+            fs::create_dir_all(&log_dir)?;
+            let output = run_aax_validator_dtt_test(
+                ctx,
+                &dtt,
+                aax_search_dir,
+                &test_dir,
+                &log_dir,
+                test_id,
+                config,
+            )?;
+            if attempt < AAX_VALIDATOR_DISH_LOAD_ATTEMPTS
+                && find_aax_validator_dtt_result(&test_dir, test_id).is_err()
+                && is_aax_validator_dish_load_failure(&output.stdout)
+            {
+                // DigiShell occasionally fails to load Avid's own `aaxval.dish` before
+                // any plug-in is opened. Observed on a self-hosted macOS runner right
+                // after a cancelled job had its validator processes killed, and not
+                // reproducible by killing the validator locally. The failure happens
+                // before the plug-in under test is touched, so retrying only this case
+                // cannot hide a plug-in defect.
+                print_aax_validator_output(&output.stdout, &output.stderr);
+                // Keep the retry visible in CI logs so its frequency can be tracked.
+                println!(
+                    "  AAX validator could not load aaxval.dish for {test_id}; retrying \
+                     (attempt {} of {AAX_VALIDATOR_DISH_LOAD_ATTEMPTS})",
+                    attempt + 1
+                );
+                attempt += 1;
+                thread::sleep(AAX_VALIDATOR_DISH_LOAD_RETRY_DELAY);
+                continue;
+            }
+            break output;
+        };
         let stdout_path = test_dir.join("dtt-stdout.log");
         let stderr_path = test_dir.join("dtt-stderr.log");
         fs::write(&stdout_path, &output.stdout)?;
@@ -164,6 +160,68 @@ fn run_aax_validator_dtt(
     }
 
     Ok(())
+}
+
+/// Total DTT runs allowed per test when DigiShell fails to load `aaxval.dish`.
+const AAX_VALIDATOR_DISH_LOAD_ATTEMPTS: u32 = 2;
+/// Pause before retrying so a transient system condition has time to clear.
+const AAX_VALIDATOR_DISH_LOAD_RETRY_DELAY: Duration = Duration::from_secs(5);
+
+/// Returns whether DTT stopped because DigiShell could not load `aaxval.dish`.
+///
+/// DTT reports this as a `load_dish` command failure whose exception names the dish.
+fn is_aax_validator_dish_load_failure(stdout: &[u8]) -> bool {
+    let stdout = String::from_utf8_lossy(stdout);
+    stdout.contains("DSH command 'load_dish' failed") && stdout.contains("\"aaxval.dish\"")
+}
+
+fn run_aax_validator_dtt_test(
+    ctx: &Context,
+    dtt: &Path,
+    aax_search_dir: &Path,
+    test_dir: &Path,
+    log_dir: &Path,
+    test_id: &str,
+    config: &AaxValidatorConfig,
+) -> Result<Output> {
+    // Avid ships DTT as the automatable scripting layer for DigiShell. Use the
+    // bundled ValidatorRunAllTests script instead of scripting DigiShell stdin
+    // directly because Windows hosted CI can launch DigiShell while dropping
+    // scripted stdin. The script expects a search directory for `findaaxplugins`;
+    // passing the bundle path itself gives a different result shape on some packages.
+    let child = Command::new(dtt)
+        .arg("--script")
+        .arg("ValidatorRunAllTests")
+        .arg("--no_pref_delete")
+        .arg("--no_move_options")
+        .arg("--disable_digitrace")
+        .arg("--verbose")
+        .arg("--logdir")
+        .arg(&log_dir)
+        .arg("--arg")
+        .arg(format!(
+            "pi_path={}",
+            aax_validator_path_arg(aax_search_dir, ctx.platform)
+        ))
+        .arg("--arg")
+        .arg(format!(
+            "out_path={}",
+            aax_validator_path_arg(&test_dir, ctx.platform)
+        ))
+        .arg("--arg")
+        .arg("result_format=json")
+        .arg("--arg")
+        .arg(format!("test_id={test_id}"))
+        // DTT's Ruby scripts parse system profiler output that can contain non-ASCII
+        // text. Without a UTF-8 locale, Ruby reads it as US-ASCII and aborts before
+        // writing any result, which happens under CI services that leave LANG unset.
+        .env("LANG", "en_US.UTF-8")
+        .env("LC_ALL", "en_US.UTF-8")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .current_dir(dtt.parent().unwrap_or(&ctx.root))
+        .spawn()?;
+    wait_for_aax_validator_process(child, aax_validator_timeout(config.timeout_secs)?)
 }
 
 fn find_aax_validator_dtt_result(test_dir: &Path, test_id: &str) -> Result<PathBuf> {
@@ -591,4 +649,24 @@ fn aax_validator_dtt_runner(root: &Path, platform: Platform) -> Result<PathBuf> 
         root.display()
     )
     .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_aax_validator_dish_load_failure;
+
+    // The retry condition can only be observed on a flaky runner, so pin it to the
+    // DTT output recorded there and make sure plug-in failures never match it.
+    #[test]
+    fn dish_load_failure_matches_only_aaxval_dish_load_errors() {
+        let dish_load_failure =
+            b"FAILED: ValidatorRunAllTests - DSH command 'load_dish' failed with exception:\n\
+            ---\n\
+            exception_message: ' (-23) while loading \"aaxval.dish\"'\n";
+        assert!(is_aax_validator_dish_load_failure(dish_load_failure));
+
+        let plugin_failure =
+            b"FAILED: ValidatorRunAllTests - DSH command 'runtest' failed with exception:\n";
+        assert!(!is_aax_validator_dish_load_failure(plugin_failure));
+    }
 }
