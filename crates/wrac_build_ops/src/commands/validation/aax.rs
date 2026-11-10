@@ -5,9 +5,10 @@
 
 use std::env;
 use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -305,26 +306,60 @@ fn assert_aax_validator_results(
 }
 
 fn wait_for_aax_validator_process(mut child: Child, timeout: Duration) -> Result<Output> {
+    // Drain stdout/stderr while DTT runs instead of after it exits. With `--verbose`,
+    // tests such as `test.parameters` can print more than the OS pipe buffer holds
+    // (64 KiB on macOS); reading only after exit leaves DTT blocked on a write, so a
+    // passing test would end as a timeout.
+    let stdout_reader = spawn_aax_validator_pipe_reader(child.stdout.take());
+    let stderr_reader = spawn_aax_validator_pipe_reader(child.stderr.take());
     let started_at = Instant::now();
-    loop {
-        if child.try_wait()?.is_some() {
-            return Ok(child.wait_with_output()?);
+    let (status, timed_out) = loop {
+        if let Some(status) = child.try_wait()? {
+            break (status, false);
         }
         if started_at.elapsed() >= timeout {
-            // Keep timeouts outside `run_with_language()` so failed DTT processes still have their
-            // stdout/stderr printed. That output is usually the only clue when the
-            // validator hangs while loading a bundle.
             child.kill()?;
-            let output = child.wait_with_output()?;
-            print_aax_validator_output(&output.stdout, &output.stderr);
-            return Err(format!(
-                "AAX validator process timed out after {} seconds",
-                timeout.as_secs()
-            )
-            .into());
+            break (child.wait()?, true);
         }
         thread::sleep(Duration::from_secs(1));
+    };
+    let output = Output {
+        status,
+        stdout: join_aax_validator_pipe_reader(stdout_reader)?,
+        stderr: join_aax_validator_pipe_reader(stderr_reader)?,
+    };
+    if timed_out {
+        // Keep timeouts outside `run_with_language()` so failed DTT processes still have their
+        // stdout/stderr printed. That output is usually the only clue when the
+        // validator hangs while loading a bundle.
+        print_aax_validator_output(&output.stdout, &output.stderr);
+        return Err(format!(
+            "AAX validator process timed out after {} seconds",
+            timeout.as_secs()
+        )
+        .into());
     }
+    Ok(output)
+}
+
+fn spawn_aax_validator_pipe_reader<R>(pipe: Option<R>) -> JoinHandle<io::Result<Vec<u8>>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = pipe {
+            pipe.read_to_end(&mut buffer)?;
+        }
+        Ok(buffer)
+    })
+}
+
+fn join_aax_validator_pipe_reader(reader: JoinHandle<io::Result<Vec<u8>>>) -> Result<Vec<u8>> {
+    let buffer = reader
+        .join()
+        .map_err(|_| "AAX validator output reader thread panicked")??;
+    Ok(buffer)
 }
 
 fn aax_validator_timeout(default_seconds: u64) -> Result<Duration> {
