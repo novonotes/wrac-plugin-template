@@ -434,7 +434,7 @@ fn configure_wrapper_with_options(
     );
     push_cmake_arg(&mut args, "-DCLAP_WRAPPER_DOWNLOAD_DEPENDENCIES=OFF");
     push_cmake_arg(&mut args, "-DCLAP_WRAPPER_CXX_STANDARD=23");
-    add_wrapper_product_args(ctx, &mut args, build);
+    add_wrapper_product_args(ctx, &mut args, build)?;
 
     match build {
         WrapperBuild::Plugins { vst3, au } => {
@@ -760,7 +760,11 @@ fn write_cmake_configure_stamp(
     Ok(())
 }
 
-fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: WrapperBuild) {
+fn add_wrapper_product_args(
+    ctx: &Context,
+    args: &mut Vec<OsString>,
+    build: WrapperBuild,
+) -> Result<()> {
     push_cmake_arg(
         args,
         format!(
@@ -772,8 +776,8 @@ fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: Wrap
         match build {
             WrapperBuild::Plugins { au: true, .. } => {
                 // CLAP/VST3/AAX read product descriptors from the Rust plugin factory.
-                // AUv2 cannot, so only AUv2 builds need per-product output and
-                // four-character AudioComponent identity values from xtask.
+                // AUv2 cannot, so only AUv2 builds need per-product output,
+                // four-character AudioComponent identity values, and tags from xtask.
                 push_cmake_arg(
                     args,
                     format!(
@@ -793,6 +797,21 @@ fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: Wrap
                     format!(
                         "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_SUBTYPE={}",
                         plugin.auv2_subtype
+                    ),
+                );
+                let tags = plugin.auv2_tags.as_ref().ok_or_else(|| {
+                    format!(
+                        "auv2_tags is required to build AUv2 for {}",
+                        plugin.plugin_name
+                    )
+                })?;
+                // Apple's tags are fixed strings without ';', so a CMake list
+                // carries them losslessly, including tags that contain spaces.
+                push_cmake_arg(
+                    args,
+                    format!(
+                        "-DCLAP_WRAPPER_BUILDER_PRODUCT_{index}_AUV2_TAGS={}",
+                        tags.join(";")
                     ),
                 );
             }
@@ -832,4 +851,5 @@ fn add_wrapper_product_args(ctx: &Context, args: &mut Vec<OsString>, build: Wrap
             WrapperBuild::Plugins { au: false, .. } | WrapperBuild::Aax => {}
         }
     }
+    Ok(())
 }

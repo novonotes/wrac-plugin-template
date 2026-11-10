@@ -110,6 +110,10 @@ pub struct PluginProduct {
     pub standalone_audio_input: bool,
     pub auv2_type: String,
     pub auv2_subtype: String,
+    /// `AudioComponents` tags written to the AUv2 `Info.plist`. Required when `formats` contains
+    /// au. Only Apple's predefined tags are accepted because hosts localize and group those as
+    /// categories, while any other string is shown as an unlocalized user tag.
+    pub auv2_tags: Option<Vec<String>>,
     pub aax_categories: Option<Vec<String>>,
     pub aax_product_id: Option<String>,
     #[serde(default)]
@@ -239,6 +243,7 @@ impl PluginManifest {
                 .into());
             }
         }
+        let supports_au = formats.contains(&PluginFormat::Au);
         let supports_aax = formats.contains(&PluginFormat::Aax);
         if supports_aax {
             let Some(aax_manufacturer_id) = self.aax_manufacturer_id.as_ref() else {
@@ -280,6 +285,26 @@ impl PluginManifest {
                 &format!("{label}.plugins.auv2_subtype"),
                 &plugin.auv2_subtype,
             )?;
+            if supports_au {
+                let Some(auv2_tags) = plugin.auv2_tags.as_ref() else {
+                    return Err(format!(
+                        "{label}.plugins.auv2_tags is required when formats contains au"
+                    )
+                    .into());
+                };
+                if auv2_tags.is_empty() {
+                    return Err(format!("{label}.plugins.auv2_tags must not be empty").into());
+                }
+                let mut seen_tags = HashSet::new();
+                for tag in auv2_tags {
+                    validate_auv2_tag(tag)?;
+                    if !seen_tags.insert(tag.as_str()) {
+                        return Err(
+                            format!("duplicate {label}.plugins.auv2_tags value: {tag}").into()
+                        );
+                    }
+                }
+            }
             if supports_aax {
                 let Some(aax_categories) = plugin.aax_categories.as_ref() else {
                     return Err(format!(
@@ -442,6 +467,17 @@ pub fn vst3_component_id_bytes(value: &str) -> Result<[u8; 16]> {
     bytes.swap(4, 5);
     bytes.swap(6, 7);
     Ok(bytes)
+}
+
+/// Accepts only the predefined tags listed in Apple's `AudioToolbox/AudioComponent.h`.
+pub fn validate_auv2_tag(tag: &str) -> Result<()> {
+    match tag {
+        "Equalizer" | "Dynamics" | "Distortion" | "Synthesizer" | "Effects" | "Filter"
+        | "Dynamics Processor" | "Delay" | "Reverb" | "Pitch" | "Panner" | "Imaging"
+        | "Sampler" | "Mixer" | "Format Converter" | "Time Effect" | "Output"
+        | "Offline Effect" | "Drums" | "Guitar" | "Vocal" | "Bass" | "MIDI" => Ok(()),
+        _ => Err(format!("unsupported AUv2 tag value: {tag}").into()),
+    }
 }
 
 pub fn aax_category_bits(category: &str) -> Result<u32> {

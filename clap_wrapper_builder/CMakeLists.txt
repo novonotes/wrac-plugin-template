@@ -44,6 +44,11 @@ project(clap_wrapper_builder)
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_TYPE
 #     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_SUBTYPE
 #                                           Product AUv2 type/subtype codes.
+#     CLAP_WRAPPER_BUILDER_PRODUCT_<N>_AUV2_TAGS
+#                                           CMake list of Apple-predefined
+#                                           AudioComponents tags.
+#                                           AUV2_TYPE/SUBTYPE/TAGS are required
+#                                           when building AUv2.
 #
 #   Format toggles
 #     CLAP_WRAPPER_BUILDER_BUILD_VST3        Default ON.
@@ -425,13 +430,41 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
         endif()
     endif()
 
+    if(AUV2_PRODUCT_TARGETS)
+        # clap-wrapper derives AudioComponents tags from CLAP features, which are
+        # not Apple's predefined tags. Hosts only localize and group predefined
+        # tags as categories, so each product declares its tags explicitly and
+        # they replace the generated ones after the plist is copied.
+        set(AUV2_TAGS_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/auv2_tags_config.cmake")
+        set(AUV2_TAGS_CONFIG_CONTENT "set(AUV2_PRODUCT_COUNT ${CLAP_WRAPPER_BUILDER_PRODUCT_COUNT})\n")
+        foreach(PRODUCT_INDEX RANGE 0 ${PRODUCT_LAST_INDEX})
+            foreach(AUV2_FIELD IN ITEMS AUV2_TYPE AUV2_SUBTYPE AUV2_TAGS)
+                clap_wrapper_builder_product_value(${PRODUCT_INDEX} ${AUV2_FIELD} AUV2_FIELD_VALUE)
+                if(NOT AUV2_FIELD_VALUE)
+                    message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_PRODUCT_${PRODUCT_INDEX}_${AUV2_FIELD} must be specified when CLAP_WRAPPER_BUILDER_BUILD_AUV2=ON")
+                endif()
+                # A bracket argument keeps the tag list intact, including tags
+                # that contain spaces such as "Dynamics Processor".
+                string(APPEND AUV2_TAGS_CONFIG_CONTENT
+                    "set(AUV2_PRODUCT_${PRODUCT_INDEX}_${AUV2_FIELD} [==[${AUV2_FIELD_VALUE}]==])\n")
+            endforeach()
+        endforeach()
+        file(WRITE "${AUV2_TAGS_CONFIG}" "${AUV2_TAGS_CONFIG_CONTENT}")
+    endif()
+
     foreach(AUV2_TARGET IN LISTS AUV2_PRODUCT_TARGETS)
         get_target_property(AUV2_OUTPUT_NAME ${AUV2_TARGET} LIBRARY_OUTPUT_NAME)
         set(AUV2_GENERATED_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${AUV2_TARGET}-build-helper-output/auv2_Info.plist")
+        set(AUV2_BUNDLE_PLIST "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>/Contents/Info.plist")
         # clap-wrapper's AUv2 helper generates the AudioComponents metadata that
         # auval needs; copy it back before staging/signing the component bundle.
+        # Always copy rather than copy_if_different: the bundle plist differs from
+        # the generated one once its tags are replaced, and replacing them again
+        # on a fresh copy keeps the step idempotent.
         add_custom_command(TARGET ${AUV2_TARGET} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${AUV2_GENERATED_PLIST}" "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>/Contents/Info.plist"
+            COMMAND ${CMAKE_COMMAND} -E copy "${AUV2_GENERATED_PLIST}" "${AUV2_BUNDLE_PLIST}"
+            COMMAND ${CMAKE_COMMAND} "-DINFO_PLIST=${AUV2_BUNDLE_PLIST}" "-DTAGS_CONFIG=${AUV2_TAGS_CONFIG}"
+                -P "${CMAKE_CURRENT_LIST_DIR}/apply_auv2_tags.cmake"
             COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
             COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
             VERBATIM
