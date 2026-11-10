@@ -548,6 +548,7 @@ vst3_component_id = "822011ca-37ec-5cef-92d7-ec7e67207195"
 standalone_name = "WRAC Gain Standalone"
 auv2_type = "aufx"
 auv2_subtype = "WtGn"
+auv2_tags = ["Effects"]
 aax_categories = ["effect"]
 aax_product_id = "WtGn"
 aax_sidechain_input = "first-auxiliary"
@@ -593,5 +594,6 @@ vst3_component_id = "822011ca-37ec-5cef-92d7-ec7e67207195"
 standalone_name = "WRAC Gain Standalone"
 auv2_type = "aufx"
 auv2_subtype = "WtGn"
+auv2_tags = ["Effects"]
 "#;
 }

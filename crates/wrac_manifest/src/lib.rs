@@ -110,6 +110,11 @@ pub struct PluginProduct {
     pub standalone_audio_input: bool,
     pub auv2_type: String,
     pub auv2_subtype: String,
+    /// `AudioComponents` tags written to the AUv2 `Info.plist`. Required when `formats` contains
+    /// au. They replace the tags clap-wrapper would derive from `clap_features`. Hosts localize
+    /// Apple's predefined tags listed in `AudioToolbox/AudioComponent.h`; a custom tag is shown
+    /// as written unless the AU localizes it itself.
+    pub auv2_tags: Option<Vec<String>>,
     pub aax_categories: Option<Vec<String>>,
     pub aax_product_id: Option<String>,
     #[serde(default)]
@@ -239,6 +244,7 @@ impl PluginManifest {
                 .into());
             }
         }
+        let supports_au = formats.contains(&PluginFormat::Au);
         let supports_aax = formats.contains(&PluginFormat::Aax);
         if supports_aax {
             let Some(aax_manufacturer_id) = self.aax_manufacturer_id.as_ref() else {
@@ -280,6 +286,26 @@ impl PluginManifest {
                 &format!("{label}.plugins.auv2_subtype"),
                 &plugin.auv2_subtype,
             )?;
+            if supports_au {
+                let Some(auv2_tags) = plugin.auv2_tags.as_ref() else {
+                    return Err(format!(
+                        "{label}.plugins.auv2_tags is required when formats contains au"
+                    )
+                    .into());
+                };
+                if auv2_tags.is_empty() {
+                    return Err(format!("{label}.plugins.auv2_tags must not be empty").into());
+                }
+                let mut seen_tags = HashSet::new();
+                for tag in auv2_tags {
+                    validate_auv2_tag(&format!("{label}.plugins.auv2_tags"), tag)?;
+                    if !seen_tags.insert(tag.as_str()) {
+                        return Err(
+                            format!("duplicate {label}.plugins.auv2_tags value: {tag}").into()
+                        );
+                    }
+                }
+            }
             if supports_aax {
                 let Some(aax_categories) = plugin.aax_categories.as_ref() else {
                     return Err(format!(
@@ -442,6 +468,25 @@ pub fn vst3_component_id_bytes(value: &str) -> Result<[u8; 16]> {
     bytes.swap(4, 5);
     bytes.swap(6, 7);
     Ok(bytes)
+}
+
+/// Rejects only tags the build cannot carry. Which tags to use is the product's choice, so
+/// custom tags are accepted as well as Apple's predefined ones.
+fn validate_auv2_tag(key: &str, tag: &str) -> Result<()> {
+    validate_required(key, tag)?;
+    // The build passes each product's tags to CMake as a list, where ';' is the separator.
+    if tag.contains(';') {
+        return Err(format!("{key} must not contain ';': {tag}").into());
+    }
+    // The build stores the list in a CMake bracket argument closed by "]==]".
+    if tag.contains("]==]") {
+        return Err(format!("{key} must not contain ']==]': {tag}").into());
+    }
+    // The build writes tags through JSON with only '\' and '"' escaped.
+    if tag.chars().any(char::is_control) {
+        return Err(format!("{key} must not contain control characters: {tag:?}").into());
+    }
+    Ok(())
 }
 
 pub fn aax_category_bits(category: &str) -> Result<u32> {
