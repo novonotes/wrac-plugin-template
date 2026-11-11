@@ -39,7 +39,17 @@ pub struct PluginManifest {
     pub auv2_manufacturer_code: String,
     pub aax_manufacturer_id: Option<String>,
     pub bundle_name: String,
-    pub bundle_identifier: String,
+    /// macOS bundle ID of the CLAP bundle, used as is.
+    ///
+    /// macOS installers match installed bundles by ID, so keep it unchanged after release.
+    pub clap_bundle_identifier: String,
+    /// macOS bundle ID prefix of the VST3, AU, AAX, and standalone bundles built by
+    /// clap-wrapper. The wrapper appends a format-specific suffix such as `.vst3`.
+    ///
+    /// Required rather than derived from `bundle_name`, because a derived ID would change
+    /// with a rename and make installers leave stale files in signed bundles. Keep it
+    /// unchanged after release.
+    pub wrapper_bundle_identifier: String,
     pub homepage_url: String,
     pub manual_url: String,
     pub support_url: String,
@@ -185,7 +195,8 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
         auv2_manufacturer_code: dedicated.bundle.auv2_manufacturer_code,
         aax_manufacturer_id: dedicated.bundle.aax_manufacturer_id,
         bundle_name: dedicated.bundle.bundle_name,
-        bundle_identifier: dedicated.bundle.bundle_identifier,
+        clap_bundle_identifier: dedicated.bundle.clap_bundle_identifier,
+        wrapper_bundle_identifier: dedicated.bundle.wrapper_bundle_identifier,
         homepage_url: dedicated.bundle.homepage_url,
         manual_url: dedicated.bundle.manual_url,
         support_url: dedicated.bundle.support_url,
@@ -223,8 +234,12 @@ impl PluginManifest {
         )?;
         validate_required(&format!("{label}.bundle_name"), &self.bundle_name)?;
         validate_required(
-            &format!("{label}.bundle_identifier"),
-            &self.bundle_identifier,
+            &format!("{label}.clap_bundle_identifier"),
+            &self.clap_bundle_identifier,
+        )?;
+        validate_required(
+            &format!("{label}.wrapper_bundle_identifier"),
+            &self.wrapper_bundle_identifier,
         )?;
         validate_required(&format!("{label}.homepage_url"), &self.homepage_url)?;
         validate_required(&format!("{label}.manual_url"), &self.manual_url)?;
@@ -548,7 +563,8 @@ struct DedicatedBundle {
     auv2_manufacturer_code: String,
     aax_manufacturer_id: Option<String>,
     bundle_name: String,
-    bundle_identifier: String,
+    clap_bundle_identifier: String,
+    wrapper_bundle_identifier: String,
     homepage_url: String,
     manual_url: String,
     support_url: String,
@@ -607,7 +623,8 @@ release_label = "preview"
 company_name = "Example"
 auv2_manufacturer_code = "ExCo"
 bundle_name = "Test Plugin"
-bundle_identifier = "com.example.test-plugin"
+clap_bundle_identifier = "com.example.test-plugin"
+wrapper_bundle_identifier = "com.example.test-plugin"
 homepage_url = "https://example.com"
 manual_url = "https://example.com/manual"
 support_url = "https://example.com/support"

@@ -12,7 +12,12 @@ company_name = "Your Company"
 auv2_manufacturer_code = "YrCo"
 aax_manufacturer_id = "YrCo"
 bundle_name = "WRAC Gain"
-bundle_identifier = "com.your-company.wrac-gain"
+# macOS bundle IDs. Installers match installed bundles by these IDs, so keep
+# them unchanged after release even if bundle_name changes.
+# The CLAP bundle uses clap_bundle_identifier as is. VST3, AU, AAX, and the
+# standalone app append format suffixes to wrapper_bundle_identifier.
+clap_bundle_identifier = "com.your-company.wrac-gain"
+wrapper_bundle_identifier = "com.your-company.wrac-gain"
 homepage_url = "https://example.com/wrac-gain"
 manual_url = "https://example.com/wrac-gain/manual"
 support_url = "https://example.com/support"

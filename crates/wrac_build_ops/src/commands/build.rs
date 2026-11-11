@@ -412,6 +412,13 @@ fn configure_wrapper_with_options(
     push_cmake_arg(
         &mut args,
         format!(
+            "-DCLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER={}",
+            ctx.metadata.wrapper_bundle_identifier
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!(
             "-DCLAP_WRAPPER_BUILDER_TARGET_NAME={}_{}",
             ctx.metadata.package_name,
             build.purpose().replace('-', "_")
