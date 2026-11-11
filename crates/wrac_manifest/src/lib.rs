@@ -40,6 +40,9 @@ pub struct PluginManifest {
     pub aax_manufacturer_id: Option<String>,
     pub bundle_name: String,
     pub bundle_identifier: String,
+    /// Stable wrapper bundle ID prefix; format suffixes are appended by the wrapper.
+    /// Explicit identity prevents display-name changes from breaking installed upgrades.
+    pub wrapper_bundle_identifier: Option<String>,
     pub homepage_url: String,
     pub manual_url: String,
     pub support_url: String,
@@ -186,6 +189,7 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
         aax_manufacturer_id: dedicated.bundle.aax_manufacturer_id,
         bundle_name: dedicated.bundle.bundle_name,
         bundle_identifier: dedicated.bundle.bundle_identifier,
+        wrapper_bundle_identifier: dedicated.bundle.wrapper_bundle_identifier,
         homepage_url: dedicated.bundle.homepage_url,
         manual_url: dedicated.bundle.manual_url,
         support_url: dedicated.bundle.support_url,
@@ -226,6 +230,9 @@ impl PluginManifest {
             &format!("{label}.bundle_identifier"),
             &self.bundle_identifier,
         )?;
+        if let Some(identifier) = &self.wrapper_bundle_identifier {
+            validate_required(&format!("{label}.wrapper_bundle_identifier"), identifier)?;
+        }
         validate_required(&format!("{label}.homepage_url"), &self.homepage_url)?;
         validate_required(&format!("{label}.manual_url"), &self.manual_url)?;
         validate_required(&format!("{label}.support_url"), &self.support_url)?;
@@ -549,6 +556,7 @@ struct DedicatedBundle {
     aax_manufacturer_id: Option<String>,
     bundle_name: String,
     bundle_identifier: String,
+    wrapper_bundle_identifier: Option<String>,
     homepage_url: String,
     manual_url: String,
     support_url: String,

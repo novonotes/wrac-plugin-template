@@ -409,6 +409,17 @@ fn configure_wrapper_with_options(
             ctx.metadata.bundle_name
         ),
     );
+    // Always pass the value so a reused CMake cache cannot retain another identity.
+    push_cmake_arg(
+        &mut args,
+        format!(
+            "-DCLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER={}",
+            ctx.metadata
+                .wrapper_bundle_identifier
+                .as_deref()
+                .unwrap_or("")
+        ),
+    );
     push_cmake_arg(
         &mut args,
         format!(

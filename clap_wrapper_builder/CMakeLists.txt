@@ -23,6 +23,9 @@ project(clap_wrapper_builder)
 #                                           to the derived plugin name.
 #     CLAP_WRAPPER_BUILDER_OUTPUT_NAME      Display/bundle name. Overrides the
 #                                           name derived from TARGET_LIB.
+#     CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER Stable bundle ID prefix. Format suffixes
+#                                           are appended. Defaults to the derived
+#                                           org.wrapper.<name> identifier.
 #     CLAP_WRAPPER_BUILDER_BUNDLE_VERSION   Version written into bundles.
 #                                           Default "1.0.0".
 #     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
@@ -236,7 +239,12 @@ if(CLAP_WRAPPER_BUILDER_BUILD_AAX)
 endif()
 
 # Plugin bundle metadata
-set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
+# A released bundle identity must survive output/display-name changes.
+if(CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER)
+    set(BUNDLE_ID "${CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER}")
+else()
+    set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
+endif()
 set(BUNDLE_VERSION "${CLAP_WRAPPER_BUILDER_BUNDLE_VERSION}")
 
 # Create bundle-level plugins using make_clapfirst_plugins. CLAP and VST3 can
