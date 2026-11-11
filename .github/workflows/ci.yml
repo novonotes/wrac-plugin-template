@@ -242,8 +242,10 @@ jobs:
             validator_archive="target/tools/aax-ci/aax-validator-dsh.zip"
           fi
 
-          curl --fail --location --retry 3 --output target/tools/aax-ci/aax-sdk.zip "$AAX_SDK_ARCHIVE_URL"
-          curl --fail --location --retry 3 --output "$validator_archive" "$validator_url"
+          # `--retry` alone skips transfer errors such as a reset HTTP/2 stream (curl exit 92),
+          # which has interrupted these large downloads on hosted runners.
+          curl --fail --location --retry 3 --retry-all-errors --output target/tools/aax-ci/aax-sdk.zip "$AAX_SDK_ARCHIVE_URL"
+          curl --fail --location --retry 3 --retry-all-errors --output "$validator_archive" "$validator_url"
 
           {
             echo "AAX_SDK_ARCHIVE=target/tools/aax-ci/aax-sdk.zip"
