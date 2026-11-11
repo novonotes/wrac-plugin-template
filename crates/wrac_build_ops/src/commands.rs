@@ -473,7 +473,7 @@ fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     // A CLAP bundle has one CFBundleIdentifier even when the factory exposes
     // multiple products. Keep macOS bundle identity separate from product IDs so
     // adding another product does not silently change the installed bundle.
-    let bundle_identifier = &metadata.bundle_identifier;
+    let bundle_identifier = &metadata.clap_bundle_identifier;
     let version = &metadata.version;
     let copyright = &metadata.copyright;
     format!(

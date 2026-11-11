@@ -17,15 +17,17 @@ project(clap_wrapper_builder)
 #                                       Plugin name is derived from its file
 #                                       name (leading "lib" stripped) unless
 #                                       overridden below.
+#     CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER
+#                                       macOS bundle ID prefix for VST3, AUv2,
+#                                       AAX, and Standalone. Format suffixes
+#                                       are appended. Required so the released
+#                                       identity never follows name changes.
 #
 #   Naming / metadata (optional)
 #     CLAP_WRAPPER_BUILDER_TARGET_NAME      Internal CMake target name. Defaults
 #                                           to the derived plugin name.
 #     CLAP_WRAPPER_BUILDER_OUTPUT_NAME      Display/bundle name. Overrides the
 #                                           name derived from TARGET_LIB.
-#     CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER Stable bundle ID prefix. Format suffixes
-#                                           are appended. Defaults to the derived
-#                                           org.wrapper.<name> identifier.
 #     CLAP_WRAPPER_BUILDER_BUNDLE_VERSION   Version written into bundles.
 #                                           Default "1.0.0".
 #     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
@@ -91,6 +93,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(CLAP_WRAPPER_BUILDER_TARGET_LIB "" CACHE FILEPATH "Path to the static library to wrap")
 set(CLAP_WRAPPER_BUILDER_TARGET_NAME "" CACHE STRING "Internal CMake target name for the wrapper")
 set(CLAP_WRAPPER_BUILDER_OUTPUT_NAME "" CACHE STRING "Output plugin display/bundle name")
+set(CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER "" CACHE STRING "macOS bundle ID prefix for wrapper formats")
 set(CLAP_WRAPPER_BUILDER_STAGE_DIR "" CACHE PATH "Directory where built artifacts are staged")
 set(CLAP_WRAPPER_BUILDER_BUNDLE_VERSION "1.0.0" CACHE STRING "Version written into wrapped plugin bundles")
 set(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT "1" CACHE STRING "Number of plugin products exposed by the wrapped library")
@@ -112,6 +115,10 @@ if(NOT CLAP_WRAPPER_BUILDER_TARGET_LIB)
     message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_TARGET_LIB must be specified. Use: -DCLAP_WRAPPER_BUILDER_TARGET_LIB=/path/to/your/plugin.a")
 endif()
 
+if(NOT CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER)
+    message(FATAL_ERROR "CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER must be specified. Use: -DCLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER=com.example.my-plugin")
+endif()
+
 if(NOT EXISTS "${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
     message(FATAL_ERROR "Static library not found: ${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
 endif()
@@ -123,7 +130,6 @@ if(CLAP_WRAPPER_BUILDER_OUTPUT_NAME)
     set(PLUGIN_NAME "${CLAP_WRAPPER_BUILDER_OUTPUT_NAME}")
 endif()
 string(REGEX REPLACE "[^A-Za-z0-9_]" "_" PLUGIN_NAME_SAFE "${PLUGIN_NAME}")
-string(REPLACE "_" "-" PLUGIN_NAME_BUNDLE ${PLUGIN_NAME_SAFE})
 if(CLAP_WRAPPER_BUILDER_TARGET_NAME)
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" PLUGIN_NAME_SAFE "${CLAP_WRAPPER_BUILDER_TARGET_NAME}")
 endif()
@@ -239,12 +245,9 @@ if(CLAP_WRAPPER_BUILDER_BUILD_AAX)
 endif()
 
 # Plugin bundle metadata
-# A released bundle identity must survive output/display-name changes.
-if(CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER)
-    set(BUNDLE_ID "${CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER}")
-else()
-    set(BUNDLE_ID "org.wrapper.${PLUGIN_NAME_BUNDLE}")
-endif()
+# Installers match bundles by ID, so the ID is taken as given instead of being
+# derived from the display name, which may change after release.
+set(BUNDLE_ID "${CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER}")
 set(BUNDLE_VERSION "${CLAP_WRAPPER_BUILDER_BUNDLE_VERSION}")
 
 # Create bundle-level plugins using make_clapfirst_plugins. CLAP and VST3 can
