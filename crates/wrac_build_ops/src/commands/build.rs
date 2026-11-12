@@ -255,15 +255,16 @@ pub fn package_clap(ctx: &Context, profile: BuildProfile) -> Result<()> {
                 macos_clap_info_plist(&ctx.metadata),
             )?;
             fs::write(contents.join("PkgInfo"), "BNDL????")?;
-            fs::copy(
-                ctx.dynamic_library(profile),
-                macos.join(&ctx.metadata.bundle_name),
-            )?;
+            let executable = macos.join(&ctx.metadata.macos_executable_name);
+            fs::copy(ctx.dynamic_library(profile), &executable)?;
             run_with_language(
                 Command::new("install_name_tool")
                     .arg("-id")
-                    .arg(format!("@loader_path/{}", ctx.metadata.bundle_name))
-                    .arg(macos.join(&ctx.metadata.bundle_name))
+                    .arg(format!(
+                        "@loader_path/{}",
+                        ctx.metadata.macos_executable_name
+                    ))
+                    .arg(&executable)
                     .current_dir(&ctx.root),
                 ctx.output_language,
             )?;
@@ -414,6 +415,13 @@ fn configure_wrapper_with_options(
         format!(
             "-DCLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER={}",
             ctx.metadata.wrapper_bundle_identifier
+        ),
+    );
+    push_cmake_arg(
+        &mut args,
+        format!(
+            "-DCLAP_WRAPPER_BUILDER_MACOS_EXECUTABLE_NAME={}",
+            ctx.metadata.macos_executable_name
         ),
     );
     push_cmake_arg(

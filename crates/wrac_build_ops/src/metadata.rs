@@ -17,6 +17,9 @@ pub(crate) struct PluginMetadata {
     pub(crate) bundle_name: String,
     pub(crate) clap_bundle_identifier: String,
     pub(crate) wrapper_bundle_identifier: String,
+    /// Executable file name inside every macOS plugin bundle, already defaulted to
+    /// `bundle_name`. See [`wrac_manifest::PluginManifest::macos_executable_name`].
+    pub(crate) macos_executable_name: String,
     pub(crate) homepage_url: String,
     pub(crate) manual_url: String,
     pub(crate) support_url: String,
@@ -121,6 +124,9 @@ impl PluginMetadata {
             company_name: manifest.company_name,
             auv2_manufacturer_code: manifest.auv2_manufacturer_code,
             aax_manufacturer_id: manifest.aax_manufacturer_id,
+            macos_executable_name: manifest
+                .macos_executable_name
+                .unwrap_or_else(|| manifest.bundle_name.clone()),
             bundle_name: manifest.bundle_name,
             clap_bundle_identifier: manifest.clap_bundle_identifier,
             wrapper_bundle_identifier: manifest.wrapper_bundle_identifier,
@@ -184,6 +190,7 @@ mod tests {
             bundle_name: "Test Plugin".to_string(),
             clap_bundle_identifier: "com.example.test-plugin".to_string(),
             wrapper_bundle_identifier: "com.example.test-plugin".to_string(),
+            macos_executable_name: "Test Plugin".to_string(),
             homepage_url: "https://example.com".to_string(),
             manual_url: "https://example.com/manual".to_string(),
             support_url: "https://example.com/support".to_string(),

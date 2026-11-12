@@ -146,7 +146,7 @@ fn build_and_verify_wrappers(
             WrapperTarget::Standalone => unreachable!(),
         }
         .join("Contents/MacOS")
-        .join(&ctx.metadata.bundle_name);
+        .join(&ctx.metadata.macos_executable_name);
         verify_universal_binary(ctx, &executable)?;
     }
     Ok(())

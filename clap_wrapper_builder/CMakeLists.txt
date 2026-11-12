@@ -28,6 +28,11 @@ project(clap_wrapper_builder)
 #                                           to the derived plugin name.
 #     CLAP_WRAPPER_BUILDER_OUTPUT_NAME      Display/bundle name. Overrides the
 #                                           name derived from TARGET_LIB.
+#     CLAP_WRAPPER_BUILDER_MACOS_EXECUTABLE_NAME
+#                                           Executable file name inside the
+#                                           macOS VST3/AUv2/AAX bundles.
+#                                           Defaults to the plugin name. Bundle
+#                                           folders keep the plugin name.
 #     CLAP_WRAPPER_BUILDER_BUNDLE_VERSION   Version written into bundles.
 #                                           Default "1.0.0".
 #     CLAP_WRAPPER_BUILDER_STAGE_DIR        If set, finished artifacts are
@@ -94,6 +99,7 @@ set(CLAP_WRAPPER_BUILDER_TARGET_LIB "" CACHE FILEPATH "Path to the static librar
 set(CLAP_WRAPPER_BUILDER_TARGET_NAME "" CACHE STRING "Internal CMake target name for the wrapper")
 set(CLAP_WRAPPER_BUILDER_OUTPUT_NAME "" CACHE STRING "Output plugin display/bundle name")
 set(CLAP_WRAPPER_BUILDER_BUNDLE_IDENTIFIER "" CACHE STRING "macOS bundle ID prefix for wrapper formats")
+set(CLAP_WRAPPER_BUILDER_MACOS_EXECUTABLE_NAME "" CACHE STRING "Executable file name inside macOS wrapper bundles")
 set(CLAP_WRAPPER_BUILDER_STAGE_DIR "" CACHE PATH "Directory where built artifacts are staged")
 set(CLAP_WRAPPER_BUILDER_BUNDLE_VERSION "1.0.0" CACHE STRING "Version written into wrapped plugin bundles")
 set(CLAP_WRAPPER_BUILDER_PRODUCT_COUNT "1" CACHE STRING "Number of plugin products exposed by the wrapped library")
@@ -134,9 +140,23 @@ if(CLAP_WRAPPER_BUILDER_TARGET_NAME)
     string(REGEX REPLACE "[^A-Za-z0-9_]" "_" PLUGIN_NAME_SAFE "${CLAP_WRAPPER_BUILDER_TARGET_NAME}")
 endif()
 
+# clap-wrapper names both the bundle folder and its executable after OUTPUT_NAME.
+# The executable name must stay stable across releases on macOS: the Audio Unit
+# registrar remembers the executable name it first saw at a component path and
+# hides an updated bundle whose executable name differs until the user logs out.
+# Build with the stable executable name and stage the bundle folders under
+# PLUGIN_NAME below, so the visible bundle name can change independently.
+# Windows VST3 expects the module file name to match its bundle folder, so this
+# only applies to macOS.
+set(WRAPPER_OUTPUT_NAME "${PLUGIN_NAME}")
+if(APPLE AND CLAP_WRAPPER_BUILDER_MACOS_EXECUTABLE_NAME)
+    set(WRAPPER_OUTPUT_NAME "${CLAP_WRAPPER_BUILDER_MACOS_EXECUTABLE_NAME}")
+endif()
+
 message(STATUS "CLAP Wrapper Builder Configuration:")
 message(STATUS "  Target Library: ${CLAP_WRAPPER_BUILDER_TARGET_LIB}")
 message(STATUS "  Plugin Name: ${PLUGIN_NAME}")
+message(STATUS "  Wrapper Output Name: ${WRAPPER_OUTPUT_NAME}")
 message(STATUS "  Safe Plugin Name: ${PLUGIN_NAME_SAFE}")
 message(STATUS "  Stage Dir: ${CLAP_WRAPPER_BUILDER_STAGE_DIR}")
 message(STATUS "  Build AAX: ${CLAP_WRAPPER_BUILDER_BUILD_AAX}")
@@ -255,7 +275,7 @@ set(BUNDLE_VERSION "${CLAP_WRAPPER_BUILDER_BUNDLE_VERSION}")
 set(CLAPFIRST_COMMON_ARGS
     TARGET_NAME ${PLUGIN_NAME_SAFE}
     IMPL_TARGET ${PLUGIN_NAME_SAFE}_impl
-    OUTPUT_NAME "${PLUGIN_NAME}"
+    OUTPUT_NAME "${WRAPPER_OUTPUT_NAME}"
     ENTRY_SOURCE ${ENTRY_SOURCE_FILE}
     PLUGIN_FORMATS ${PLUGIN_FORMATS}
     BUNDLE_IDENTIFIER "${BUNDLE_ID}"
@@ -466,7 +486,6 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
     endif()
 
     foreach(AUV2_TARGET IN LISTS AUV2_PRODUCT_TARGETS)
-        get_target_property(AUV2_OUTPUT_NAME ${AUV2_TARGET} LIBRARY_OUTPUT_NAME)
         set(AUV2_GENERATED_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${AUV2_TARGET}-build-helper-output/auv2_Info.plist")
         set(AUV2_BUNDLE_PLIST "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>/Contents/Info.plist")
         # clap-wrapper's AUv2 helper generates the AudioComponents metadata that
@@ -481,8 +500,8 @@ if(CLAP_WRAPPER_BUILDER_STAGE_DIR)
             COMMAND ${CMAKE_COMMAND} -E copy "${AUV2_GENERATED_PLIST}" "${AUV2_BUNDLE_PLIST}"
             COMMAND ${CMAKE_COMMAND} "-DINFO_PLIST=${AUV2_BUNDLE_PLIST}" "-DTAGS_CONFIG=${AUV2_TAGS_CONFIG}"
                 -P "${CMAKE_CURRENT_LIST_DIR}/apply_auv2_tags.cmake"
-            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${AUV2_OUTPUT_NAME}.component"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.component"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_BUNDLE_DIR:${AUV2_TARGET}>" "${CLAP_WRAPPER_BUILDER_STAGE_DIR}/${PLUGIN_NAME}.component"
             VERBATIM
         )
     endforeach()
