@@ -18,6 +18,10 @@ bundle_name = "WRAC Gain"
 # standalone app append format suffixes to wrapper_bundle_identifier.
 clap_bundle_identifier = "com.your-company.wrac-gain"
 wrapper_bundle_identifier = "com.your-company.wrac-gain"
+# The executable inside each macOS bundle defaults to bundle_name. If you rename
+# a released plugin, set macos_executable_name to the released executable name:
+# macOS keeps a renamed AU hidden after an in-place update until the user logs out.
+# macos_executable_name = "WRAC Gain"
 homepage_url = "https://example.com/wrac-gain"
 manual_url = "https://example.com/wrac-gain/manual"
 support_url = "https://example.com/support"

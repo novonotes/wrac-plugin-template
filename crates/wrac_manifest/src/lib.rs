@@ -50,6 +50,15 @@ pub struct PluginManifest {
     /// with a rename and make installers leave stale files in signed bundles. Keep it
     /// unchanged after release.
     pub wrapper_bundle_identifier: String,
+    /// Executable file name inside every macOS plugin bundle (CLAP, VST3, AU, and AAX).
+    /// `None` uses `bundle_name`.
+    ///
+    /// Keep it unchanged after release. The macOS Audio Unit registrar remembers the
+    /// executable name it first saw at a component path, so an update that replaces the
+    /// installed bundle with one whose executable name differs hides the AU until the user
+    /// logs out or restarts. Set this when `bundle_name` no longer matches a released
+    /// executable name.
+    pub macos_executable_name: Option<String>,
     pub homepage_url: String,
     pub manual_url: String,
     pub support_url: String,
@@ -197,6 +206,7 @@ pub fn read_dedicated_manifest(path: &Path) -> Result<PluginManifest> {
         bundle_name: dedicated.bundle.bundle_name,
         clap_bundle_identifier: dedicated.bundle.clap_bundle_identifier,
         wrapper_bundle_identifier: dedicated.bundle.wrapper_bundle_identifier,
+        macos_executable_name: dedicated.bundle.macos_executable_name,
         homepage_url: dedicated.bundle.homepage_url,
         manual_url: dedicated.bundle.manual_url,
         support_url: dedicated.bundle.support_url,
@@ -241,6 +251,9 @@ impl PluginManifest {
             &format!("{label}.wrapper_bundle_identifier"),
             &self.wrapper_bundle_identifier,
         )?;
+        if let Some(name) = &self.macos_executable_name {
+            validate_file_name(&format!("{label}.macos_executable_name"), name)?;
+        }
         validate_required(&format!("{label}.homepage_url"), &self.homepage_url)?;
         validate_required(&format!("{label}.manual_url"), &self.manual_url)?;
         validate_required(&format!("{label}.support_url"), &self.support_url)?;
@@ -541,6 +554,24 @@ fn validate_required(key: &str, value: &str) -> Result<()> {
     }
 }
 
+fn validate_file_name(key: &str, value: &str) -> Result<()> {
+    validate_required(key, value)?;
+    // The value becomes a file name under `Contents/MacOS` and is also passed to CMake,
+    // so reject path separators and anything that would need quoting.
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ' '))
+        && !value.starts_with('.')
+    {
+        Ok(())
+    } else {
+        Err(
+            format!("{key} must be a file name of ASCII letters, digits, spaces, '_', '-', or '.'")
+                .into(),
+        )
+    }
+}
+
 fn validate_four_ascii(key: &str, value: &str) -> Result<()> {
     four_ascii_bytes(value)
         .map(|_| ())
@@ -565,6 +596,8 @@ struct DedicatedBundle {
     bundle_name: String,
     clap_bundle_identifier: String,
     wrapper_bundle_identifier: String,
+    #[serde(default)]
+    macos_executable_name: Option<String>,
     homepage_url: String,
     manual_url: String,
     support_url: String,

@@ -470,6 +470,7 @@ pub fn print_build_outputs(
 
 fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
     let plugin_name = &metadata.bundle_name;
+    let executable_name = &metadata.macos_executable_name;
     // A CLAP bundle has one CFBundleIdentifier even when the factory exposes
     // multiple products. Keep macOS bundle identity separate from product IDs so
     // adding another product does not silently change the installed bundle.
@@ -482,7 +483,7 @@ fn macos_clap_info_plist(metadata: &PluginMetadata) -> String {
 <plist>
   <dict>
     <key>CFBundleExecutable</key>
-    <string>{plugin_name}</string>
+    <string>{executable_name}</string>
     <key>CFBundleIconFile</key>
     <string></string>
     <key>CFBundleIdentifier</key>
