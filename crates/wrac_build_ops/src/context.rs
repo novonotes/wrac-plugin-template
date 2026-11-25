@@ -17,7 +17,8 @@ pub struct WracContext {
     pub(crate) plugin_root: PathBuf,
     pub(crate) manifest_path: PathBuf,
     pub platform: Platform,
-    /// Cargo target directory shared by every plugin package.
+    /// Cargo target directory shared by every plugin package, separate from the
+    /// workspace's default Cargo target directory.
     pub(crate) cargo_target_dir: PathBuf,
     /// Per-plugin output tree for wrapper builds, bundles, and validation tools.
     pub(crate) plugin_target_dir: PathBuf,
@@ -37,12 +38,11 @@ impl WracContext {
         let target_root = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.root.join("target"));
-        // Each plugin owns its own CMake and bundle output tree. Wrapper builds create
-        // format-specific projects with fixed target names, so sharing one target/wrac
-        // directory across plugins would make artifacts overwrite or cross-contaminate.
-        let plugin_target_dir = target_root
-            .join(&config.target_namespace)
-            .join(&package.artifact_namespace);
+        let (cargo_target_dir, plugin_target_dir) = resolve_target_dirs(
+            &target_root,
+            &config.target_namespace,
+            &package.artifact_namespace,
+        );
         // CLAP_WRAPPER_DIR lets wrapper developers point xtask at another clap_wrapper_builder checkout.
         let wrapper_dir = std::env::var_os("CLAP_WRAPPER_DIR")
             .map(PathBuf::from)
@@ -57,10 +57,7 @@ impl WracContext {
             plugin_root: package.plugin_root,
             manifest_path: package.manifest_path,
             platform: Platform::detect()?,
-            // Cargo output is shared because plugin libraries are named after their packages
-            // and cannot collide. A per-plugin Cargo directory rebuilt every common dependency
-            // for each plugin, which dominated the time of validating many plugins in a row.
-            cargo_target_dir: target_root,
+            cargo_target_dir,
             plugin_target_dir,
             wrapper_dir,
             default_aax_sdk_root: config.default_aax_sdk_root.clone(),
@@ -106,6 +103,10 @@ impl WracContext {
         self.manifest_path.clone()
     }
 
+    /// Returns the Cargo profile output directory for plugin libraries.
+    ///
+    /// The directory is shared by every plugin package in the workspace, so callers must not
+    /// treat its contents as owned by this plugin (for example, when cleaning).
     pub fn cargo_profile_dir(&self, profile: BuildProfile) -> PathBuf {
         self.cargo_target_dir.join(profile.cargo_dir())
     }
@@ -184,6 +185,28 @@ impl WracContext {
 }
 
 pub(crate) type Context = WracContext;
+
+/// Resolves the shared Cargo target directory and the per-plugin output directory.
+fn resolve_target_dirs(
+    target_root: &Path,
+    target_namespace: &str,
+    artifact_namespace: &str,
+) -> (PathBuf, PathBuf) {
+    let namespace_dir = target_root.join(target_namespace);
+    // Cargo output is shared across plugins because plugin libraries are named after their
+    // packages and cannot collide. A per-plugin Cargo directory rebuilt every common dependency
+    // for each plugin, which dominated the time of validating many plugins in a row.
+    // It stays out of the workspace's default target directory because plugin builds inject
+    // MACOSX_DEPLOYMENT_TARGET while plain cargo commands do not. Mixing them in one directory
+    // makes env-sensitive build scripts rebuild on every switch, and lets Cargo reuse plugin
+    // libraries built without the intended deployment target.
+    let cargo_target_dir = namespace_dir.join("cargo");
+    // Each plugin owns its own CMake and bundle output tree. Wrapper builds create
+    // format-specific projects with fixed target names, so sharing one target/wrac
+    // directory across plugins would make artifacts overwrite or cross-contaminate.
+    let plugin_target_dir = namespace_dir.join(artifact_namespace);
+    (cargo_target_dir, plugin_target_dir)
+}
 
 pub(crate) fn available_packages(config: &XtaskConfig) -> Result<Vec<WracPluginPackage>> {
     available_packages_at_root(&config.root)
@@ -356,7 +379,27 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{plugin_layout_from_manifest, validate_plugin_layout};
+    use super::{plugin_layout_from_manifest, resolve_target_dirs, validate_plugin_layout};
+
+    #[test]
+    fn shares_cargo_target_dir_across_plugins_and_separates_plugin_outputs() {
+        let target_root = Path::new("/workspace/target");
+        let (gain_cargo, gain_plugin) =
+            resolve_target_dirs(target_root, "wrac-plugins", "wrac-gain");
+        let (delay_cargo, delay_plugin) =
+            resolve_target_dirs(target_root, "wrac-plugins", "wrac-delay");
+
+        assert_eq!(gain_cargo, delay_cargo);
+        assert_ne!(gain_plugin, delay_plugin);
+        assert_eq!(
+            gain_plugin,
+            target_root.join("wrac-plugins").join("wrac-gain")
+        );
+        // The shared Cargo directory must not be the workspace's default target directory,
+        // which plain cargo commands use with a different MACOSX_DEPLOYMENT_TARGET.
+        assert_ne!(gain_cargo, target_root);
+        assert!(gain_cargo.starts_with(target_root.join("wrac-plugins")));
+    }
 
     #[test]
     fn accepts_conventional_plugin_layout() {
