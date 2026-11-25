@@ -17,7 +17,10 @@ pub struct WracContext {
     pub(crate) plugin_root: PathBuf,
     pub(crate) manifest_path: PathBuf,
     pub platform: Platform,
-    pub(crate) target_dir: PathBuf,
+    /// Cargo target directory shared by every plugin package.
+    pub(crate) cargo_target_dir: PathBuf,
+    /// Per-plugin output tree for wrapper builds, bundles, and validation tools.
+    pub(crate) plugin_target_dir: PathBuf,
     pub(crate) wrapper_dir: PathBuf,
     pub(crate) default_aax_sdk_root: Option<PathBuf>,
     pub(crate) aax_validator_dsh_archive: Option<PathBuf>,
@@ -34,10 +37,10 @@ impl WracContext {
         let target_root = std::env::var_os("CARGO_TARGET_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| config.root.join("target"));
-        // Each plugin owns its own Cargo and CMake output tree. Wrapper builds create
+        // Each plugin owns its own CMake and bundle output tree. Wrapper builds create
         // format-specific projects with fixed target names, so sharing one target/wrac
         // directory across plugins would make artifacts overwrite or cross-contaminate.
-        let target_dir = target_root
+        let plugin_target_dir = target_root
             .join(&config.target_namespace)
             .join(&package.artifact_namespace);
         // CLAP_WRAPPER_DIR lets wrapper developers point xtask at another clap_wrapper_builder checkout.
@@ -54,7 +57,11 @@ impl WracContext {
             plugin_root: package.plugin_root,
             manifest_path: package.manifest_path,
             platform: Platform::detect()?,
-            target_dir,
+            // Cargo output is shared because plugin libraries are named after their packages
+            // and cannot collide. A per-plugin Cargo directory rebuilt every common dependency
+            // for each plugin, which dominated the time of validating many plugins in a row.
+            cargo_target_dir: target_root,
+            plugin_target_dir,
             wrapper_dir,
             default_aax_sdk_root: config.default_aax_sdk_root.clone(),
             aax_validator_dsh_archive: config.aax_validator_dsh_archive.clone(),
@@ -100,11 +107,11 @@ impl WracContext {
     }
 
     pub fn cargo_profile_dir(&self, profile: BuildProfile) -> PathBuf {
-        self.target_dir.join(profile.cargo_dir())
+        self.cargo_target_dir.join(profile.cargo_dir())
     }
 
     pub fn wrac_dir(&self) -> PathBuf {
-        self.target_dir.join("wrac")
+        self.plugin_target_dir.join("wrac")
     }
 
     pub fn plugins_dir(&self, profile: BuildProfile) -> PathBuf {
