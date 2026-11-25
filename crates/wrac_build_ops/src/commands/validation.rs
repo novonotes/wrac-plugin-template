@@ -193,7 +193,7 @@ fn normalize_vst3_cid(value: &str) -> String {
 
 fn ensure_clap_validator(ctx: &Context, version: &str) -> Result<PathBuf> {
     let validator_dir = ctx
-        .target_dir
+        .plugin_target_dir
         .join("tools")
         .join("clap-validator")
         .join(version);
@@ -342,10 +342,10 @@ fn ensure_vst3_validator(ctx: &Context) -> Result<PathBuf> {
         "validator"
     };
     let shared_validator_dir = ctx
-        .target_dir
+        .plugin_target_dir
         .parent()
         .map(|path| path.join("vst3sdk-validator"))
-        .unwrap_or_else(|| ctx.target_dir.join("vst3sdk-validator"));
+        .unwrap_or_else(|| ctx.plugin_target_dir.join("vst3sdk-validator"));
     let validator_bin_dir = shared_validator_dir.join("bin");
     let validator = validator_bin_dir.join("Debug").join(executable);
     let validator_without_config = validator_bin_dir.join(executable);

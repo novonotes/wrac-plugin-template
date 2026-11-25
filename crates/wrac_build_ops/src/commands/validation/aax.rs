@@ -686,7 +686,10 @@ fn normalize_windows_aax_validator_main_config(path: &Path) -> Result<()> {
 
 fn aax_validator_dsh_root(ctx: &Context) -> Result<PathBuf> {
     let archive = aax_validator_dsh_archive(ctx)?;
-    let extracted_root = ctx.target_dir.join("tools").join("aax-validator-dsh");
+    let extracted_root = ctx
+        .plugin_target_dir
+        .join("tools")
+        .join("aax-validator-dsh");
     // Extract into target/ so CI caches or local builds can reuse the private
     // validator without committing Avid binaries to the template repository.
     remove_if_exists(&extracted_root)?;

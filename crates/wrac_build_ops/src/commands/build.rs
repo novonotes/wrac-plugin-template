@@ -182,7 +182,7 @@ impl RustPluginBuild {
 
     fn cargo_target_dir(self, ctx: &Context) -> PathBuf {
         match self {
-            Self::Default => ctx.target_dir.clone(),
+            Self::Default => ctx.cargo_target_dir.clone(),
             Self::Standalone => ctx.wrac_dir().join("cargo").join(self.label()),
         }
     }
