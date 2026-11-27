@@ -23,6 +23,7 @@ use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
 
 #[derive(Debug, Clone, Copy)]
+/// Editor bounds at 100% on Windows. Other platforms retain their native host units.
 pub struct GuiSizeLimits {
     pub min: GuiSize,
     pub max: GuiSize,
@@ -690,7 +691,7 @@ impl PluginGuiQueryExtension for WxpGuiController {
     }
 
     fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
-        Ok(self.layout.clamp_size(size))
+        Ok(self.layout.clamp_size(size, *self.scale.lock()))
     }
 }
 
@@ -737,35 +738,45 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
 
     fn set_scale(&self, scale: f64) -> PluginResult<()> {
         log::debug!("wxp controller: set_scale called: scale={scale}");
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(PluginError::Message("invalid GUI scale".into()));
+        }
         let (handle, scale) = {
             let mut state = self.runtime.lock();
-            if let Some(session) = &mut state.session {
-                let corrected_scale = self.correct_host_scale(scale, session.parent);
-                session.scale = corrected_scale;
-                (session.handle.clone(), corrected_scale)
-            } else {
-                (None, scale)
+            let mut previous_scale = self.scale.lock();
+            let parent = state.session.as_ref().and_then(|session| session.parent);
+            let scale = self.correct_host_scale(scale, parent);
+            if parent.is_none() {
+                // The host can query get_size before it creates the parent. Scale the
+                // suggested size then, and leave an attached host's frame to set_size.
+                self.layout.rescale_preferred_size(*previous_scale, scale);
             }
+            *previous_scale = scale;
+            let handle = state.session.as_mut().and_then(|session| {
+                session.scale = scale;
+                session.handle.clone()
+            });
+            (handle, scale)
         };
         if let Some(handle) = handle {
             handle.set_scale(scale)?;
         }
-        *self.scale.lock() = scale;
         log::debug!("wxp controller: set_scale completed");
         Ok(())
     }
 
     fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
-        let size = self.layout.clamp_size(requested_size);
+        let (handle, scale) = {
+            let state = self.runtime.lock();
+            if let Some(session) = &state.session {
+                (session.handle.clone(), session.scale)
+            } else {
+                (None, *self.scale.lock())
+            }
+        };
+        let size = self.layout.clamp_size(requested_size, scale);
         let previous_size = self.layout.accepted_size();
         let size_changed = previous_size.width != size.width || previous_size.height != size.height;
-        let handle = {
-            self.runtime
-                .lock()
-                .session
-                .as_ref()
-                .and_then(|session| session.handle.clone())
-        };
 
         // Some hosts repeatedly send the same size until the editor window settles.
         // Re-applying identical bounds does not violate the contract but adds redundant

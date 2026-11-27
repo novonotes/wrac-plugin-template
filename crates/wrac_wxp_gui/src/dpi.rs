@@ -4,8 +4,8 @@ use wxp::dpi::{LogicalPosition, LogicalSize, Size};
 /// Conversion between CLAP GUI sizes and wxp bounds.
 ///
 /// Most hosts report CLAP GUI sizes in physical pixels, but some wrappers/hosts expose
-/// native logical window coordinates. WebView bounds are logical on macOS/Windows and
-/// physical on Linux, so keep host and platform-specific pixel arithmetic in one place.
+/// native logical window coordinates. WebView bounds are logical on macOS and
+/// physical on Windows and Linux.
 pub(crate) struct DpiConverter {
     scale_factor: f64,
     host_size_unit: HostGuiSizeUnit,
@@ -44,7 +44,9 @@ impl DpiConverter {
         Self {
             scale_factor,
             host_size_unit,
-            uses_logical: cfg!(any(target_os = "macos", target_os = "windows")),
+            // The Windows host already supplies physical pixels. Letting the WebView
+            // convert logical bounds again can apply its monitor DPI instead of the host's.
+            uses_logical: cfg!(target_os = "macos"),
         }
     }
 

@@ -3,9 +3,8 @@ use super::*;
 use wrac_host_context::DetectedHost;
 use wxp::dpi::LogicalSize;
 
-#[test]
-fn clamps_logical_resize_request_in_physical_pixels() {
-    let layout = HostGuiLayout::new(
+fn test_layout() -> HostGuiLayout {
+    HostGuiLayout::new(
         GuiSize {
             width: 600,
             height: 400,
@@ -21,12 +20,46 @@ fn clamps_logical_resize_request_in_physical_pixels() {
             },
         },
         GuiResizePolicy::RESIZABLE,
-    );
+    )
+}
 
+#[test]
+fn keeps_resize_limits_in_platform_units() {
+    let layout = test_layout();
     let clamped = layout.clamp_logical_size(LogicalSize::new(700.0, 100.0), 1.5);
 
-    assert_eq!(clamped.width, 600.0);
-    assert_eq!(clamped.height, 200.0 / 1.5);
+    let expected = if cfg!(windows) {
+        LogicalSize::new(700.0, 200.0)
+    } else {
+        LogicalSize::new(600.0, 200.0 / 1.5)
+    };
+    assert_eq!(clamped, expected);
+}
+
+#[cfg(windows)]
+#[test]
+fn keeps_the_editor_at_its_preferred_logical_size_before_attachment() {
+    let layout = test_layout();
+
+    layout.rescale_preferred_size(1.0, 1.25);
+    let size = layout.accepted_size();
+    assert_eq!((size.width, size.height), (750, 500));
+    let minimum = layout.clamp_size(
+        GuiSize {
+            width: 300,
+            height: 200,
+        },
+        1.25,
+    );
+    assert_eq!((minimum.width, minimum.height), (375, 250));
+
+    layout.store_accepted_size(GuiSize {
+        width: 850,
+        height: 610,
+    });
+    layout.rescale_preferred_size(1.25, 1.5);
+    let size = layout.accepted_size();
+    assert_eq!((size.width, size.height), (1020, 732));
 }
 
 #[test]

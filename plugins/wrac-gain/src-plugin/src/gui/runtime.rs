@@ -9,8 +9,8 @@ use wrac_clap_adapter::interface::{
     PluginResult,
 };
 use wrac_wxp_gui::{
-    GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
-    WxpWebViewConfig, WxpWebViewSession,
+    ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime, WxpWebViewConfig,
+    WxpWebViewSession,
 };
 use wxp::WxpCommandHandler;
 
@@ -106,10 +106,6 @@ impl WracGainGuiRuntime {
             WxpWebViewConfig {
                 plugin_id: dependencies.descriptor.id,
                 initial_size,
-                limits: GuiSizeLimits {
-                    min: MIN_GUI_SIZE,
-                    max: MAX_GUI_SIZE,
-                },
                 host_size_unit,
                 parent,
                 frontend: frontend_source(),

@@ -48,8 +48,28 @@ impl HostGuiLayout {
         self.accepted_size.load()
     }
 
-    pub(super) fn clamp_size(&self, size: GuiSize) -> GuiSize {
-        clamp_size_with_limits(size, self.limits)
+    pub(super) fn clamp_size(&self, size: GuiSize, scale: f64) -> GuiSize {
+        let limits = GuiSizeLimits {
+            min: self.scale_layout_size(self.limits.min, scale),
+            max: self.scale_layout_size(self.limits.max, scale),
+        };
+        clamp_size_with_limits(size, limits)
+    }
+
+    pub(super) fn rescale_preferred_size(&self, old_scale: f64, new_scale: f64) {
+        if old_scale != new_scale {
+            let size = self.scale_layout_size(self.accepted_size(), new_scale / old_scale);
+            self.accepted_size.store(self.clamp_size(size, new_scale));
+        }
+    }
+
+    fn scale_layout_size(&self, size: GuiSize, scale: f64) -> GuiSize {
+        if cfg!(windows) {
+            let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+            dpi.logical_size_to_gui(LogicalSize::new(size.width as f64, size.height as f64))
+        } else {
+            size
+        }
     }
 
     pub(super) fn clamp_logical_size(
@@ -61,7 +81,7 @@ impl HostGuiLayout {
         // Resize commands receive frontend logical pixels. Convert through the host
         // boundary unit before clamping so limits remain comparable to host callbacks.
         let physical = dpi.logical_size_to_gui(size);
-        let clamped = clamp_size_with_limits(physical, self.limits);
+        let clamped = self.clamp_size(physical, scale);
         dpi.gui_size_to_logical(clamped)
     }
 
