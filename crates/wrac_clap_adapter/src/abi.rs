@@ -573,6 +573,26 @@ impl PluginInstanceState {
     pub(crate) fn clear_gui_lifecycle_thread(&self) {
         *self.gui_lifecycle_thread.lock() = None;
     }
+
+    /// Returns whether the current thread owns a GUI lifecycle that `gui.destroy` has not closed.
+    ///
+    /// Unlike [`Self::enter_gui_lifecycle_thread`], this never records a new owner: plugin
+    /// destruction uses it to close only a GUI the host left open. The owner thread is recorded
+    /// by the first GUI main-thread callback and cleared by `gui.destroy`, so an empty record
+    /// means there is no GUI to tear down.
+    pub(crate) fn owns_open_gui_lifecycle(&self, callback_name: &'static str) -> bool {
+        let current = std::thread::current().id();
+        match *self.gui_lifecycle_thread.lock() {
+            Some(expected) if expected != current => {
+                log::error!(
+                    "rejecting CLAP GUI main-thread callback from a different thread: callback={callback_name} expected={expected:?} current={current:?}"
+                );
+                false
+            }
+            Some(_) => true,
+            None => false,
+        }
+    }
 }
 
 pub(crate) struct LifecycleGuard<'a> {
