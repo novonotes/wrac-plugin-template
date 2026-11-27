@@ -47,7 +47,10 @@ pub trait PluginGuiMainThreadExtension: 'static {
     /// `[main-thread]`
     fn create(&self, configuration: GuiConfig) -> PluginResult<()>;
 
-    /// Called from CLAP `gui.destroy` or plugin destruction.
+    /// Called from CLAP `gui.destroy`, or from plugin destruction when the host left the GUI open.
+    ///
+    /// Plugin destruction calls this only on the thread that owns the open GUI, so the
+    /// `[main-thread]` annotation holds on both paths.
     ///
     /// `[main-thread]`
     fn destroy(&self);

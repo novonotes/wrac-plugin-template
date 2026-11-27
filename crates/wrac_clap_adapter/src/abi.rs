@@ -573,6 +573,14 @@ impl PluginInstanceState {
     pub(crate) fn clear_gui_lifecycle_thread(&self) {
         *self.gui_lifecycle_thread.lock() = None;
     }
+
+    /// Returns whether a host-started GUI lifecycle has not been closed by `gui.destroy` yet.
+    ///
+    /// The owner thread is recorded by the first GUI main-thread callback and cleared by
+    /// `gui.destroy`, so `false` means there is no GUI for plugin destruction to tear down.
+    pub(crate) fn has_open_gui_lifecycle(&self) -> bool {
+        self.gui_lifecycle_thread.lock().is_some()
+    }
 }
 
 pub(crate) struct LifecycleGuard<'a> {

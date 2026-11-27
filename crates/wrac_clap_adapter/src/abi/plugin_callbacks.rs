@@ -160,7 +160,13 @@ pub(super) unsafe extern "C" fn plugin_destroy(plugin: *const clap_plugin) {
             .and_then(|runtime| runtime.gui.clone())
         {
             if let Some(_gui_callback) = instance.gui_callback_busy.try_lock() {
-                if instance.enter_gui_lifecycle_thread("destroy") {
+                // Only close a GUI the host left open. Without an open GUI there is nothing to
+                // tear down, and the lifecycle-thread check below would accept any thread, so
+                // calling `destroy()` here would hand product code a `[main-thread]` callback on
+                // whatever thread disposes the plugin (e.g. a wrapper teardown thread).
+                if instance.has_open_gui_lifecycle()
+                    && instance.enter_gui_lifecycle_thread("destroy")
+                {
                     gui.main_thread().destroy();
                     instance.clear_gui_lifecycle_thread();
                 }

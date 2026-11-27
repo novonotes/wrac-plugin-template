@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use clap_sys::ext::audio_ports::{
     CLAP_AUDIO_PORTS_RESCAN_NAMES, CLAP_EXT_AUDIO_PORTS, clap_host_audio_ports,
 };
+use clap_sys::ext::gui::CLAP_WINDOW_API_COCOA;
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_host_latency, clap_plugin_latency};
 use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_PORTS_RESCAN_NAMES, clap_host_note_ports,
@@ -14,17 +15,19 @@ use clap_sys::host::clap_host;
 use clap_sys::plugin::clap_plugin;
 use clap_sys::version::CLAP_VERSION;
 
+use super::gui_extension::GUI;
 use super::{
     PluginInstanceState, RtCallbackTracker, RtDepthGuard, plugin_activate, plugin_destroy,
     plugin_get_extension, plugin_init, plugin_on_main_thread,
 };
 use crate::entry::EntryRegistration;
 use crate::interface::{
-    ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext,
-    HostAudioPorts, HostLifecycle, HostNotePorts, InactiveProcessor, LogConfig, NoteDialects,
-    ParamFlushContext, PluginDescriptor, PluginEntry, PluginFactory, PluginInstance,
-    PluginInstanceContext, PluginLatencyExtension, PluginParamsQuery, PluginResult, ProcessContext,
-    ProcessStatus,
+    ActivateContext, ActivateNotifications, ActivateResult, ActiveProcessor, EntryContext, GuiApi,
+    GuiConfig, GuiResizeHints, GuiSize, HostAudioPorts, HostLifecycle, HostNotePorts, HostWindow,
+    InactiveProcessor, LogConfig, NoteDialects, ParamFlushContext, PluginDescriptor, PluginEntry,
+    PluginFactory, PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
+    PluginGuiQueryExtension, PluginInstance, PluginInstanceContext, PluginLatencyExtension,
+    PluginParamsQuery, PluginResult, ProcessContext, ProcessStatus,
 };
 use wrac_host_context::HostContext;
 
@@ -36,6 +39,8 @@ static ZERO_LATENCY_ENTRY: TestEntry = TestEntry {
         request_host_ports: false,
         request_host_ports_during_create: false,
         count_create_plugin: false,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static ZERO_LATENCY_REGISTRATION: EntryRegistration = EntryRegistration::new(&ZERO_LATENCY_ENTRY);
@@ -48,6 +53,8 @@ static ACTIVATE_LATENCY_CHANGED_ENTRY: TestEntry = TestEntry {
         request_host_ports: false,
         request_host_ports_during_create: false,
         count_create_plugin: false,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static ACTIVATE_LATENCY_CHANGED_REGISTRATION: EntryRegistration =
@@ -61,6 +68,8 @@ static REQUEST_HOST_LIFECYCLE_ENTRY: TestEntry = TestEntry {
         request_host_ports: false,
         request_host_ports_during_create: false,
         count_create_plugin: false,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static REQUEST_HOST_PORTS_ENTRY: TestEntry = TestEntry {
@@ -71,6 +80,8 @@ static REQUEST_HOST_PORTS_ENTRY: TestEntry = TestEntry {
         request_host_ports: true,
         request_host_ports_during_create: false,
         count_create_plugin: false,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static REQUEST_HOST_PORTS_DURING_CREATE_ENTRY: TestEntry = TestEntry {
@@ -81,6 +92,8 @@ static REQUEST_HOST_PORTS_DURING_CREATE_ENTRY: TestEntry = TestEntry {
         request_host_ports: false,
         request_host_ports_during_create: true,
         count_create_plugin: false,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static DEFER_CREATE_ENTRY: TestEntry = TestEntry {
@@ -91,6 +104,8 @@ static DEFER_CREATE_ENTRY: TestEntry = TestEntry {
         request_host_ports: false,
         request_host_ports_during_create: false,
         count_create_plugin: true,
+        gui_destroy_count: None,
+        destroy_count: &DESTROY_COUNT,
     },
 };
 static REQUEST_HOST_LIFECYCLE_REGISTRATION: EntryRegistration =
@@ -100,6 +115,17 @@ static REQUEST_HOST_PORTS_REGISTRATION: EntryRegistration =
 static REQUEST_HOST_PORTS_DURING_CREATE_REGISTRATION: EntryRegistration =
     EntryRegistration::new(&REQUEST_HOST_PORTS_DURING_CREATE_ENTRY);
 static DEFER_CREATE_REGISTRATION: EntryRegistration = EntryRegistration::new(&DEFER_CREATE_ENTRY);
+static GUI_NEVER_OPENED_DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
+static GUI_NEVER_OPENED_REGISTRATION: EntryRegistration =
+    EntryRegistration::new(&GUI_NEVER_OPENED_ENTRY);
+static GUI_NEVER_OPENED_ENTRY: TestEntry = TestEntry {
+    factory: TestFactory::with_gui(&GUI_NEVER_OPENED_DESTROY_COUNT),
+};
+static GUI_LEFT_OPEN_DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
+static GUI_LEFT_OPEN_REGISTRATION: EntryRegistration = EntryRegistration::new(&GUI_LEFT_OPEN_ENTRY);
+static GUI_LEFT_OPEN_ENTRY: TestEntry = TestEntry {
+    factory: TestFactory::with_gui(&GUI_LEFT_OPEN_DESTROY_COUNT),
+};
 
 static LATENCY_CHANGED_COUNT: AtomicU32 = AtomicU32::new(0);
 static REQUEST_RESTART_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -107,6 +133,7 @@ static REQUEST_PROCESS_COUNT: AtomicU32 = AtomicU32::new(0);
 static REQUEST_CALLBACK_COUNT: AtomicU32 = AtomicU32::new(0);
 static ON_MAIN_THREAD_COUNT: AtomicU32 = AtomicU32::new(0);
 static DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
+static GUI_TESTS_DESTROY_COUNT: AtomicU32 = AtomicU32::new(0);
 static CREATE_PLUGIN_COUNT: AtomicU32 = AtomicU32::new(0);
 
 #[cfg(target_os = "macos")]
@@ -250,6 +277,38 @@ fn plugin_destroy_calls_instance_hook() {
     }
 
     assert_eq!(DESTROY_COUNT.load(Ordering::Relaxed), 1);
+}
+
+// Plugin destruction may run on a wrapper teardown thread. It must not hand the product a
+// `[main-thread]` GUI callback when there is no open GUI to close.
+#[test]
+fn plugin_destroy_skips_gui_destroy_without_open_gui() {
+    let instance = test_instance(&GUI_NEVER_OPENED_REGISTRATION, ptr::null());
+    assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+    let plugin = &instance.plugin as *const clap_plugin;
+    let _instance = Box::into_raw(instance);
+
+    unsafe {
+        plugin_destroy(plugin);
+    }
+
+    assert_eq!(GUI_NEVER_OPENED_DESTROY_COUNT.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn plugin_destroy_closes_gui_left_open_by_host() {
+    let instance = test_instance(&GUI_LEFT_OPEN_REGISTRATION, ptr::null());
+    assert!(unsafe { plugin_init(&instance.plugin as *const clap_plugin) });
+    let plugin = &instance.plugin as *const clap_plugin;
+    let create = GUI.create.expect("gui.create");
+    assert!(unsafe { create(plugin, CLAP_WINDOW_API_COCOA.as_ptr(), false) });
+    let _instance = Box::into_raw(instance);
+
+    unsafe {
+        plugin_destroy(plugin);
+    }
+
+    assert_eq!(GUI_LEFT_OPEN_DESTROY_COUNT.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -611,6 +670,25 @@ struct TestFactory {
     request_host_ports: bool,
     request_host_ports_during_create: bool,
     count_create_plugin: bool,
+    /// Gives the plugin a GUI whose `destroy()` calls are counted here.
+    gui_destroy_count: Option<&'static AtomicU32>,
+    /// Counts `PluginInstance::destroy` calls; tests sharing a counter must not assert on it.
+    destroy_count: &'static AtomicU32,
+}
+
+impl TestFactory {
+    const fn with_gui(gui_destroy_count: &'static AtomicU32) -> Self {
+        Self {
+            activate_latency_changed: false,
+            request_host_lifecycle: false,
+            request_host_lifecycle_during_create: false,
+            request_host_ports: false,
+            request_host_ports_during_create: false,
+            count_create_plugin: false,
+            gui_destroy_count: Some(gui_destroy_count),
+            destroy_count: &GUI_TESTS_DESTROY_COUNT,
+        }
+    }
 }
 
 impl PluginFactory for TestFactory {
@@ -658,6 +736,8 @@ impl PluginFactory for TestFactory {
                 host_lifecycle: context.host_lifecycle,
                 host_audio_ports: context.host_audio_ports,
                 host_note_ports: context.host_note_ports,
+                gui_destroy_count: self.gui_destroy_count,
+                destroy_count: self.destroy_count,
             }) as Box<dyn PluginInstance>
         })
     }
@@ -670,6 +750,8 @@ struct TestPlugin {
     host_lifecycle: Arc<dyn HostLifecycle>,
     host_audio_ports: Arc<dyn HostAudioPorts>,
     host_note_ports: Arc<dyn HostNotePorts>,
+    gui_destroy_count: Option<&'static AtomicU32>,
+    destroy_count: &'static AtomicU32,
 }
 
 impl PluginInstance for TestPlugin {
@@ -715,7 +797,7 @@ impl PluginInstance for TestPlugin {
     }
 
     fn destroy(&mut self) {
-        DESTROY_COUNT.fetch_add(1, Ordering::Relaxed);
+        self.destroy_count.fetch_add(1, Ordering::Relaxed);
     }
 
     fn on_main_thread(&mut self) {
@@ -728,6 +810,90 @@ impl PluginInstance for TestPlugin {
 
     fn latency(&self) -> Option<Arc<dyn PluginLatencyExtension>> {
         Some(Arc::new(TestLatency))
+    }
+
+    fn gui(&self) -> Option<Arc<dyn PluginGuiExtension>> {
+        self.gui_destroy_count
+            .map(|destroy_count| Arc::new(TestGui { destroy_count }) as Arc<dyn PluginGuiExtension>)
+    }
+}
+
+struct TestGui {
+    destroy_count: &'static AtomicU32,
+}
+
+impl PluginGuiExtension for TestGui {
+    fn api_support(&self) -> &(dyn PluginGuiApiSupportExtension + Send + Sync) {
+        self
+    }
+
+    fn query(&self) -> &(dyn PluginGuiQueryExtension + Send + Sync) {
+        self
+    }
+
+    fn main_thread(&self) -> &dyn PluginGuiMainThreadExtension {
+        self
+    }
+}
+
+impl PluginGuiApiSupportExtension for TestGui {
+    fn is_api_supported(&self, _api: GuiApi, _is_floating: bool) -> bool {
+        true
+    }
+}
+
+impl PluginGuiQueryExtension for TestGui {
+    fn preferred_api(&self) -> Option<GuiConfig> {
+        None
+    }
+
+    fn get_size(&self) -> PluginResult<GuiSize> {
+        Ok(GuiSize {
+            width: 1,
+            height: 1,
+        })
+    }
+
+    fn can_resize(&self) -> bool {
+        false
+    }
+
+    fn resize_hints(&self) -> Option<GuiResizeHints> {
+        None
+    }
+
+    fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
+        Ok(size)
+    }
+}
+
+impl PluginGuiMainThreadExtension for TestGui {
+    fn create(&self, _configuration: GuiConfig) -> PluginResult<()> {
+        Ok(())
+    }
+
+    fn destroy(&self) {
+        self.destroy_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn set_scale(&self, _scale: f64) -> PluginResult<()> {
+        Ok(())
+    }
+
+    fn set_size(&self, _size: GuiSize) -> PluginResult<()> {
+        Ok(())
+    }
+
+    fn set_parent(&self, _window: HostWindow) -> PluginResult<()> {
+        Ok(())
+    }
+
+    fn show(&self) -> PluginResult<()> {
+        Ok(())
+    }
+
+    fn hide(&self) -> PluginResult<()> {
+        Ok(())
     }
 }
 
