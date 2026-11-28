@@ -36,6 +36,9 @@ pub(super) struct HostGuiLayout {
     limits: GuiSizeLimits,
     resize_policy: GuiResizePolicy,
     dpi_policy: GuiDpiPolicy,
+    // Both frontend resize commands and the controller's attached-scale resize go through
+    // `request_host_resize`, so the host handle lives with the layout it negotiates.
+    host_gui: Arc<dyn HostGui>,
 }
 
 #[derive(Clone)]
@@ -48,8 +51,15 @@ impl HostGuiLayout {
         size: GuiSize,
         limits: GuiSizeLimits,
         resize_policy: GuiResizePolicy,
+        host_gui: Arc<dyn HostGui>,
     ) -> Self {
-        Self::with_dpi_policy(size, limits, resize_policy, GuiDpiPolicy::current())
+        Self::with_dpi_policy(
+            size,
+            limits,
+            resize_policy,
+            GuiDpiPolicy::current(),
+            host_gui,
+        )
     }
 
     pub(super) fn with_dpi_policy(
@@ -57,6 +67,7 @@ impl HostGuiLayout {
         limits: GuiSizeLimits,
         resize_policy: GuiResizePolicy,
         dpi_policy: GuiDpiPolicy,
+        host_gui: Arc<dyn HostGui>,
     ) -> Self {
         let size = clamp_size_with_limits(size, limits);
         Self {
@@ -70,6 +81,7 @@ impl HostGuiLayout {
             limits,
             resize_policy,
             dpi_policy,
+            host_gui,
         }
     }
 
@@ -98,30 +110,59 @@ impl HostGuiLayout {
         self.state.lock().scale = scale;
     }
 
-    /// Returns the host size that keeps the preferred logical size at the active scale, or
-    /// `None` when the accepted host frame already matches it.
+    /// Returns the host size to request when the accepted frame is below the logical minimum
+    /// at the active scale, or `None` when the frame fits.
     ///
-    /// Used after an attached scale change: the frame was negotiated at the previous scale,
-    /// so without a host resize the WebView keeps the old pixel size and the layout no longer
-    /// fits (e.g. below the logical minimum after a scale increase).
-    pub(super) fn host_size_for_active_scale(&self) -> Option<GuiSize> {
+    /// After an attached scale increase the frame keeps the size negotiated at the previous
+    /// scale, and a frame below the scaled minimum clips the WebView layout. Only that case is
+    /// resized: a host may already have delivered a frame for the new scale before reporting
+    /// it (`set_size` then `set_scale` on a monitor change). `preferred_logical_size` was then
+    /// derived with the previous scale, so resizing to it again would scale the editor twice.
+    pub(super) fn host_size_to_unclip_at_active_scale(&self) -> Option<GuiSize> {
         if !self.dpi_policy.scales_layout_with_host_dpi() {
             return None;
         }
-        let target = {
-            let state = self.state.lock();
-            let dpi = DpiConverter::with_policy(state.scale, self.dpi_policy);
-            let limits = GuiSizeLimits {
-                min: self.scale_layout_size(self.limits.min, state.scale),
-                max: self.scale_layout_size(self.limits.max, state.scale),
-            };
-            clamp_size_with_limits(
-                dpi.logical_size_to_gui(state.preferred_logical_size),
-                limits,
-            )
+        let state = self.state.lock();
+        let limits = GuiSizeLimits {
+            min: self.scale_layout_size(self.limits.min, state.scale),
+            max: self.scale_layout_size(self.limits.max, state.scale),
         };
         let accepted = self.accepted_size();
-        (target.width != accepted.width || target.height != accepted.height).then_some(target)
+        if accepted.width >= limits.min.width && accepted.height >= limits.min.height {
+            return None;
+        }
+        let dpi = DpiConverter::with_policy(state.scale, self.dpi_policy);
+        Some(clamp_size_with_limits(
+            dpi.logical_size_to_gui(state.preferred_logical_size),
+            limits,
+        ))
+    }
+
+    /// Asks the host for `size` and returns the host size that is in effect afterwards.
+    ///
+    /// Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls
+    /// `set_size()` re-entrantly, and then returns false to CLAP. That re-entrant `set_size()`
+    /// is the ground truth; optimistically resizing the WebView here would race geometry with
+    /// the host and cause visual jitter during grip dragging. Some hosts accept the request but
+    /// never call `set_size()`; then `apply` mirrors `size` to the WebView and it is recorded
+    /// as accepted. A genuine rejection keeps the last host-confirmed size.
+    ///
+    /// `[main-thread]`: enters the host GUI extension, so call it only from GUI commands or
+    /// run-loop tasks, never from inside a CLAP GUI callback.
+    pub(super) fn request_host_resize(
+        &self,
+        size: GuiSize,
+        apply: impl FnOnce(GuiSize) -> PluginResult<()>,
+    ) -> PluginResult<GuiSize> {
+        let previous_revision = self.accepted_size_revision();
+        let resize_result = self.host_gui.request_resize(size);
+        if self.accepted_size_revision() != previous_revision {
+            return Ok(self.accepted_size());
+        }
+        resize_result?;
+        apply(size)?;
+        self.store_accepted_size(size);
+        Ok(size)
     }
 
     /// Re-syncs `accepted_size` and `negotiated_scale` to the latest scale when starting a
@@ -212,7 +253,7 @@ impl HostGuiLayout {
         self.accepted_size_revision.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(super) fn accepted_size_revision(&self) -> u64 {
+    fn accepted_size_revision(&self) -> u64 {
         self.accepted_size_revision.load(Ordering::Relaxed)
     }
 
@@ -230,12 +271,16 @@ impl WxpGuiResizeHandle {
     ///
     /// On Windows, sizes are interpreted as 100% logical pixels and scaled into host pixels.
     /// On macOS, sizes are Cocoa logical points. On Linux, sizes remain in host units.
-    pub fn new(initial_size: GuiSize, limits: GuiSizeLimits) -> Self {
+    ///
+    /// `host_gui` is the plugin instance's host GUI extension. Resize requests from frontend
+    /// commands and from attached scale changes are sent through it.
+    pub fn new(initial_size: GuiSize, limits: GuiSizeLimits, host_gui: Arc<dyn HostGui>) -> Self {
         Self {
             layout: Arc::new(HostGuiLayout::new(
                 initial_size,
                 limits,
                 GuiResizePolicy::RESIZABLE,
+                host_gui,
             )),
         }
     }
@@ -245,6 +290,7 @@ impl WxpGuiResizeHandle {
         initial_size: GuiSize,
         limits: GuiSizeLimits,
         dpi_policy: GuiDpiPolicy,
+        host_gui: Arc<dyn HostGui>,
     ) -> Self {
         Self {
             layout: Arc::new(HostGuiLayout::with_dpi_policy(
@@ -252,6 +298,7 @@ impl WxpGuiResizeHandle {
                 limits,
                 GuiResizePolicy::RESIZABLE,
                 dpi_policy,
+                host_gui,
             )),
         }
     }
@@ -264,47 +311,24 @@ impl WxpGuiResizeHandle {
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
-        host_gui: &dyn HostGui,
     ) -> PluginResult<LogicalSize<f64>> {
-        // `HostGui` can be shared from Send/Sync product state, but the target
-        // API is a host GUI extension. Keep the "GUI command only" threading contract at the
-        // command registration boundary rather than making this a generic background-thread API.
         let scale = self.layout.scale();
         let logical_size = self.layout.clamp_logical_size(requested);
         let dpi = DpiConverter::with_policy(scale, self.layout.dpi_policy);
         let gui_size = dpi.logical_size_to_gui(logical_size);
 
-        let previous_revision = self.layout.accepted_size_revision();
-        let resize_result = host_gui.request_resize(gui_size);
-        let current_revision = self.layout.accepted_size_revision();
-
-        // Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls
-        // `set_size()` re-entrantly, and then returns false to CLAP. Treat that re-entrant
-        // `set_size()` as the ground truth. Optimistically resizing the WebView here would
-        // race geometry with the host and cause visual jitter during grip dragging.
-        if current_revision != previous_revision {
-            return Ok(dpi.gui_size_to_logical(self.layout.accepted_size()));
+        // Pass `WebViewDispatch` rather than the native owner so the command handler can
+        // resize without extending the lifetime of a closing editor.
+        let accepted = self.layout.request_host_resize(gui_size, |_| {
+            web_view
+                .post_set_bounds(dpi.create_webview_bounds(logical_size))
+                .map_err(|_| PluginError::Message("failed to resize webview".into()))
+        })?;
+        if accepted.width == gui_size.width && accepted.height == gui_size.height {
+            // Return the unrounded logical size the frontend asked for.
+            return Ok(logical_size);
         }
-
-        match resize_result {
-            Ok(()) => {
-                // Some hosts accept the request but never call `set_size()`. In that case,
-                // update the WebView directly without waiting for an async callback.
-                // Pass `WebViewDispatch` rather than the native owner so the command handler
-                // can resize without extending the lifetime of a closing editor.
-                web_view
-                    .post_set_bounds(dpi.create_webview_bounds(logical_size))
-                    .map_err(|_| PluginError::Message("failed to resize webview".into()))?;
-                self.layout.store_accepted_size(gui_size);
-                Ok(logical_size)
-            }
-            Err(error) => {
-                // A genuine rejection is distinct from the AUv2 re-entry case above. Rather
-                // than speculatively moving the child WebView and rolling it back, keep the
-                // last host-confirmed size.
-                Err(error)
-            }
-        }
+        Ok(dpi.gui_size_to_logical(accepted))
     }
 }
 

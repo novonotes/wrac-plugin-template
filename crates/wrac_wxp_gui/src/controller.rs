@@ -8,7 +8,7 @@ use crate::window::StoredParentWindow;
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::interface::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGui, HostWindow, PluginError,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError,
     PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
     PluginGuiQueryExtension, PluginResult,
 };
@@ -46,8 +46,6 @@ pub struct WxpGuiController {
     factory: Arc<dyn WxpGuiFactory>,
     layout: Arc<HostGuiLayout>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
-    // Lets the controller ask the host to resize the frame after an attached scale change.
-    host_gui: Arc<dyn HostGui>,
     host_context: HostContext,
 }
 
@@ -104,10 +102,9 @@ const _: () = {
 };
 
 impl WxpGuiController {
-    pub fn new_with_resize_handle(
+    pub fn new(
         factory: impl WxpGuiFactory,
         resize_handle: WxpGuiResizeHandle,
-        host_gui: Arc<dyn HostGui>,
         host_context: HostContext,
     ) -> Self {
         Self {
@@ -122,7 +119,6 @@ impl WxpGuiController {
                 pending_creation_generation: None,
                 destroy_requested_while_creating: false,
             })),
-            host_gui,
             host_context,
         }
     }
@@ -170,14 +166,13 @@ impl WxpGuiController {
         corrected
     }
 
-    /// Asks the host to resize an attached frame to the preferred logical size at the
-    /// active scale.
+    /// Asks the host to enlarge an attached frame that would clip at the active scale.
     ///
     /// Some hosts report the scale only after `get_size` and `set_parent` (Ableton Live
     /// with Auto-Scale off sends `set_scale` last), so the frame keeps the size negotiated
-    /// at the previous scale. Without a resize, a scale increase leaves the WebView below
-    /// the logical minimum and the layout is clipped. A scale decrease (moving to a lower
-    /// DPI monitor) likewise keeps the logical size stable.
+    /// at the previous scale and falls below the logical minimum. See
+    /// `HostGuiLayout::host_size_to_unclip_at_active_scale` for why frames that already fit
+    /// are left alone.
     ///
     /// The request is posted to the run loop instead of being sent from the GUI callback:
     /// the CLAP adapter guards `set_scale`, `set_parent` and `set_size` with one mutation
@@ -185,8 +180,12 @@ impl WxpGuiController {
     /// rejected while the callback is still running. The VST3 wrapper also applies the
     /// `getSize` rectangle in `attached()` after `set_parent`, which would overwrite a
     /// request made before `attached()` returns.
-    fn post_resize_for_attached_scale(&self, generation: u64) {
-        let host_gui = self.host_gui.clone();
+    fn post_resize_if_clipped_at_active_scale(&self, generation: u64) {
+        // Checked here as well as in the posted task so hosts and platforms whose frame
+        // already fits never queue run-loop work.
+        if self.layout.host_size_to_unclip_at_active_scale().is_none() {
+            return;
+        }
         let layout = self.layout.clone();
         let runtime = self.runtime.clone();
         let post_result = RunLoop::post(move |_| {
@@ -200,7 +199,8 @@ impl WxpGuiController {
                     };
                     session.handle.clone()
                 };
-            let Some(size) = layout.host_size_for_active_scale() else {
+            // The host may have resized the frame between the callback and this task.
+            let Some(size) = layout.host_size_to_unclip_at_active_scale() else {
                 return;
             };
             log::debug!(
@@ -208,22 +208,13 @@ impl WxpGuiController {
                 size.width,
                 size.height
             );
-            let previous_revision = layout.accepted_size_revision();
-            if let Err(error) = host_gui.request_resize(size) {
-                log::debug!("wxp controller: host rejected attached scale resize: {error:?}");
-                return;
-            }
-            // Most hosts confirm through a re-entrant or later `set_size`. Apply the size
-            // directly only when the host accepted without calling back, matching
-            // `WxpGuiResizeHandle::request_resize`.
-            if layout.accepted_size_revision() == previous_revision {
-                if let Some(handle) = handle
-                    && let Err(error) = handle.set_size(size)
-                {
-                    log::warn!("wxp controller: attached scale resize set_size failed: {error:?}");
-                    return;
-                }
-                layout.store_accepted_size(size);
+            let result = layout.request_host_resize(size, |size| match &handle {
+                Some(handle) => handle.set_size(size),
+                // The runtime reads the accepted size when its pending creation runs.
+                None => Ok(()),
+            });
+            if let Err(error) = result {
+                log::debug!("wxp controller: attached scale resize was not applied: {error:?}");
             }
         });
         if post_result.is_err() {
@@ -724,7 +715,8 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             let parent = session.and_then(|session| session.parent);
             let scale = self.correct_host_scale(scale, parent);
             // The host can query get_size before it creates the parent. Scale the
-            // suggested size then, and leave an attached host's frame to set_size.
+            // suggested size then. An attached host's frame stays governed by set_size;
+            // only a frame that would clip at the new scale gets a resize request below.
             if parent.is_none() {
                 self.layout.set_scale_before_attach(scale);
             } else {
@@ -740,7 +732,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             handle.set_scale(scale)?;
         }
         if let Some(generation) = attached_generation {
-            self.post_resize_for_attached_scale(generation);
+            self.post_resize_if_clipped_at_active_scale(generation);
         }
         log::debug!("wxp controller: set_scale completed");
         Ok(())
@@ -857,8 +849,9 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         // On failure, leave the session without a runtime and let a subsequent
         // show/set_parent reschedule it.
         self.schedule_runtime_creation(generation)?;
-        // A scale correction above can leave the frame negotiated by get_size too small.
-        self.post_resize_for_attached_scale(generation);
+        // The Cubase scale correction above can leave the frame negotiated by get_size
+        // below the minimum at the corrected scale.
+        self.post_resize_if_clipped_at_active_scale(generation);
         log::debug!("wxp controller: set_parent completed");
         Ok(())
     }
