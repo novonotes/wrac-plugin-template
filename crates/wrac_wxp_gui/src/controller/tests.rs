@@ -27,6 +27,15 @@ fn test_layout(dpi_policy: GuiDpiPolicy) -> HostGuiLayout {
     )
 }
 
+// These tests run without a GUI run loop, so posted host resize requests never execute.
+struct UnusedHostGui;
+
+impl HostGui for UnusedHostGui {
+    fn request_resize(&self, _size: GuiSize) -> PluginResult<()> {
+        Err(PluginError::InvalidState)
+    }
+}
+
 fn test_controller(
     initial_size: GuiSize,
     limits: GuiSizeLimits,
@@ -51,6 +60,7 @@ fn test_controller(
          _parent: ParentWindowHandle|
          -> PluginResult<Box<dyn WxpGuiRuntime>> { Err(PluginError::InvalidState) },
         resize_handle,
+        Arc::new(UnusedHostGui),
         context,
     )
 }

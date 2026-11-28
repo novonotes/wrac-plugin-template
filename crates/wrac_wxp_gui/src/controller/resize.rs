@@ -98,6 +98,32 @@ impl HostGuiLayout {
         self.state.lock().scale = scale;
     }
 
+    /// Returns the host size that keeps the preferred logical size at the active scale, or
+    /// `None` when the accepted host frame already matches it.
+    ///
+    /// Used after an attached scale change: the frame was negotiated at the previous scale,
+    /// so without a host resize the WebView keeps the old pixel size and the layout no longer
+    /// fits (e.g. below the logical minimum after a scale increase).
+    pub(super) fn host_size_for_active_scale(&self) -> Option<GuiSize> {
+        if !self.dpi_policy.scales_layout_with_host_dpi() {
+            return None;
+        }
+        let target = {
+            let state = self.state.lock();
+            let dpi = DpiConverter::with_policy(state.scale, self.dpi_policy);
+            let limits = GuiSizeLimits {
+                min: self.scale_layout_size(self.limits.min, state.scale),
+                max: self.scale_layout_size(self.limits.max, state.scale),
+            };
+            clamp_size_with_limits(
+                dpi.logical_size_to_gui(state.preferred_logical_size),
+                limits,
+            )
+        };
+        let accepted = self.accepted_size();
+        (target.width != accepted.width || target.height != accepted.height).then_some(target)
+    }
+
     /// Re-syncs `accepted_size` and `negotiated_scale` to the latest scale when starting a
     /// new GUI session, so reopening after an attached scale change starts at the expected
     /// size even if the host skips `set_scale` before `get_size`.
@@ -186,7 +212,7 @@ impl HostGuiLayout {
         self.accepted_size_revision.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn accepted_size_revision(&self) -> u64 {
+    pub(super) fn accepted_size_revision(&self) -> u64 {
         self.accepted_size_revision.load(Ordering::Relaxed)
     }
 

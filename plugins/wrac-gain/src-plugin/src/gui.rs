@@ -95,6 +95,7 @@ pub(crate) fn create_gui_integration(
             dependencies: runtime_dependencies,
         },
         resize_handle,
+        context.host_gui.clone(),
         context.host_context.clone(),
     ));
 
