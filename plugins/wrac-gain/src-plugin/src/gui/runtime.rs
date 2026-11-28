@@ -85,7 +85,6 @@ impl WracGainGuiRuntime {
         );
 
         let command_handler = Rc::new(WxpCommandHandler::new());
-        let host_size_unit = dependencies.resize_handle.host_size_unit();
         register_commands(
             command_handler.clone(),
             CommandRegistrationDependencies {
@@ -106,7 +105,6 @@ impl WracGainGuiRuntime {
             WxpWebViewConfig {
                 plugin_id: dependencies.descriptor.id,
                 initial_size,
-                host_size_unit,
                 parent,
                 frontend: frontend_source(),
                 devtools: cfg!(debug_assertions),

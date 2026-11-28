@@ -8,7 +8,7 @@ use url::{Host, Url};
 use wrac_clap_adapter::interface::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
-use crate::dpi::{DpiConverter, HostGuiSizeUnit};
+use crate::dpi::DpiConverter;
 use crate::window::ParentWindowHandle;
 
 const URL_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -43,7 +43,6 @@ pub struct WxpWebViewConfig {
     pub plugin_id: &'static str,
     /// Initial size negotiated with the host by the GUI controller.
     pub initial_size: GuiSize,
-    pub host_size_unit: HostGuiSizeUnit,
     pub parent: ParentWindowHandle,
     pub frontend: WxpFrontendSource,
     pub devtools: bool,
@@ -84,7 +83,7 @@ impl WxpWebViewSession {
         log::debug!("using GUI data directory: {}", data_dir.display());
 
         let mut wxp_context = WebContext::new(data_dir);
-        let dpi_converter = DpiConverter::with_host_size_unit(1.0, config.host_size_unit);
+        let dpi_converter = DpiConverter::new(1.0);
         // Convert initial bounds here so product runtimes never need host- or
         // platform-specific DPI branches.
         let host_size = config.initial_size;

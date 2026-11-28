@@ -1,11 +1,11 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use wrac_clap_adapter::interface::{GuiResizeHints, GuiSize, HostGui, PluginError, PluginResult};
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
-use crate::dpi::{DpiConverter, HostGuiSizeUnit};
+use crate::dpi::{DpiConverter, GuiDpiPolicy};
 
 use super::GuiSizeLimits;
 
@@ -35,12 +35,7 @@ pub(super) struct HostGuiLayout {
     accepted_size_revision: AtomicU64,
     limits: GuiSizeLimits,
     resize_policy: GuiResizePolicy,
-    host_size_unit: AtomicU8,
-    // Only Windows WebView2 automatically matches its CSS viewport scale to the host's
-    // per-monitor DPI. Linux WebKitGTK renders at the GDK integer scale regardless of the
-    // CLAP host scale, so scaling preferred sizes and limits by host scale stays Windows-only
-    // until Linux zoom synchronization is implemented and verified on X11.
-    scales_with_host_dpi: AtomicBool,
+    dpi_policy: GuiDpiPolicy,
 }
 
 #[derive(Clone)]
@@ -54,6 +49,15 @@ impl HostGuiLayout {
         limits: GuiSizeLimits,
         resize_policy: GuiResizePolicy,
     ) -> Self {
+        Self::with_dpi_policy(size, limits, resize_policy, GuiDpiPolicy::current())
+    }
+
+    pub(super) fn with_dpi_policy(
+        size: GuiSize,
+        limits: GuiSizeLimits,
+        resize_policy: GuiResizePolicy,
+        dpi_policy: GuiDpiPolicy,
+    ) -> Self {
         let size = clamp_size_with_limits(size, limits);
         Self {
             accepted_size: AtomicGuiSize::new(size),
@@ -65,8 +69,7 @@ impl HostGuiLayout {
             accepted_size_revision: AtomicU64::new(0),
             limits,
             resize_policy,
-            host_size_unit: AtomicU8::new(HostGuiSizeUnit::PhysicalPixels.to_u8()),
-            scales_with_host_dpi: AtomicBool::new(cfg!(windows)),
+            dpi_policy,
         }
     }
 
@@ -78,22 +81,40 @@ impl HostGuiLayout {
         self.state.lock().scale
     }
 
-    pub(super) fn set_scale(&self, scale: f64, is_unattached: bool) {
+    /// Updates the active scale before a parent window is attached and re-derives
+    /// `accepted_size` from the 100% logical baseline so `get_size` returns scaled host
+    /// pixels on Windows.
+    pub(super) fn set_scale_before_attach(&self, scale: f64) {
         let mut state = self.state.lock();
         state.scale = scale;
-        if is_unattached {
-            self.apply_preferred_scale_locked(&mut state, scale);
-        }
+        self.apply_preferred_scale_locked(&mut state, scale);
     }
 
+    /// Updates the active scale while a parent window is already attached.
+    ///
+    /// Deliberately leaves `accepted_size` and `negotiated_scale` untouched so an attached
+    /// host frame remains governed by `set_size` rather than expanding out of its parent.
+    pub(super) fn set_scale_while_attached(&self, scale: f64) {
+        self.state.lock().scale = scale;
+    }
+
+    /// Re-syncs `accepted_size` and `negotiated_scale` to the latest scale when starting a
+    /// new GUI session, so reopening after an attached scale change starts at the expected
+    /// size even if the host skips `set_scale` before `get_size`.
     pub(super) fn prepare_for_new_session(&self) {
         let mut state = self.state.lock();
         let scale = state.scale;
         self.apply_preferred_scale_locked(&mut state, scale);
     }
 
+    /// Clamps a host-supplied size (from `adjust_size` or `set_size`) to the active bounds.
+    ///
+    /// On Windows, the minimum bound uses `negotiated_scale.min(scale)` and the maximum
+    /// bound uses `negotiated_scale.max(scale)` so late scale updates on an unresized parent
+    /// frame do not clip the child WebView, while hosts that enlarge their frame to the new
+    /// scale are accepted up to the scaled maximum.
     pub(super) fn clamp_host_size(&self, size: GuiSize) -> GuiSize {
-        if !self.uses_host_dpi_layout_scaling() {
+        if !self.dpi_policy.scales_layout_with_host_dpi() {
             return clamp_size_with_limits(size, self.limits);
         }
         let (scale, negotiated_scale) = {
@@ -109,10 +130,10 @@ impl HostGuiLayout {
 
     fn apply_preferred_scale_locked(&self, state: &mut LayoutState, scale: f64) {
         state.negotiated_scale = scale;
-        if !self.uses_host_dpi_layout_scaling() {
+        if !self.dpi_policy.scales_layout_with_host_dpi() {
             return;
         }
-        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
         let scaled = dpi.logical_size_to_gui(state.preferred_logical_size);
         let limits = GuiSizeLimits {
             min: self.scale_layout_size(self.limits.min, scale),
@@ -123,22 +144,17 @@ impl HostGuiLayout {
     }
 
     fn scale_layout_size(&self, size: GuiSize, scale: f64) -> GuiSize {
-        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
         dpi.logical_size_to_gui(LogicalSize::new(size.width as f64, size.height as f64))
-    }
-
-    fn uses_host_dpi_layout_scaling(&self) -> bool {
-        self.scales_with_host_dpi.load(Ordering::Relaxed)
-            && self.host_size_unit() == HostGuiSizeUnit::PhysicalPixels
     }
 
     pub(super) fn clamp_logical_size(&self, size: LogicalSize<f64>) -> LogicalSize<f64> {
         let scale = self.scale();
-        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
         // Resize commands receive frontend logical pixels. Convert through the host
         // boundary unit before clamping so limits remain comparable to host callbacks.
         let host_size = dpi.logical_size_to_gui(size);
-        let limits = if self.uses_host_dpi_layout_scaling() {
+        let limits = if self.dpi_policy.scales_layout_with_host_dpi() {
             GuiSizeLimits {
                 min: self.scale_layout_size(self.limits.min, scale),
                 max: self.scale_layout_size(self.limits.max, scale),
@@ -150,26 +166,13 @@ impl HostGuiLayout {
         dpi.gui_size_to_logical(clamped)
     }
 
-    pub(super) fn set_host_size_unit(&self, unit: HostGuiSizeUnit) {
-        self.host_size_unit.store(unit.to_u8(), Ordering::Relaxed);
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_scales_with_host_dpi(&self, enabled: bool) {
-        self.scales_with_host_dpi.store(enabled, Ordering::Relaxed);
-    }
-
-    pub(super) fn host_size_unit(&self) -> HostGuiSizeUnit {
-        HostGuiSizeUnit::from_u8(self.host_size_unit.load(Ordering::Relaxed))
-    }
-
     pub(super) fn store_accepted_size(&self, size: GuiSize) {
         let previous = self.accepted_size.load();
         let size_changed = previous.width != size.width || previous.height != size.height;
-        if size_changed && self.uses_host_dpi_layout_scaling() {
+        if size_changed && self.dpi_policy.scales_layout_with_host_dpi() {
             let mut state = self.state.lock();
             let scale = state.scale;
-            let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+            let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
             state.preferred_logical_size = dpi.gui_size_to_logical(size);
             // Once the host actually delivers a frame at least as large as the new scale's
             // minimum, promote `negotiated_scale` so subsequent resizes enforce the scaled
@@ -211,12 +214,20 @@ impl WxpGuiResizeHandle {
         }
     }
 
-    pub fn host_size_unit(&self) -> HostGuiSizeUnit {
-        self.layout.host_size_unit()
-    }
-
-    pub(super) fn set_host_size_unit(&self, unit: HostGuiSizeUnit) {
-        self.layout.set_host_size_unit(unit);
+    #[cfg(test)]
+    pub(super) fn with_dpi_policy(
+        initial_size: GuiSize,
+        limits: GuiSizeLimits,
+        dpi_policy: GuiDpiPolicy,
+    ) -> Self {
+        Self {
+            layout: Arc::new(HostGuiLayout::with_dpi_policy(
+                initial_size,
+                limits,
+                GuiResizePolicy::RESIZABLE,
+                dpi_policy,
+            )),
+        }
     }
 
     /// Requests a host-approved resize from the GUI event path and mirrors accepted bounds to wxp.
@@ -234,7 +245,7 @@ impl WxpGuiResizeHandle {
         // command registration boundary rather than making this a generic background-thread API.
         let scale = self.layout.scale();
         let logical_size = self.layout.clamp_logical_size(requested);
-        let dpi = DpiConverter::with_host_size_unit(scale, self.layout.host_size_unit());
+        let dpi = DpiConverter::with_policy(scale, self.layout.dpi_policy);
         let gui_size = dpi.logical_size_to_gui(logical_size);
 
         let previous_revision = self.layout.accepted_size_revision();

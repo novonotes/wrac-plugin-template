@@ -18,7 +18,7 @@ mod defaults;
 mod resize;
 mod scale;
 
-use self::defaults::{default_gui_api, default_gui_configuration, default_host_gui_size_unit};
+use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
 use self::scale::corrected_scale_for_parent;
@@ -107,7 +107,6 @@ impl WxpGuiController {
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
     ) -> Self {
-        resize_handle.set_host_size_unit(default_host_gui_size_unit());
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
@@ -660,7 +659,11 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             let scale = self.correct_host_scale(scale, parent);
             // The host can query get_size before it creates the parent. Scale the
             // suggested size then, and leave an attached host's frame to set_size.
-            self.layout.set_scale(scale, parent.is_none());
+            if parent.is_none() {
+                self.layout.set_scale_before_attach(scale);
+            } else {
+                self.layout.set_scale_while_attached(scale);
+            }
             let handle = state
                 .session
                 .as_ref()
@@ -775,7 +778,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         // wait until the native parent window is known. Update the shared layout scale
         // without rescaling the already-created host frame.
         let corrected_scale = self.correct_host_scale(self.layout.scale(), Some(parent));
-        self.layout.set_scale(corrected_scale, false);
+        self.layout.set_scale_while_attached(corrected_scale);
         if let Some(parent_lease) = parent_lease {
             session.parent_lease = Some(parent_lease);
         }

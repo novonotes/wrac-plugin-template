@@ -1,13 +1,13 @@
 use super::resize::GuiResizePolicy;
 use super::*;
-use crate::dpi::HostGuiSizeUnit;
+use crate::dpi::GuiDpiPolicy;
 use crate::runtime::WxpGuiRuntime;
 use crate::window::ParentWindowHandle;
 use wrac_host_context::DetectedHost;
 use wxp::dpi::LogicalSize;
 
-fn test_layout(unit: HostGuiSizeUnit, scales_with_host_dpi: bool) -> HostGuiLayout {
-    let layout = HostGuiLayout::new(
+fn test_layout(dpi_policy: GuiDpiPolicy) -> HostGuiLayout {
+    HostGuiLayout::with_dpi_policy(
         GuiSize {
             width: 600,
             height: 400,
@@ -23,17 +23,14 @@ fn test_layout(unit: HostGuiSizeUnit, scales_with_host_dpi: bool) -> HostGuiLayo
             },
         },
         GuiResizePolicy::RESIZABLE,
-    );
-    layout.set_host_size_unit(unit);
-    layout.set_scales_with_host_dpi(scales_with_host_dpi);
-    layout
+        dpi_policy,
+    )
 }
 
 fn test_controller(
     initial_size: GuiSize,
     limits: GuiSizeLimits,
-    unit: HostGuiSizeUnit,
-    scales_with_host_dpi: bool,
+    dpi_policy: GuiDpiPolicy,
 ) -> WxpGuiController {
     let (context, _) = HostContext::new(
         DetectedHost {
@@ -46,8 +43,8 @@ fn test_controller(
         PluginFormat::Vst3,
         wrac_host_context::SystemContext::detect(),
     );
-    let resize_handle = WxpGuiResizeHandle::new(initial_size, limits);
-    let controller = WxpGuiController::new_with_resize_handle(
+    let resize_handle = WxpGuiResizeHandle::with_dpi_policy(initial_size, limits, dpi_policy);
+    WxpGuiController::new_with_resize_handle(
         |_run_loop: &RunLoopLocal,
          _config: GuiConfig,
          _initial_size: GuiSize,
@@ -55,32 +52,27 @@ fn test_controller(
          -> PluginResult<Box<dyn WxpGuiRuntime>> { Err(PluginError::InvalidState) },
         resize_handle,
         context,
-    );
-    controller.layout.set_host_size_unit(unit);
-    controller
-        .layout
-        .set_scales_with_host_dpi(scales_with_host_dpi);
-    controller
+    )
 }
 
 #[test]
 fn clamps_logical_resize_request_per_platform_policy() {
-    let windows_layout = test_layout(HostGuiSizeUnit::PhysicalPixels, true);
-    windows_layout.set_scale(1.5, true);
+    let windows_layout = test_layout(GuiDpiPolicy::Windows);
+    windows_layout.set_scale_before_attach(1.5);
     assert_eq!(
         windows_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
         LogicalSize::new(700.0, 200.0)
     );
 
-    let linux_layout = test_layout(HostGuiSizeUnit::PhysicalPixels, false);
-    linux_layout.set_scale(1.5, true);
+    let linux_layout = test_layout(GuiDpiPolicy::Linux);
+    linux_layout.set_scale_before_attach(1.5);
     assert_eq!(
         linux_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
         LogicalSize::new(600.0, 200.0 / 1.5)
     );
 
-    let macos_layout = test_layout(HostGuiSizeUnit::LogicalPoints, false);
-    macos_layout.set_scale(2.0, true);
+    let macos_layout = test_layout(GuiDpiPolicy::Macos);
+    macos_layout.set_scale_before_attach(2.0);
     assert_eq!(
         macos_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
         LogicalSize::new(700.0, 200.0)
@@ -89,9 +81,9 @@ fn clamps_logical_resize_request_per_platform_policy() {
 
 #[test]
 fn scales_preferred_size_and_limits_on_windows() {
-    let layout = test_layout(HostGuiSizeUnit::PhysicalPixels, true);
+    let layout = test_layout(GuiDpiPolicy::Windows);
 
-    layout.set_scale(1.25, true);
+    layout.set_scale_before_attach(1.25);
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (750, 500));
 
@@ -105,29 +97,31 @@ fn scales_preferred_size_and_limits_on_windows() {
         width: 850,
         height: 610,
     });
-    layout.set_scale(1.5, true);
+    layout.set_scale_before_attach(1.5);
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (1020, 732));
 }
 
 #[test]
-fn keeps_linux_physical_sizes_and_limits_unchanged_across_host_scale() {
-    let layout = test_layout(HostGuiSizeUnit::PhysicalPixels, false);
+fn keeps_macos_and_linux_host_sizes_and_limits_unchanged_across_scale() {
+    for policy in [GuiDpiPolicy::Macos, GuiDpiPolicy::Linux] {
+        let layout = test_layout(policy);
 
-    layout.set_scale(2.0, true);
-    let size = layout.accepted_size();
-    assert_eq!((size.width, size.height), (600, 400));
+        layout.set_scale_before_attach(2.0);
+        let size = layout.accepted_size();
+        assert_eq!((size.width, size.height), (600, 400));
 
-    let clamped = layout.clamp_host_size(GuiSize {
-        width: 200,
-        height: 700,
-    });
-    assert_eq!((clamped.width, clamped.height), (300, 600));
+        let clamped = layout.clamp_host_size(GuiSize {
+            width: 200,
+            height: 700,
+        });
+        assert_eq!((clamped.width, clamped.height), (300, 600));
+    }
 }
 
 #[test]
 fn avoids_rounding_drift_across_repeated_scale_changes() {
-    let layout = HostGuiLayout::new(
+    let layout = HostGuiLayout::with_dpi_policy(
         GuiSize {
             width: 322,
             height: 381,
@@ -143,31 +137,15 @@ fn avoids_rounding_drift_across_repeated_scale_changes() {
             },
         },
         GuiResizePolicy::RESIZABLE,
+        GuiDpiPolicy::Windows,
     );
-    layout.set_host_size_unit(HostGuiSizeUnit::PhysicalPixels);
-    layout.set_scales_with_host_dpi(true);
 
     for scale in [1.25, 1.33, 1.75, 1.25, 1.0] {
-        layout.set_scale(scale, true);
+        layout.set_scale_before_attach(scale);
     }
 
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (322, 381));
-}
-
-#[test]
-fn keeps_logical_point_hosts_unscaled() {
-    let layout = test_layout(HostGuiSizeUnit::LogicalPoints, false);
-
-    layout.set_scale(2.0, true);
-    let size = layout.accepted_size();
-    assert_eq!((size.width, size.height), (600, 400));
-
-    let minimum = layout.clamp_host_size(GuiSize {
-        width: 200,
-        height: 150,
-    });
-    assert_eq!((minimum.width, minimum.height), (300, 200));
 }
 
 #[test]
@@ -189,8 +167,7 @@ fn keeps_attached_frame_unclipped_and_reopen_accurate_after_late_scale_increase(
                 height: 720,
             },
         },
-        HostGuiSizeUnit::PhysicalPixels,
-        true,
+        GuiDpiPolicy::Windows,
     );
     let config = default_gui_configuration();
 
@@ -247,8 +224,7 @@ fn preserves_logical_baseline_when_attached_host_echoes_unscaled_frame() {
                 height: 600,
             },
         },
-        HostGuiSizeUnit::PhysicalPixels,
-        true,
+        GuiDpiPolicy::Windows,
     );
     let config = default_gui_configuration();
 
@@ -286,8 +262,7 @@ fn allows_attached_fixed_size_frame_to_grow_when_host_scales_parent() {
                 height: 380,
             },
         },
-        HostGuiSizeUnit::PhysicalPixels,
-        true,
+        GuiDpiPolicy::Windows,
     );
     let config = default_gui_configuration();
 
@@ -308,14 +283,4 @@ fn allows_attached_fixed_size_frame_to_grow_when_host_scales_parent() {
     controller.set_size(adjusted).unwrap();
     let grown = controller.get_size().unwrap();
     assert_eq!((grown.width, grown.height), (400, 475));
-}
-
-#[test]
-fn selects_host_size_unit_by_platform() {
-    let expected = if cfg!(target_os = "macos") {
-        HostGuiSizeUnit::LogicalPoints
-    } else {
-        HostGuiSizeUnit::PhysicalPixels
-    };
-    assert_eq!(default_host_gui_size_unit(), expected);
 }
