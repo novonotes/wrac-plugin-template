@@ -92,8 +92,8 @@ impl WxpGuiController {
     }
 
     fn monitor_change_since_scale_report(&self, session: &GuiSession) -> Option<MonitorChange> {
-        // A host resizing for the new monitor before reporting its scale has only been
-        // observed through the VST3 content-scale interface.
+        // Limited to VST3: this compensates for a frame that arrives ahead of the VST3
+        // content-scale report, and the other formats have no such report to run ahead of.
         if self.resize_handle.host_context.plugin_format != PluginFormat::Vst3 {
             return None;
         }

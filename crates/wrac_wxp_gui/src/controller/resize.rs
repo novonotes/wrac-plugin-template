@@ -337,7 +337,8 @@ impl WxpGuiResizeHandle {
     /// Whether the host resizes the editor window on a VST3 `resizeView` request without
     /// confirming the new frame through `onSize`, whatever the request returns.
     fn host_resizes_without_confirmation(&self) -> bool {
-        // These hosts are only known to behave this way on Windows. The request cannot
+        // Limited to Windows, the only platform where the controller issues frame requests
+        // on its own; elsewhere a rejected resize command must stay rejected. The request cannot
         // tell a rejection from a missing host frame, which is why requests are limited to
         // an attached editor (see `request_host_frame`): the frame exists by then.
         self.layout.scales_with_host_dpi()
