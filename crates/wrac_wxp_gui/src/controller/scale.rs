@@ -4,10 +4,11 @@ use crate::window::StoredParentWindow;
 
 /// Queries the native parent window's effective DPI scale on Windows.
 ///
-/// Some Windows hosts (notably Cubase 10 VST3) report integer scale factors even on
-/// fractional-DPI monitors, so the controller falls back to inspecting the parent HWND.
+/// The controller inspects the parent HWND where the host cannot be relied on for the scale:
+/// some Windows hosts (notably Cubase 10 VST3) report integer scale factors even on
+/// fractional-DPI monitors, and AAX has no content-scale callback at all.
 #[cfg(windows)]
-pub(super) fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> Option<f64> {
+pub(super) fn parent_window_scale(parent: Option<StoredParentWindow>) -> Option<f64> {
     use std::sync::OnceLock;
 
     use windows_sys::Win32::Foundation::HWND;
@@ -98,7 +99,7 @@ where
 }
 
 #[cfg(not(windows))]
-pub(super) fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
+pub(super) fn parent_window_scale(_parent: Option<StoredParentWindow>) -> Option<f64> {
     None
 }
 

@@ -22,7 +22,7 @@ mod scale;
 use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
-use self::scale::{corrected_scale_for_parent, monitor_scale_for_parent};
+use self::scale::{monitor_scale_for_parent, parent_window_scale};
 
 /// Minimum and maximum editor bounds.
 ///
@@ -172,7 +172,7 @@ impl WxpGuiController {
         // Cubase 10 on Windows has been observed to report integer VST3 scale factors
         // even when the editor is hosted on a fractional-DPI monitor. The host parent
         // HWND is the closest source of truth for the actual size conversion.
-        let corrected = corrected_scale_for_parent(parent).unwrap_or(scale);
+        let corrected = parent_window_scale(parent).unwrap_or(scale);
         if (corrected - scale).abs() > f64::EPSILON {
             log::info!(
                 "wxp controller: corrected Cubase VST3 host scale from {scale} to {corrected}"
@@ -797,17 +797,31 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         // without rescaling the already-created host frame.
         let corrected_scale = self.correct_host_scale(self.layout.scale(), Some(parent));
         self.layout.set_scale_while_attached(corrected_scale);
+        if self.host_context.plugin_format == PluginFormat::Aax {
+            // AAX has no content-scale callback, so the parent window is the only source of
+            // the scale. The host has not negotiated a frame at this scale yet, so the
+            // accepted size is re-derived the same way as for a scale reported before attach.
+            // `None` means the lookup does not apply (not on Windows) or the window DPI is
+            // unavailable; the editor then keeps the current scale, as it did before this
+            // lookup existed.
+            if let Some(scale) = parent_window_scale(Some(parent)) {
+                self.layout.set_scale_before_attach(scale);
+            }
+        }
         if let Some(parent_lease) = parent_lease {
             session.parent_lease = Some(parent_lease);
         }
         drop(state);
-        if self.host_context.plugin_format == PluginFormat::Vst3 {
+        if matches!(
+            self.host_context.plugin_format,
+            PluginFormat::Vst3 | PluginFormat::Aax
+        ) {
             // A VST3 host may have sized its window from a `getSize` answered before the
-            // scale was known or corrected, and nothing tells the plugin which frame the
-            // host created. Requesting the preferred frame on every attach is the only way
-            // to bring such a host in line; a host that already has it treats this as a
-            // no-op. CLAP hosts report the scale before querying the size, so they need no
-            // request here.
+            // scale was known or corrected, and an AAX host cannot know the scale read from
+            // its window above. Nothing tells the plugin which frame the host created, so
+            // requesting the preferred frame on every attach is the only way to bring such
+            // a host in line; a host that already has it treats this as a no-op. CLAP hosts
+            // report the scale before querying the size, so they need no request here.
             if let Err(error) = self.request_preferred_host_frame() {
                 // Attachment itself succeeded. The runtime is created from the last
                 // accepted frame, so a failed request only leaves the frame as it was.
