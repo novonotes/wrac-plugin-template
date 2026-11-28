@@ -1,11 +1,12 @@
 use super::resize::GuiResizePolicy;
 use super::*;
+use crate::dpi::HostGuiSizeUnit;
 use crate::runtime::WxpGuiRuntime;
 use crate::window::ParentWindowHandle;
 use wrac_host_context::DetectedHost;
 use wxp::dpi::LogicalSize;
 
-fn test_layout(unit: HostGuiSizeUnit) -> HostGuiLayout {
+fn test_layout(unit: HostGuiSizeUnit, scales_with_host_dpi: bool) -> HostGuiLayout {
     let layout = HostGuiLayout::new(
         GuiSize {
             width: 600,
@@ -24,10 +25,16 @@ fn test_layout(unit: HostGuiSizeUnit) -> HostGuiLayout {
         GuiResizePolicy::RESIZABLE,
     );
     layout.set_host_size_unit(unit);
+    layout.set_scales_with_host_dpi(scales_with_host_dpi);
     layout
 }
 
-fn test_controller(unit: HostGuiSizeUnit) -> WxpGuiController {
+fn test_controller(
+    initial_size: GuiSize,
+    limits: GuiSizeLimits,
+    unit: HostGuiSizeUnit,
+    scales_with_host_dpi: bool,
+) -> WxpGuiController {
     let (context, _) = HostContext::new(
         DetectedHost {
             family: HostFamily::Unknown,
@@ -39,22 +46,7 @@ fn test_controller(unit: HostGuiSizeUnit) -> WxpGuiController {
         PluginFormat::Vst3,
         wrac_host_context::SystemContext::detect(),
     );
-    let resize_handle = WxpGuiResizeHandle::new(
-        GuiSize {
-            width: 600,
-            height: 400,
-        },
-        GuiSizeLimits {
-            min: GuiSize {
-                width: 300,
-                height: 200,
-            },
-            max: GuiSize {
-                width: 900,
-                height: 600,
-            },
-        },
-    );
+    let resize_handle = WxpGuiResizeHandle::new(initial_size, limits);
     let controller = WxpGuiController::new_with_resize_handle(
         |_run_loop: &RunLoopLocal,
          _config: GuiConfig,
@@ -66,47 +58,71 @@ fn test_controller(unit: HostGuiSizeUnit) -> WxpGuiController {
     );
     controller.layout.set_host_size_unit(unit);
     controller
+        .layout
+        .set_scales_with_host_dpi(scales_with_host_dpi);
+    controller
 }
 
 #[test]
-fn keeps_resize_limits_in_logical_pixels_across_host_size_units() {
-    for unit in [
-        HostGuiSizeUnit::PhysicalPixels,
-        HostGuiSizeUnit::LogicalPoints,
-    ] {
-        let layout = test_layout(unit);
-        let clamped = layout.clamp_logical_size(LogicalSize::new(700.0, 100.0), 1.5);
-        assert_eq!(clamped, LogicalSize::new(700.0, 200.0));
-    }
+fn clamps_logical_resize_request_per_platform_policy() {
+    let windows_layout = test_layout(HostGuiSizeUnit::PhysicalPixels, true);
+    windows_layout.set_scale(1.5, true);
+    assert_eq!(
+        windows_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
+        LogicalSize::new(700.0, 200.0)
+    );
+
+    let linux_layout = test_layout(HostGuiSizeUnit::PhysicalPixels, false);
+    linux_layout.set_scale(1.5, true);
+    assert_eq!(
+        linux_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
+        LogicalSize::new(600.0, 200.0 / 1.5)
+    );
+
+    let macos_layout = test_layout(HostGuiSizeUnit::LogicalPoints, false);
+    macos_layout.set_scale(2.0, true);
+    assert_eq!(
+        macos_layout.clamp_logical_size(LogicalSize::new(700.0, 100.0)),
+        LogicalSize::new(700.0, 200.0)
+    );
 }
 
 #[test]
-fn scales_preferred_size_and_limits_for_physical_pixel_hosts() {
-    let layout = test_layout(HostGuiSizeUnit::PhysicalPixels);
+fn scales_preferred_size_and_limits_on_windows() {
+    let layout = test_layout(HostGuiSizeUnit::PhysicalPixels, true);
 
-    layout.apply_preferred_scale(1.25);
+    layout.set_scale(1.25, true);
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (750, 500));
 
-    let minimum = layout.clamp_size(
-        GuiSize {
-            width: 300,
-            height: 200,
-        },
-        1.25,
-    );
+    let minimum = layout.clamp_host_size(GuiSize {
+        width: 300,
+        height: 200,
+    });
     assert_eq!((minimum.width, minimum.height), (375, 250));
 
-    layout.store_accepted_size(
-        GuiSize {
-            width: 850,
-            height: 610,
-        },
-        1.25,
-    );
-    layout.apply_preferred_scale(1.5);
+    layout.store_accepted_size(GuiSize {
+        width: 850,
+        height: 610,
+    });
+    layout.set_scale(1.5, true);
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (1020, 732));
+}
+
+#[test]
+fn keeps_linux_physical_sizes_and_limits_unchanged_across_host_scale() {
+    let layout = test_layout(HostGuiSizeUnit::PhysicalPixels, false);
+
+    layout.set_scale(2.0, true);
+    let size = layout.accepted_size();
+    assert_eq!((size.width, size.height), (600, 400));
+
+    let clamped = layout.clamp_host_size(GuiSize {
+        width: 200,
+        height: 700,
+    });
+    assert_eq!((clamped.width, clamped.height), (300, 600));
 }
 
 #[test]
@@ -129,9 +145,10 @@ fn avoids_rounding_drift_across_repeated_scale_changes() {
         GuiResizePolicy::RESIZABLE,
     );
     layout.set_host_size_unit(HostGuiSizeUnit::PhysicalPixels);
+    layout.set_scales_with_host_dpi(true);
 
     for scale in [1.25, 1.33, 1.75, 1.25, 1.0] {
-        layout.apply_preferred_scale(scale);
+        layout.set_scale(scale, true);
     }
 
     let size = layout.accepted_size();
@@ -140,78 +157,165 @@ fn avoids_rounding_drift_across_repeated_scale_changes() {
 
 #[test]
 fn keeps_logical_point_hosts_unscaled() {
-    let layout = test_layout(HostGuiSizeUnit::LogicalPoints);
+    let layout = test_layout(HostGuiSizeUnit::LogicalPoints, false);
 
-    layout.apply_preferred_scale(2.0);
+    layout.set_scale(2.0, true);
     let size = layout.accepted_size();
     assert_eq!((size.width, size.height), (600, 400));
 
-    let minimum = layout.clamp_size(
-        GuiSize {
-            width: 200,
-            height: 150,
-        },
-        2.0,
-    );
+    let minimum = layout.clamp_host_size(GuiSize {
+        width: 200,
+        height: 150,
+    });
     assert_eq!((minimum.width, minimum.height), (300, 200));
 }
 
 #[test]
-fn keeps_reopen_size_accurate_after_attached_scale_change_without_set_size() {
-    let controller = test_controller(HostGuiSizeUnit::PhysicalPixels);
+fn keeps_attached_frame_unclipped_and_reopen_accurate_after_late_scale_increase() {
+    // Mirrors WRAC Gain (min == default == 320x380) when a Windows host creates a 100%
+    // parent frame first and then updates scale (or Cubase 10 corrects scale in set_parent).
+    let controller = test_controller(
+        GuiSize {
+            width: 320,
+            height: 380,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 320,
+                height: 380,
+            },
+            max: GuiSize {
+                width: 720,
+                height: 720,
+            },
+        },
+        HostGuiSizeUnit::PhysicalPixels,
+        true,
+    );
     let config = default_gui_configuration();
 
     controller.create(config).unwrap();
-    assert_eq!(controller.get_size().unwrap().width, 600);
-    assert_eq!(controller.get_size().unwrap().height, 400);
+    let initial = controller.get_size().unwrap();
+    assert_eq!((initial.width, initial.height), (320, 380));
 
-    // Simulate an attached session whose host updates scale without resending set_size.
+    // Simulate an attached session whose host updates scale to 125% without enlarging the
+    // 320x380 parent frame.
     controller.runtime.lock().session.as_mut().unwrap().parent =
         Some(StoredParentWindow::Win32 { hwnd: 1 });
     controller.set_scale(1.25).unwrap();
-    // Attached host frames stay owned by set_size, so get_size keeps the existing frame.
-    let attached_size = controller.get_size().unwrap();
-    assert_eq!((attached_size.width, attached_size.height), (600, 400));
 
-    // Reopening at the same scale or back at 100% must derive from the 600x400 logical
-    // baseline rather than rescaling 600x400 by `new_scale / 1.25`.
+    // Neither adjust_size nor set_size may push the child WebView above the 320x380 host
+    // frame (which would clip the bottom-right area).
+    let adjusted = controller
+        .adjust_size(GuiSize {
+            width: 320,
+            height: 380,
+        })
+        .unwrap();
+    assert_eq!((adjusted.width, adjusted.height), (320, 380));
+    controller.set_size(adjusted).unwrap();
+    let attached = controller.get_size().unwrap();
+    assert_eq!((attached.width, attached.height), (320, 380));
+
+    // Reopening at 125% or 100% still derives from the preserved 320x380 logical baseline.
     controller.destroy();
     controller.create(config).unwrap();
     let reopened_at_125 = controller.get_size().unwrap();
-    assert_eq!((reopened_at_125.width, reopened_at_125.height), (750, 500));
+    assert_eq!((reopened_at_125.width, reopened_at_125.height), (400, 475));
 
     controller.set_scale(1.0).unwrap();
     let reopened_at_100 = controller.get_size().unwrap();
-    assert_eq!((reopened_at_100.width, reopened_at_100.height), (600, 400));
+    assert_eq!((reopened_at_100.width, reopened_at_100.height), (320, 380));
+}
+
+#[test]
+fn preserves_logical_baseline_when_attached_host_echoes_unscaled_frame() {
+    // When default > min, echoing the existing 600x400 frame after a late scale update must
+    // not overwrite the 600x400 logical baseline with 480x320.
+    let controller = test_controller(
+        GuiSize {
+            width: 600,
+            height: 400,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 300,
+                height: 200,
+            },
+            max: GuiSize {
+                width: 900,
+                height: 600,
+            },
+        },
+        HostGuiSizeUnit::PhysicalPixels,
+        true,
+    );
+    let config = default_gui_configuration();
+
+    controller.create(config).unwrap();
+    controller.runtime.lock().session.as_mut().unwrap().parent =
+        Some(StoredParentWindow::Win32 { hwnd: 1 });
+    controller.set_scale(1.25).unwrap();
+    controller
+        .set_size(GuiSize {
+            width: 600,
+            height: 400,
+        })
+        .unwrap();
+
+    controller.destroy();
+    controller.create(config).unwrap();
+    let reopened = controller.get_size().unwrap();
+    assert_eq!((reopened.width, reopened.height), (750, 500));
+}
+
+#[test]
+fn allows_attached_fixed_size_frame_to_grow_when_host_scales_parent() {
+    let controller = test_controller(
+        GuiSize {
+            width: 320,
+            height: 380,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 320,
+                height: 380,
+            },
+            max: GuiSize {
+                width: 320,
+                height: 380,
+            },
+        },
+        HostGuiSizeUnit::PhysicalPixels,
+        true,
+    );
+    let config = default_gui_configuration();
+
+    controller.create(config).unwrap();
+    controller.runtime.lock().session.as_mut().unwrap().parent =
+        Some(StoredParentWindow::Win32 { hwnd: 1 });
+    controller.set_scale(1.25).unwrap();
+
+    // If the host does resize its parent to 125% (400x475), the controller must accept it
+    // instead of clamping back to 320x380.
+    let adjusted = controller
+        .adjust_size(GuiSize {
+            width: 400,
+            height: 475,
+        })
+        .unwrap();
+    assert_eq!((adjusted.width, adjusted.height), (400, 475));
+    controller.set_size(adjusted).unwrap();
+    let grown = controller.get_size().unwrap();
+    assert_eq!((grown.width, grown.height), (400, 475));
 }
 
 #[test]
 fn selects_host_size_unit_by_platform() {
-    let formats = [
-        PluginFormat::Vst3,
-        PluginFormat::Au,
-        PluginFormat::Aax,
-        PluginFormat::Unknown,
-    ];
-
-    for plugin_format in formats {
-        let (context, _) = HostContext::new(
-            DetectedHost {
-                family: HostFamily::Unknown,
-                display_name: "test".to_string(),
-                process_name: "test".to_string(),
-                process_path: String::new(),
-                version: None,
-            },
-            plugin_format,
-            wrac_host_context::SystemContext::detect(),
-        );
-
-        let expected = if cfg!(target_os = "macos") {
-            HostGuiSizeUnit::LogicalPoints
-        } else {
-            HostGuiSizeUnit::PhysicalPixels
-        };
-        assert_eq!(host_gui_size_unit_for_context(&context), expected);
-    }
+    let expected = if cfg!(target_os = "macos") {
+        HostGuiSizeUnit::LogicalPoints
+    } else {
+        HostGuiSizeUnit::PhysicalPixels
+    };
+    assert_eq!(default_host_gui_size_unit(), expected);
 }
