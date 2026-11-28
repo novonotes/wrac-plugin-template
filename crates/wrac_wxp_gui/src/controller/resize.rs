@@ -118,6 +118,11 @@ impl HostGuiLayout {
     /// resized: a host may already have delivered a frame for the new scale before reporting
     /// it (`set_size` then `set_scale` on a monitor change). `preferred_logical_size` was then
     /// derived with the previous scale, so resizing to it again would scale the editor twice.
+    ///
+    /// Trade-off: an editor whose preferred size is well above its minimum can therefore open
+    /// smaller than preferred (still at or above the minimum, so not clipped) when the host
+    /// reports the scale late. Avoiding clipping and double scaling takes priority, because the
+    /// late report cannot be told apart from a frame the host already scaled.
     pub(super) fn host_size_to_unclip_at_active_scale(&self) -> Option<GuiSize> {
         if !self.dpi_policy.scales_layout_with_host_dpi() {
             return None;
