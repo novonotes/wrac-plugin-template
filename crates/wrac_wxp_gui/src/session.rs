@@ -6,6 +6,9 @@ use std::time::{Duration, Instant};
 use directories::ProjectDirs;
 use url::{Host, Url};
 use wrac_clap_adapter::interface::{GuiSize, PluginError, PluginResult};
+use wxp::keyboard::{
+    AcceleratorDestination, KeyEventDestination, KeyboardRouting, WebViewAcceleratorDelivery,
+};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
 use crate::dpi::DpiConverter;
@@ -139,6 +142,7 @@ impl WxpWebViewSession {
         };
 
         let web_view = builder
+            .with_keyboard_routing(plugin_keyboard_routing())
             .build_as_child(&config.parent)
             .map_err(|_| PluginError::Message("failed to build webview".into()))?;
 
@@ -505,6 +509,29 @@ fn escape_html(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// Keyboard routing shared by every plugin editor.
+///
+/// Keys stay with the WebView like wxp's default, except shortcuts that hosts reserve for their own
+/// plugin windows. On macOS, Command-Option-W closes plugin windows in some hosts; the WebView would
+/// otherwise consume it as an unhandled accelerator, so it goes to the host instead. The WebView has
+/// no behavior for this chord, and text editing shortcuts such as Command-C are not affected.
+fn plugin_keyboard_routing() -> KeyboardRouting {
+    let routing = KeyboardRouting::new(
+        KeyEventDestination::WebView,
+        AcceleratorDestination::WebView(WebViewAcceleratorDelivery::PlatformDefault),
+    );
+    // The consumed accelerator was observed only on macOS. Windows keeps wxp's default routing
+    // until a host there shows the same problem.
+    #[cfg(target_os = "macos")]
+    let routing = routing.route_accelerator(
+        wxp::keyboard::KeyboardChord::new(wxp::keyboard::KeyboardKey::W)
+            .with_command()
+            .with_alt(),
+        AcceleratorDestination::Parent,
+    );
+    routing
 }
 
 fn escape_js_string(value: &str) -> String {
