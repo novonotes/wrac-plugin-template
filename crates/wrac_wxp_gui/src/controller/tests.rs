@@ -3,6 +3,7 @@ use super::*;
 use crate::dpi::GuiDpiPolicy;
 use crate::runtime::WxpGuiRuntime;
 use crate::window::ParentWindowHandle;
+use wrac_clap_adapter::interface::HostGui;
 use wrac_host_context::DetectedHost;
 use wxp::dpi::LogicalSize;
 
@@ -24,7 +25,41 @@ fn test_layout(dpi_policy: GuiDpiPolicy) -> HostGuiLayout {
         },
         GuiResizePolicy::RESIZABLE,
         dpi_policy,
+        Arc::new(UnusedHostGui),
     )
+}
+
+// Mirrors an editor whose default width equals its minimum width, so a frame negotiated at
+// 100% falls below the minimum as soon as the scale increases.
+fn min_width_layout(dpi_policy: GuiDpiPolicy) -> HostGuiLayout {
+    HostGuiLayout::with_dpi_policy(
+        GuiSize {
+            width: 960,
+            height: 480,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 960,
+                height: 400,
+            },
+            max: GuiSize {
+                width: 2760,
+                height: 1260,
+            },
+        },
+        GuiResizePolicy::RESIZABLE,
+        dpi_policy,
+        Arc::new(UnusedHostGui),
+    )
+}
+
+// These tests run without a GUI run loop, so posted host resize requests never execute.
+struct UnusedHostGui;
+
+impl HostGui for UnusedHostGui {
+    fn request_resize(&self, _size: GuiSize) -> PluginResult<()> {
+        Err(PluginError::InvalidState)
+    }
 }
 
 fn test_controller(
@@ -43,8 +78,13 @@ fn test_controller(
         PluginFormat::Vst3,
         wrac_host_context::SystemContext::detect(),
     );
-    let resize_handle = WxpGuiResizeHandle::with_dpi_policy(initial_size, limits, dpi_policy);
-    WxpGuiController::new_with_resize_handle(
+    let resize_handle = WxpGuiResizeHandle::with_dpi_policy(
+        initial_size,
+        limits,
+        dpi_policy,
+        Arc::new(UnusedHostGui),
+    );
+    WxpGuiController::new(
         |_run_loop: &RunLoopLocal,
          _config: GuiConfig,
          _initial_size: GuiSize,
@@ -53,6 +93,77 @@ fn test_controller(
         resize_handle,
         context,
     )
+}
+
+#[test]
+fn requests_scaled_size_when_attached_frame_falls_below_minimum() {
+    // Ableton Live with Auto-Scale off: get_size, set_parent and set_size happen at 100%,
+    // then set_scale(1.25) arrives while the 960x480 frame is attached.
+    let layout = min_width_layout(GuiDpiPolicy::Windows);
+    layout.store_accepted_size(GuiSize {
+        width: 960,
+        height: 480,
+    });
+    layout.set_scale_while_attached(1.25);
+
+    let size = layout.host_size_to_unclip_at_active_scale().unwrap();
+    assert_eq!((size.width, size.height), (1200, 600));
+}
+
+#[test]
+fn leaves_frame_alone_when_host_resized_before_reporting_scale() {
+    // A host that sends the new frame before set_scale (set_size then set_scale on a monitor
+    // change) must not be asked to scale the already scaled frame a second time.
+    let layout = min_width_layout(GuiDpiPolicy::Windows);
+    layout.store_accepted_size(GuiSize {
+        width: 1200,
+        height: 600,
+    });
+    layout.set_scale_while_attached(1.25);
+
+    assert!(layout.host_size_to_unclip_at_active_scale().is_none());
+}
+
+#[test]
+fn tolerates_host_truncating_the_scaled_frame_before_reporting_scale() {
+    // 961 * 1.5 = 1441.5. The clamp rounds the minimum to 1442, but a host that truncates
+    // sends 1441 before set_scale; that frame already fits and must not be scaled again.
+    let layout = HostGuiLayout::with_dpi_policy(
+        GuiSize {
+            width: 961,
+            height: 480,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 961,
+                height: 400,
+            },
+            max: GuiSize {
+                width: 2760,
+                height: 1260,
+            },
+        },
+        GuiResizePolicy::RESIZABLE,
+        GuiDpiPolicy::Windows,
+        Arc::new(UnusedHostGui),
+    );
+    layout.store_accepted_size(GuiSize {
+        width: 1441,
+        height: 720,
+    });
+    layout.set_scale_while_attached(1.5);
+
+    assert!(layout.host_size_to_unclip_at_active_scale().is_none());
+}
+
+#[test]
+fn never_requests_attached_scale_resize_on_macos_or_linux() {
+    for policy in [GuiDpiPolicy::Macos, GuiDpiPolicy::Linux] {
+        let layout = min_width_layout(policy);
+        layout.set_scale_while_attached(2.0);
+
+        assert!(layout.host_size_to_unclip_at_active_scale().is_none());
+    }
 }
 
 #[test]
@@ -138,6 +249,7 @@ fn avoids_rounding_drift_across_repeated_scale_changes() {
         },
         GuiResizePolicy::RESIZABLE,
         GuiDpiPolicy::Windows,
+        Arc::new(UnusedHostGui),
     );
 
     for scale in [1.25, 1.33, 1.75, 1.25, 1.0] {

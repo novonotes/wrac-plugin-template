@@ -102,7 +102,7 @@ const _: () = {
 };
 
 impl WxpGuiController {
-    pub fn new_with_resize_handle(
+    pub fn new(
         factory: impl WxpGuiFactory,
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
@@ -164,6 +164,63 @@ impl WxpGuiController {
             );
         }
         corrected
+    }
+
+    /// Asks the host to enlarge an attached frame that would clip at the active scale.
+    ///
+    /// Some hosts report the scale only after `get_size` and `set_parent` (Ableton Live
+    /// with Auto-Scale off sends `set_scale` last), so the frame keeps the size negotiated
+    /// at the previous scale and falls below the logical minimum. See
+    /// `HostGuiLayout::host_size_to_unclip_at_active_scale` for why frames that already fit
+    /// are left alone.
+    ///
+    /// The request is posted to the run loop instead of being sent from the GUI callback:
+    /// the CLAP adapter guards `set_scale`, `set_parent` and `set_size` with one mutation
+    /// guard, so a host answering `request_resize` with a synchronous `set_size` would be
+    /// rejected while the callback is still running. The VST3 wrapper also applies the
+    /// `getSize` rectangle in `attached()` after `set_parent`, which would overwrite a
+    /// request made before `attached()` returns.
+    fn post_resize_if_clipped_at_active_scale(&self, generation: u64) {
+        // Checked here as well as in the posted task so hosts and platforms whose frame
+        // already fits never queue run-loop work.
+        if self.layout.host_size_to_unclip_at_active_scale().is_none() {
+            return;
+        }
+        let layout = self.layout.clone();
+        let runtime = self.runtime.clone();
+        let post_result = RunLoop::post(move |_| {
+            if matches!(
+                attached_session(&runtime, generation),
+                AttachedSession::Gone
+            ) {
+                return;
+            }
+            // The host may have resized the frame between the callback and this task.
+            let Some(size) = layout.host_size_to_unclip_at_active_scale() else {
+                return;
+            };
+            log::debug!(
+                "wxp controller: requesting host resize for attached scale: width={}, height={}",
+                size.width,
+                size.height
+            );
+            let result = layout.request_host_resize(size, |size| {
+                // Look the session up again: the host may destroy or recreate the editor while
+                // `request_resize()` runs, and a stale session must not record its size.
+                match attached_session(&runtime, generation) {
+                    AttachedSession::Gone => Err(PluginError::InvalidState),
+                    AttachedSession::Runtime(handle) => handle.set_size(size),
+                    // The runtime reads the accepted size when its pending creation runs.
+                    AttachedSession::RuntimePending => Ok(()),
+                }
+            });
+            if let Err(error) = result {
+                log::debug!("wxp controller: attached scale resize was not applied: {error:?}");
+            }
+        });
+        if post_result.is_err() {
+            log::warn!("wxp controller: attached scale resize could not be posted");
+        }
     }
 
     fn note_runtime_destroyed(&self) {
@@ -375,6 +432,30 @@ fn schedule_runtime_creation(
         return Err(PluginError::InvalidState);
     }
     Ok(())
+}
+
+/// State of the attached session a deferred task was scheduled for.
+enum AttachedSession {
+    /// The session was destroyed, replaced by a newer generation, or never got a parent.
+    Gone,
+    /// The parent is attached but the runtime is still being created.
+    RuntimePending,
+    Runtime(GuiRuntimeHandle),
+}
+
+fn attached_session(runtime: &Mutex<GuiRuntimeState>, generation: u64) -> AttachedSession {
+    let state = runtime.lock();
+    let Some(session) = state
+        .session
+        .as_ref()
+        .filter(|session| session.generation == generation && session.parent.is_some())
+    else {
+        return AttachedSession::Gone;
+    };
+    match session.handle.clone() {
+        Some(handle) => AttachedSession::Runtime(handle),
+        None => AttachedSession::RuntimePending,
+    }
 }
 
 fn clear_runtime_creation_after_post_failure(runtime: &Mutex<GuiRuntimeState>, generation: u64) {
@@ -653,25 +734,30 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         if !scale.is_finite() || scale <= 0.0 {
             return Err(PluginError::Message("invalid GUI scale".into()));
         }
-        let (handle, scale) = {
+        let (handle, scale, attached_generation) = {
             let state = self.runtime.lock();
-            let parent = state.session.as_ref().and_then(|session| session.parent);
+            let session = state.session.as_ref();
+            let parent = session.and_then(|session| session.parent);
             let scale = self.correct_host_scale(scale, parent);
             // The host can query get_size before it creates the parent. Scale the
-            // suggested size then, and leave an attached host's frame to set_size.
+            // suggested size then. An attached host's frame stays governed by set_size;
+            // only a frame that would clip at the new scale gets a resize request below.
             if parent.is_none() {
                 self.layout.set_scale_before_attach(scale);
             } else {
                 self.layout.set_scale_while_attached(scale);
             }
-            let handle = state
-                .session
-                .as_ref()
-                .and_then(|session| session.handle.clone());
-            (handle, scale)
+            let handle = session.and_then(|session| session.handle.clone());
+            let attached_generation = session
+                .filter(|session| session.parent.is_some())
+                .map(|session| session.generation);
+            (handle, scale, attached_generation)
         };
         if let Some(handle) = handle {
             handle.set_scale(scale)?;
+        }
+        if let Some(generation) = attached_generation {
+            self.post_resize_if_clipped_at_active_scale(generation);
         }
         log::debug!("wxp controller: set_scale completed");
         Ok(())
@@ -788,6 +874,9 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         // On failure, leave the session without a runtime and let a subsequent
         // show/set_parent reschedule it.
         self.schedule_runtime_creation(generation)?;
+        // The Cubase scale correction above can leave the frame negotiated by get_size
+        // below the minimum at the corrected scale.
+        self.post_resize_if_clipped_at_active_scale(generation);
         log::debug!("wxp controller: set_parent completed");
         Ok(())
     }
