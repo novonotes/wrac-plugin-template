@@ -1,3 +1,5 @@
+use wrac_clap_adapter::interface::GuiSize;
+
 use crate::window::StoredParentWindow;
 
 /// Queries the native parent window's effective DPI scale on Windows.
@@ -9,14 +11,8 @@ pub(super) fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> 
     use std::sync::OnceLock;
 
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Graphics::Gdi::{
-        HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
-    };
-    use windows_sys::Win32::UI::HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE};
 
     type GetDpiForWindowFn = unsafe extern "system" fn(HWND) -> u32;
-    type GetDpiForMonitorFn =
-        unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut u32, *mut u32) -> i32;
 
     let hwnd = parent?.win32_hwnd()? as HWND;
     if hwnd.is_null() {
@@ -31,6 +27,33 @@ pub(super) fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> 
         if window_dpi > 0 {
             return Some(window_dpi as f64 / 96.0);
         }
+    }
+
+    monitor_scale_for_parent(parent)
+}
+
+/// Queries the DPI scale of the monitor that currently shows the parent window on Windows.
+///
+/// Unlike the window DPI, this follows the window as soon as it is dragged onto another
+/// monitor, before the host reports the new content scale. Returns `None` when the scale
+/// cannot be determined; a process that is not per-monitor DPI aware always sees the same
+/// value, so monitor changes stay invisible there.
+#[cfg(windows)]
+pub(super) fn monitor_scale_for_parent(parent: Option<StoredParentWindow>) -> Option<f64> {
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{
+        HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
+    };
+    use windows_sys::Win32::UI::HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE};
+
+    type GetDpiForMonitorFn =
+        unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut u32, *mut u32) -> i32;
+
+    let hwnd = parent?.win32_hwnd()? as HWND;
+    if hwnd.is_null() {
+        return None;
     }
 
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
@@ -77,4 +100,37 @@ where
 #[cfg(not(windows))]
 pub(super) fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
     None
+}
+
+#[cfg(not(windows))]
+pub(super) fn monitor_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
+    None
+}
+
+/// Decides whether a host resize already applied a monitor DPI change to the frame.
+///
+/// A per-monitor DPI aware host such as REAPER resizes a resizable view for the new monitor
+/// before it reports the new content scale. Interpreting that frame with the stale scale
+/// would store an enlarged logical size, and the scale report that follows would enlarge
+/// the frame a second time.
+///
+/// `monitor_scale_ratio` is the current monitor scale divided by the monitor scale at the
+/// time `scale` was reported. Returns the scale to adopt when `requested` is closer to
+/// `previous` scaled by that ratio than to `previous` itself, and `None` when the resize
+/// is unrelated to the monitor change.
+pub(super) fn scale_implied_by_host_resize(
+    previous: GuiSize,
+    requested: GuiSize,
+    scale: f64,
+    monitor_scale_ratio: f64,
+) -> Option<f64> {
+    let distance_from_requested = |width: f64, height: f64| {
+        (requested.width as f64 - width).abs() + (requested.height as f64 - height).abs()
+    };
+    let unscaled = distance_from_requested(previous.width as f64, previous.height as f64);
+    let rescaled = distance_from_requested(
+        previous.width as f64 * monitor_scale_ratio,
+        previous.height as f64 * monitor_scale_ratio,
+    );
+    (rescaled < unscaled).then_some(scale * monitor_scale_ratio)
 }

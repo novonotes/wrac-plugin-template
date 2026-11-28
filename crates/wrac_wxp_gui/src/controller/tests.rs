@@ -1,4 +1,5 @@
 use super::resize::GuiResizePolicy;
+use super::scale::scale_implied_by_host_resize;
 use super::*;
 use crate::dpi::GuiDpiPolicy;
 use crate::runtime::WxpGuiRuntime;
@@ -27,14 +28,66 @@ fn test_layout(dpi_policy: GuiDpiPolicy) -> HostGuiLayout {
     )
 }
 
+/// How the test host answers `request_resize`. It never calls `set_size` back.
+#[derive(Clone, Copy)]
+enum HostResizeAnswer {
+    Accept,
+    Reject,
+}
+
+struct TestHostGui {
+    answer: HostResizeAnswer,
+    requested: Mutex<Vec<(u32, u32)>>,
+}
+
+impl TestHostGui {
+    fn new(answer: HostResizeAnswer) -> Arc<Self> {
+        Arc::new(Self {
+            answer,
+            requested: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn requested(&self) -> Vec<(u32, u32)> {
+        self.requested.lock().clone()
+    }
+}
+
+impl HostGui for TestHostGui {
+    fn request_resize(&self, size: GuiSize) -> PluginResult<()> {
+        self.requested.lock().push((size.width, size.height));
+        match self.answer {
+            HostResizeAnswer::Accept => Ok(()),
+            HostResizeAnswer::Reject => Err(PluginError::Message("rejected".into())),
+        }
+    }
+}
+
 fn test_controller(
     initial_size: GuiSize,
     limits: GuiSizeLimits,
     dpi_policy: GuiDpiPolicy,
 ) -> WxpGuiController {
+    // A host that keeps its frame is the case the clamping rules have to survive.
+    test_controller_in_host(
+        initial_size,
+        limits,
+        dpi_policy,
+        HostFamily::Unknown,
+        TestHostGui::new(HostResizeAnswer::Reject),
+    )
+}
+
+fn test_controller_in_host(
+    initial_size: GuiSize,
+    limits: GuiSizeLimits,
+    dpi_policy: GuiDpiPolicy,
+    family: HostFamily,
+    host_gui: Arc<TestHostGui>,
+) -> WxpGuiController {
     let (context, _) = HostContext::new(
         DetectedHost {
-            family: HostFamily::Unknown,
+            family,
             display_name: "test".to_string(),
             process_name: "test".to_string(),
             process_path: String::new(),
@@ -52,8 +105,30 @@ fn test_controller(
          -> PluginResult<Box<dyn WxpGuiRuntime>> { Err(PluginError::InvalidState) },
         resize_handle,
         context,
+        host_gui,
     )
 }
+
+fn attach_test_parent(controller: &WxpGuiController) {
+    // `set_parent` needs a GUI run loop, so tests mark the session as attached directly.
+    controller.runtime.lock().session.as_mut().unwrap().parent =
+        Some(StoredParentWindow::Win32 { hwnd: 1 });
+}
+
+const EDITOR_SIZE: GuiSize = GuiSize {
+    width: 322,
+    height: 381,
+};
+const EDITOR_LIMITS: GuiSizeLimits = GuiSizeLimits {
+    min: GuiSize {
+        width: 320,
+        height: 380,
+    },
+    max: GuiSize {
+        width: 720,
+        height: 720,
+    },
+};
 
 #[test]
 fn clamps_logical_resize_request_per_platform_policy() {
@@ -283,4 +358,116 @@ fn allows_attached_fixed_size_frame_to_grow_when_host_scales_parent() {
     controller.set_size(adjusted).unwrap();
     let grown = controller.get_size().unwrap();
     assert_eq!((grown.width, grown.height), (400, 475));
+}
+
+#[test]
+fn requests_scaled_frame_when_scale_arrives_after_attach() {
+    // Hosts may report the content scale after attaching, and again after a monitor change.
+    // Without a request the frame keeps its old size and the logical viewport shrinks
+    // below the editor minimum.
+    let host_gui = TestHostGui::new(HostResizeAnswer::Accept);
+    let controller = test_controller_in_host(
+        EDITOR_SIZE,
+        EDITOR_LIMITS,
+        GuiDpiPolicy::Windows,
+        HostFamily::Unknown,
+        host_gui.clone(),
+    );
+    controller.create(default_gui_configuration()).unwrap();
+    attach_test_parent(&controller);
+
+    controller.set_scale(1.33).unwrap();
+    let scaled = controller.get_size().unwrap();
+    assert_eq!((scaled.width, scaled.height), (428, 507));
+
+    // An unchanged scale must not disturb the host again.
+    controller.set_scale(1.33).unwrap();
+    assert_eq!(host_gui.requested(), vec![(428, 507)]);
+
+    // The granted frame is the rounded baseline, so it must not replace the baseline.
+    controller.set_scale(1.0).unwrap();
+    assert_eq!(host_gui.requested(), vec![(428, 507), (322, 381)]);
+}
+
+#[test]
+fn leaves_frame_requests_to_platforms_that_scale_layout() {
+    for policy in [GuiDpiPolicy::Macos, GuiDpiPolicy::Linux] {
+        let host_gui = TestHostGui::new(HostResizeAnswer::Accept);
+        let controller = test_controller_in_host(
+            EDITOR_SIZE,
+            EDITOR_LIMITS,
+            policy,
+            HostFamily::Unknown,
+            host_gui.clone(),
+        );
+        controller.create(default_gui_configuration()).unwrap();
+        attach_test_parent(&controller);
+
+        controller.set_scale(2.0).unwrap();
+        assert!(host_gui.requested().is_empty());
+    }
+}
+
+#[test]
+fn applies_requested_frame_in_hosts_that_resize_without_confirmation() {
+    let host_gui = TestHostGui::new(HostResizeAnswer::Reject);
+    let controller = test_controller_in_host(
+        EDITOR_SIZE,
+        EDITOR_LIMITS,
+        GuiDpiPolicy::Windows,
+        HostFamily::BitwigStudio,
+        host_gui,
+    );
+    controller.create(default_gui_configuration()).unwrap();
+    attach_test_parent(&controller);
+
+    controller.set_scale(1.25).unwrap();
+    let size = controller.get_size().unwrap();
+    assert_eq!((size.width, size.height), (403, 476));
+}
+
+#[test]
+fn defers_size_report_in_ableton_live_until_attached() {
+    // Live sizes the attached view from a `getSize` it issued before reporting the scale.
+    let controller = test_controller_in_host(
+        EDITOR_SIZE,
+        EDITOR_LIMITS,
+        GuiDpiPolicy::Windows,
+        HostFamily::AbletonLive,
+        TestHostGui::new(HostResizeAnswer::Accept),
+    );
+    controller.create(default_gui_configuration()).unwrap();
+    assert!(controller.get_size().is_err());
+
+    controller.set_scale(1.25).unwrap();
+    attach_test_parent(&controller);
+    let size = controller.get_size().unwrap();
+    assert_eq!((size.width, size.height), (403, 476));
+}
+
+#[test]
+fn adopts_monitor_scale_only_when_host_resize_matches_it() {
+    let previous = GuiSize {
+        width: 1200,
+        height: 600,
+    };
+    // Moving from a 125% to a 150% monitor: the host first resizes the frame by 1.2.
+    let rescaled = GuiSize {
+        width: 1440,
+        height: 720,
+    };
+    assert_eq!(
+        scale_implied_by_host_resize(previous, rescaled, 1.25, 1.2),
+        Some(1.5)
+    );
+
+    // A user resize on the new monitor must not be mistaken for the monitor change.
+    let dragged = GuiSize {
+        width: 1230,
+        height: 610,
+    };
+    assert_eq!(
+        scale_implied_by_host_resize(previous, dragged, 1.25, 1.2),
+        None
+    );
 }

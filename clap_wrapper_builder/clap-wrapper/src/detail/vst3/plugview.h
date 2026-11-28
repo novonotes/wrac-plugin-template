@@ -105,6 +105,11 @@ class WrappedView : public Steinberg::IPlugView,
   clap_window_t _window = {nullptr, {nullptr}};
   IPlugFrame *_plugFrame = nullptr;
   ViewRect _rect = {0, 0, 0, 0};
+  // Whether _rect holds a size the host imposed through onSize(), as opposed to the
+  // plugin's own answer to getSize(). Only a host-imposed size is pushed back to the
+  // plugin on attach: the plugin's earlier answer goes stale when the content scale
+  // arrives after getSize().
+  bool _rectFromHost = false;
   bool _created = false;
   bool _attached = false;
 

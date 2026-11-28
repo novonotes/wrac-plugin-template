@@ -81,6 +81,11 @@ impl HostGuiLayout {
         self.state.lock().scale
     }
 
+    /// Whether host frames are derived from a logical baseline multiplied by the host scale.
+    pub(super) fn scales_with_host_dpi(&self) -> bool {
+        self.dpi_policy.scales_layout_with_host_dpi()
+    }
+
     /// Updates the active scale before a parent window is attached and re-derives
     /// `accepted_size` from the 100% logical baseline so `get_size` returns scaled host
     /// pixels on Windows.
@@ -92,10 +97,33 @@ impl HostGuiLayout {
 
     /// Updates the active scale while a parent window is already attached.
     ///
-    /// Deliberately leaves `accepted_size` and `negotiated_scale` untouched so an attached
-    /// host frame remains governed by `set_size` rather than expanding out of its parent.
+    /// Deliberately leaves `accepted_size` and `negotiated_scale` untouched: the host owns
+    /// the attached frame, so the controller asks it for [`Self::preferred_host_size`] and
+    /// only adopts the new frame once the host delivers or accepts it.
     pub(super) fn set_scale_while_attached(&self, scale: f64) {
         self.state.lock().scale = scale;
+    }
+
+    /// Returns the host frame that shows the preferred logical size at the active scale.
+    ///
+    /// `None` on platforms whose layout does not scale with host DPI: there the accepted
+    /// size never goes stale when the scale changes, so there is nothing to ask the host for.
+    pub(super) fn preferred_host_size(&self) -> Option<GuiSize> {
+        if !self.dpi_policy.scales_layout_with_host_dpi() {
+            return None;
+        }
+        let state = self.state.lock();
+        Some(self.preferred_host_size_locked(&state, state.scale))
+    }
+
+    fn preferred_host_size_locked(&self, state: &LayoutState, scale: f64) -> GuiSize {
+        let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
+        let scaled = dpi.logical_size_to_gui(state.preferred_logical_size);
+        let limits = GuiSizeLimits {
+            min: self.scale_layout_size(self.limits.min, scale),
+            max: self.scale_layout_size(self.limits.max, scale),
+        };
+        clamp_size_with_limits(scaled, limits)
     }
 
     /// Re-syncs `accepted_size` and `negotiated_scale` to the latest scale when starting a
@@ -133,14 +161,8 @@ impl HostGuiLayout {
         if !self.dpi_policy.scales_layout_with_host_dpi() {
             return;
         }
-        let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
-        let scaled = dpi.logical_size_to_gui(state.preferred_logical_size);
-        let limits = GuiSizeLimits {
-            min: self.scale_layout_size(self.limits.min, scale),
-            max: self.scale_layout_size(self.limits.max, scale),
-        };
         self.accepted_size
-            .store(clamp_size_with_limits(scaled, limits));
+            .store(self.preferred_host_size_locked(state, scale));
     }
 
     fn scale_layout_size(&self, size: GuiSize, scale: f64) -> GuiSize {
@@ -172,8 +194,15 @@ impl HostGuiLayout {
         if size_changed && self.dpi_policy.scales_layout_with_host_dpi() {
             let mut state = self.state.lock();
             let scale = state.scale;
-            let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
-            state.preferred_logical_size = dpi.gui_size_to_logical(size);
+            // A host that grants the frame requested after a scale change echoes the rounded
+            // host pixels of the current baseline. Re-deriving the baseline from those
+            // integers would accumulate rounding drift across scale changes, so only a frame
+            // that differs from the baseline replaces it.
+            let baseline_frame = self.preferred_host_size_locked(&state, scale);
+            if baseline_frame.width != size.width || baseline_frame.height != size.height {
+                let dpi = DpiConverter::with_policy(scale, self.dpi_policy);
+                state.preferred_logical_size = dpi.gui_size_to_logical(size);
+            }
             // Once the host actually delivers a frame at least as large as the new scale's
             // minimum, promote `negotiated_scale` so subsequent resizes enforce the scaled
             // minimum as well.
@@ -186,7 +215,7 @@ impl HostGuiLayout {
         self.accepted_size_revision.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn accepted_size_revision(&self) -> u64 {
+    pub(super) fn accepted_size_revision(&self) -> u64 {
         self.accepted_size_revision.load(Ordering::Relaxed)
     }
 

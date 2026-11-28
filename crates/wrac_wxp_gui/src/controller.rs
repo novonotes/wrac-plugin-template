@@ -8,20 +8,21 @@ use crate::window::StoredParentWindow;
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::interface::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGui, HostWindow, PluginError,
     PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
     PluginGuiQueryExtension, PluginResult,
 };
 use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 
 mod defaults;
+mod host_frame;
 mod resize;
 mod scale;
 
 use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
-use self::scale::corrected_scale_for_parent;
+use self::scale::{corrected_scale_for_parent, monitor_scale_for_parent};
 
 /// Minimum and maximum editor bounds.
 ///
@@ -47,6 +48,10 @@ pub struct WxpGuiController {
     layout: Arc<HostGuiLayout>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
     host_context: HostContext,
+    // The host owns the editor frame. Scale changes and attachment change the frame the
+    // editor needs without any user resize command, so the controller itself has to be
+    // able to ask the host for it.
+    host_gui: Arc<dyn HostGui>,
 }
 
 struct GuiRuntimeState {
@@ -57,6 +62,9 @@ struct GuiRuntimeState {
     // callback detect a stale session and tear down the half-created runtime without
     // attaching it to an already-closed editor.
     generation: u64,
+    // Whether the host has ever called `set_scale`. The scale outlives GUI sessions, so this
+    // does too. Monitor DPI tracking only makes sense against a host-reported scale.
+    host_reported_scale: bool,
     last_runtime_destroyed_at: Option<Instant>,
     // Some Windows hosts (notably Ableton Live) may recreate the editor while the
     // previous teardown is still in progress. Keep child WebView creation single-flight
@@ -79,6 +87,10 @@ struct GuiSession {
     generation: u64,
     configuration: GuiConfig,
     parent: Option<StoredParentWindow>,
+    // Scale of the monitor showing the parent when the host last reported its content scale
+    // (or when the parent was attached under an already reported scale). A later mismatch
+    // means the window moved to another monitor before the host reported the new scale.
+    monitor_scale_at_scale_report: Option<f64>,
     parent_lease: Option<GuiThreadLease>,
     handle: Option<GuiRuntimeHandle>,
     visible: bool,
@@ -106,6 +118,7 @@ impl WxpGuiController {
         factory: impl WxpGuiFactory,
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
+        host_gui: Arc<dyn HostGui>,
     ) -> Self {
         Self {
             factory: Arc::new(factory),
@@ -113,6 +126,7 @@ impl WxpGuiController {
             runtime: Arc::new(Mutex::new(GuiRuntimeState {
                 session: None,
                 generation: 0,
+                host_reported_scale: false,
                 last_runtime_destroyed_at: None,
                 is_creating_runtime: false,
                 creating_generation: None,
@@ -120,6 +134,7 @@ impl WxpGuiController {
                 destroy_requested_while_creating: false,
             })),
             host_context,
+            host_gui,
         }
     }
 
@@ -583,6 +598,19 @@ impl PluginGuiQueryExtension for WxpGuiController {
     }
 
     fn get_size(&self) -> PluginResult<GuiSize> {
+        if self.defers_size_report_until_attached() {
+            let state = self.runtime.lock();
+            let attached = state
+                .session
+                .as_ref()
+                .is_some_and(|session| session.parent.is_some());
+            if !attached {
+                log::debug!("wxp controller: get_size deferred until the parent is attached");
+                return Err(PluginError::Message(
+                    "GUI size is unavailable until the parent window is attached".into(),
+                ));
+            }
+        }
         let size = self.layout.accepted_size();
         log::debug!(
             "wxp controller: get_size called: width={}, height={}",
@@ -629,6 +657,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
                 generation,
                 configuration,
                 parent: None,
+                monitor_scale_at_scale_report: None,
                 parent_lease: None,
                 handle: None,
                 // Some wrappers treat attachment to the parent as an implicit show and never
@@ -653,65 +682,47 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         if !scale.is_finite() || scale <= 0.0 {
             return Err(PluginError::Message("invalid GUI scale".into()));
         }
-        let (handle, scale) = {
-            let state = self.runtime.lock();
+        let (handle, scale, attached) = {
+            let mut state = self.runtime.lock();
+            state.host_reported_scale = true;
             let parent = state.session.as_ref().and_then(|session| session.parent);
             let scale = self.correct_host_scale(scale, parent);
             // The host can query get_size before it creates the parent. Scale the
-            // suggested size then, and leave an attached host's frame to set_size.
+            // suggested size then. An attached frame belongs to the host, so it is
+            // requested below instead of being resized here.
             if parent.is_none() {
                 self.layout.set_scale_before_attach(scale);
             } else {
                 self.layout.set_scale_while_attached(scale);
             }
-            let handle = state
-                .session
-                .as_ref()
-                .and_then(|session| session.handle.clone());
-            (handle, scale)
+            let mut handle = None;
+            if let Some(session) = state.session.as_mut() {
+                if parent.is_some() {
+                    session.monitor_scale_at_scale_report = monitor_scale_for_parent(parent);
+                }
+                handle = session.handle.clone();
+            }
+            (handle, scale, parent.is_some())
         };
         if let Some(handle) = handle {
             handle.set_scale(scale)?;
+        }
+        if attached {
+            // Hosts may report the content scale after attaching the view, and report a new
+            // one when the window moves to another monitor. The frame they created for the
+            // previous scale then shows a smaller logical viewport than the editor's
+            // minimum, which clips the layout.
+            self.request_preferred_host_frame_if_stale()?;
         }
         log::debug!("wxp controller: set_scale completed");
         Ok(())
     }
 
     fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
+        // Must run before clamping: the limits depend on the active scale.
+        self.adopt_scale_implied_by_host_resize(requested_size)?;
         let size = self.layout.clamp_host_size(requested_size);
-        let previous_size = self.layout.accepted_size();
-        let size_changed = previous_size.width != size.width || previous_size.height != size.height;
-        let handle = self
-            .runtime
-            .lock()
-            .session
-            .as_ref()
-            .and_then(|session| session.handle.clone());
-
-        // Some hosts repeatedly send the same size until the editor window settles.
-        // Re-applying identical bounds does not violate the contract but adds redundant
-        // geometry processing to the child view, making resize drags feel laggy. Size is
-        // still recorded below so re-entrant `request_resize()` detection can observe
-        // host callbacks.
-        if let Some(handle) = handle {
-            if size_changed {
-                handle.set_size(size)?;
-            }
-            if self.should_async_resync_bounds_after_set_size() {
-                // Cubase 10 on macOS can resize the host-owned editor window after
-                // delivering `set_size`, leaving the embedded child view one geometry
-                // step behind. Re-posting the latest accepted size lets the host finish
-                // its adjustment before wxp reapplies child bounds.
-                log::debug!(
-                    "wxp controller: scheduling Cubase VST3 async bounds resync: width={}, height={}",
-                    size.width,
-                    size.height
-                );
-                handle.post_set_size(size)?;
-            }
-        }
-        self.layout.store_accepted_size(size);
-        Ok(())
+        self.apply_host_size(size)
     }
 
     fn set_parent(&self, window: HostWindow) -> PluginResult<()> {
@@ -773,7 +784,14 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             drop(parent_lease);
             return Err(PluginError::InvalidState);
         }
+        let host_reported_scale = state.host_reported_scale;
+        let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
         session.parent = Some(parent);
+        // Hosts may report the content scale either before or after attaching the view, so
+        // the monitor scale is recorded both here and in `set_scale`.
+        session.monitor_scale_at_scale_report = host_reported_scale
+            .then(|| monitor_scale_for_parent(Some(parent)))
+            .flatten();
         // If `set_scale` arrived before `set_parent`, Cubase VST3 scale correction must
         // wait until the native parent window is known. Update the shared layout scale
         // without rescaling the already-created host frame.
@@ -783,6 +801,19 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             session.parent_lease = Some(parent_lease);
         }
         drop(state);
+        if self.host_context.plugin_format == PluginFormat::Vst3 {
+            // A VST3 host may have sized its window from a `getSize` answered before the
+            // scale was known or corrected, and nothing tells the plugin which frame the
+            // host created. Requesting the preferred frame on every attach is the only way
+            // to bring such a host in line; a host that already has it treats this as a
+            // no-op. CLAP hosts report the scale before querying the size, so they need no
+            // request here.
+            if let Err(error) = self.request_preferred_host_frame() {
+                // Attachment itself succeeded. The runtime is created from the last
+                // accepted frame, so a failed request only leaves the frame as it was.
+                log::warn!("wxp controller: preferred host frame request failed: {error}");
+            }
+        }
         // Only accept the parent and schedule WebView creation here. Deferring actual
         // creation outside the host lifecycle callback avoids create/destroy re-entry.
         // On failure, leave the session without a runtime and let a subsequent

@@ -96,6 +96,7 @@ pub(crate) fn create_gui_integration(
         },
         resize_handle,
         context.host_context.clone(),
+        context.host_gui.clone(),
     ));
 
     GuiIntegration {
