@@ -77,6 +77,8 @@ pub(crate) fn create_gui_integration(
             min: MIN_GUI_SIZE,
             max: MAX_GUI_SIZE,
         },
+        context.host_context.clone(),
+        context.host_gui.clone(),
     );
     let runtime_dependencies = GuiRuntimeDependencies {
         descriptor,
@@ -85,18 +87,15 @@ pub(crate) fn create_gui_integration(
         latency,
         gui_notifier: notifier.clone(),
         param_output_queue,
-        host_gui: context.host_gui.clone(),
         host_state: context.host_state.clone(),
         resize_handle: resize_handle.clone(),
         host_context: context.host_context.clone(),
     };
-    let controller = Arc::new(WxpGuiController::new_with_resize_handle(
+    let controller = Arc::new(WxpGuiController::new(
         WracGainGuiFactory {
             dependencies: runtime_dependencies,
         },
         resize_handle,
-        context.host_context.clone(),
-        context.host_gui.clone(),
     ));
 
     GuiIntegration {

@@ -116,33 +116,32 @@ tresult PLUGIN_API WrappedView::attached(void *parent, FIDString /*type*/)
 #endif
 
   ensure_ui();
-  _extgui->set_parent(_plugin, &_window);
-  _attached = true;
-  if (!_rectFromHost)
+  if (_rectFromHost && _extgui->can_resize(_plugin))
   {
-    // The host has not sized the view itself, so _rect is at best the plugin's answer to
-    // an earlier getSize(). The plugin may have rescaled its preferred size since then
-    // (content scale reported after getSize()) or requested a new frame from set_parent(),
-    // and a host that fails getSize() before attaching leaves _rect empty. Pushing that
-    // rectangle back with set_size() would shrink the plugin to a stale or empty frame,
-    // so adopt the plugin's current size instead.
-    uint32_t w, h;
-    if (_extgui->get_size(_plugin, &w, &h))
-    {
-      _rect.right = _rect.left + w;
-      _rect.bottom = _rect.top + h;
-    }
-  }
-  else if (_extgui->can_resize(_plugin))
-  {
+    // The host sized the view before attaching it, typically to restore a saved window
+    // size. onSize() could not forward that to the unattached plugin, so deliver it now,
+    // before set_parent(): the plugin may request its preferred frame from set_parent() and
+    // would otherwise ask the host to give up the size it just restored.
+    //
+    // Only a host-imposed size is delivered. When _rect is merely the plugin's answer to
+    // an earlier getSize(), it is stale once the content scale arrives later, and empty
+    // when that getSize() failed.
     uint32_t w = _rect.getWidth();
     uint32_t h = _rect.getHeight();
-    if (_extgui->adjust_size(_plugin, &w, &h))
-    {
-      _rect.right = _rect.left + w + 1;
-      _rect.bottom = _rect.top + h + 1;
-    }
+    _extgui->adjust_size(_plugin, &w, &h);
     _extgui->set_size(_plugin, w, h);
+  }
+  // Mark the view attached before set_parent(): a resizeView() issued from set_parent() can
+  // make the host call onSize() re-entrantly, and that frame has to reach the plugin.
+  _attached = true;
+  _extgui->set_parent(_plugin, &_window);
+  // The plugin may have adjusted the delivered size or settled on a new frame during
+  // set_parent(), so _rect follows the plugin's current size from here on.
+  uint32_t w, h;
+  if (_extgui->get_size(_plugin, &w, &h))
+  {
+    _rect.right = _rect.left + w;
+    _rect.bottom = _rect.top + h;
   }
   _extgui->show(_plugin);
   return kResultOk;
@@ -152,6 +151,9 @@ tresult PLUGIN_API WrappedView::removed()
 {
   releaseAdditionalReferences();
   _attached = false;
+  // A size the host imposed on this attachment has been delivered; it must not be
+  // delivered again if the host re-attaches the view.
+  _rectFromHost = false;
   _window.ptr = nullptr;
   return kResultOk;
 }

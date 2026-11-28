@@ -4,6 +4,7 @@ use super::*;
 use crate::dpi::GuiDpiPolicy;
 use crate::runtime::WxpGuiRuntime;
 use crate::window::ParentWindowHandle;
+use wrac_clap_adapter::interface::HostGui;
 use wrac_host_context::DetectedHost;
 use wxp::dpi::LogicalSize;
 
@@ -96,16 +97,15 @@ fn test_controller_in_host(
         PluginFormat::Vst3,
         wrac_host_context::SystemContext::detect(),
     );
-    let resize_handle = WxpGuiResizeHandle::with_dpi_policy(initial_size, limits, dpi_policy);
-    WxpGuiController::new_with_resize_handle(
+    let resize_handle =
+        WxpGuiResizeHandle::with_dpi_policy(initial_size, limits, dpi_policy, context, host_gui);
+    WxpGuiController::new(
         |_run_loop: &RunLoopLocal,
          _config: GuiConfig,
          _initial_size: GuiSize,
          _parent: ParentWindowHandle|
          -> PluginResult<Box<dyn WxpGuiRuntime>> { Err(PluginError::InvalidState) },
         resize_handle,
-        context,
-        host_gui,
     )
 }
 
@@ -470,4 +470,30 @@ fn adopts_monitor_scale_only_when_host_resize_matches_it() {
         scale_implied_by_host_resize(previous, dragged, 1.25, 1.2),
         None
     );
+}
+
+#[test]
+fn admits_frames_sized_for_a_pending_monitor_scale() {
+    // The VST3 wrapper passes a host frame through `adjust_size` before `set_size`. An editor
+    // at its minimum size that moves from a 150% to a 100% monitor receives the 100% frame
+    // while 150% is still active; clamping it back to the 150% minimum would hide the move.
+    let layout = HostGuiLayout::with_dpi_policy(
+        EDITOR_LIMITS.min,
+        EDITOR_LIMITS,
+        GuiResizePolicy::RESIZABLE,
+        GuiDpiPolicy::Windows,
+    );
+    layout.set_scale_before_attach(1.5);
+
+    let clamped_to_active_scale = layout.clamp_host_size(EDITOR_LIMITS.min);
+    assert_eq!(
+        (
+            clamped_to_active_scale.width,
+            clamped_to_active_scale.height
+        ),
+        (480, 570)
+    );
+
+    let admitted = layout.clamp_host_size_allowing_scale(EDITOR_LIMITS.min, 1.0);
+    assert_eq!((admitted.width, admitted.height), (320, 380));
 }

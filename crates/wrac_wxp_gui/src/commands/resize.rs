@@ -1,9 +1,7 @@
 use std::rc::Rc;
-use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::json;
-use wrac_clap_adapter::interface::HostGui;
 use wxp::{WxpCommandHandler, dpi::LogicalSize};
 
 use crate::{controller::WxpGuiResizeHandle, resize_drag::WxpNativeResizeDrag};
@@ -37,7 +35,6 @@ struct EndGuiResizeDragRequest {
 /// `WxpGuiResizeHandle` makes future fixes apply to all wxp-based plugin GUIs.
 pub fn register_resize_commands(
     command_handler: &Rc<WxpCommandHandler>,
-    host_gui: Arc<dyn HostGui>,
     gui_resize_handle: WxpGuiResizeHandle,
 ) {
     let native_resize_drag = Rc::new(WxpNativeResizeDrag::default());
@@ -79,7 +76,7 @@ pub fn register_resize_commands(
                 LogicalSize::new(request.width, request.height),
             );
             let size = gui_resize_handle
-                .request_resize(requested, ctx.webview(), host_gui.as_ref())
+                .request_resize(requested, ctx.webview())
                 .map_err(|e| e.to_string())?;
             Ok::<_, String>(json!({
                 "ok": true,

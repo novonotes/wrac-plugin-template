@@ -8,7 +8,7 @@ use crate::window::StoredParentWindow;
 use novonotes_run_loop::{RunLoop, RunLoopLocal};
 use parking_lot::Mutex;
 use wrac_clap_adapter::interface::{
-    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostGui, HostWindow, PluginError,
+    GuiApi, GuiConfig, GuiResizeHints, GuiSize, HostWindow, PluginError,
     PluginGuiApiSupportExtension, PluginGuiExtension, PluginGuiMainThreadExtension,
     PluginGuiQueryExtension, PluginResult,
 };
@@ -47,11 +47,10 @@ pub struct WxpGuiController {
     factory: Arc<dyn WxpGuiFactory>,
     layout: Arc<HostGuiLayout>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
-    host_context: HostContext,
     // The host owns the editor frame. Scale changes and attachment change the frame the
-    // editor needs without any user resize command, so the controller itself has to be
-    // able to ask the host for it.
-    host_gui: Arc<dyn HostGui>,
+    // editor needs without any user resize command, so the controller asks the host for it
+    // through the same handle the frontend resize commands use.
+    resize_handle: WxpGuiResizeHandle,
 }
 
 struct GuiRuntimeState {
@@ -114,12 +113,7 @@ const _: () = {
 };
 
 impl WxpGuiController {
-    pub fn new_with_resize_handle(
-        factory: impl WxpGuiFactory,
-        resize_handle: WxpGuiResizeHandle,
-        host_context: HostContext,
-        host_gui: Arc<dyn HostGui>,
-    ) -> Self {
+    pub fn new(factory: impl WxpGuiFactory, resize_handle: WxpGuiResizeHandle) -> Self {
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
@@ -133,8 +127,7 @@ impl WxpGuiController {
                 pending_creation_generation: None,
                 destroy_requested_while_creating: false,
             })),
-            host_context,
-            host_gui,
+            resize_handle,
         }
     }
 
@@ -162,11 +155,11 @@ impl WxpGuiController {
     }
 
     fn should_async_resync_bounds_after_set_size(&self) -> bool {
-        is_cubase_vst3(&self.host_context)
+        is_cubase_vst3(&self.resize_handle.host_context)
     }
 
     fn correct_host_scale(&self, scale: f64, parent: Option<StoredParentWindow>) -> f64 {
-        if !is_cubase_vst3(&self.host_context) {
+        if !is_cubase_vst3(&self.resize_handle.host_context) {
             return scale;
         }
         // Cubase 10 on Windows has been observed to report integer VST3 scale factors
@@ -629,7 +622,13 @@ impl PluginGuiQueryExtension for WxpGuiController {
     }
 
     fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
-        Ok(self.layout.clamp_host_size(size))
+        // The VST3 wrapper validates a host frame here before delivering it through
+        // `set_size`. After a monitor change that frame is sized for a scale the host has
+        // not reported yet, so it must survive this clamp for `set_size` to recognize it.
+        Ok(match self.scale_pending_from_monitor_change() {
+            Some(scale) => self.layout.clamp_host_size_allowing_scale(size, scale),
+            None => self.layout.clamp_host_size(size),
+        })
     }
 }
 
@@ -778,14 +777,13 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             }
         }
         let mut state = self.runtime.lock();
+        let host_reported_scale = state.host_reported_scale;
         let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
         if session.generation != generation {
             drop(state);
             drop(parent_lease);
             return Err(PluginError::InvalidState);
         }
-        let host_reported_scale = state.host_reported_scale;
-        let session = state.session.as_mut().ok_or(PluginError::InvalidState)?;
         session.parent = Some(parent);
         // Hosts may report the content scale either before or after attaching the view, so
         // the monitor scale is recorded both here and in `set_scale`.
@@ -797,7 +795,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         // without rescaling the already-created host frame.
         let corrected_scale = self.correct_host_scale(self.layout.scale(), Some(parent));
         self.layout.set_scale_while_attached(corrected_scale);
-        if self.host_context.plugin_format == PluginFormat::Aax {
+        if self.resize_handle.host_context.plugin_format == PluginFormat::Aax {
             // AAX has no content-scale callback, so the parent window is the only source of
             // the scale. The host has not negotiated a frame at this scale yet, so the
             // accepted size is re-derived the same way as for a scale reported before attach.
@@ -813,7 +811,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         }
         drop(state);
         if matches!(
-            self.host_context.plugin_format,
+            self.resize_handle.host_context.plugin_format,
             PluginFormat::Vst3 | PluginFormat::Aax
         ) {
             // A VST3 host may have sized its window from a `getSize` answered before the

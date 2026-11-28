@@ -4,10 +4,11 @@
 //! methods decide when to ask and which host-delivered frames to adopt.
 
 use wrac_clap_adapter::interface::{GuiSize, PluginResult};
-use wrac_host_context::{HostContext, HostFamily, PluginFormat};
+use wrac_host_context::{HostFamily, PluginFormat};
 
-use super::WxpGuiController;
+use super::resize::HostFrameAnswer;
 use super::scale::{monitor_scale_for_parent, scale_implied_by_host_resize};
+use super::{GuiSession, WxpGuiController};
 
 impl WxpGuiController {
     /// Asks the host for the frame that shows the preferred logical size at the active scale.
@@ -23,24 +24,10 @@ impl WxpGuiController {
             size.width,
             size.height
         );
-        let previous_revision = self.layout.accepted_size_revision();
-        let result = self.host_gui.request_resize(size);
-        if self.layout.accepted_size_revision() != previous_revision {
-            // The host delivered a frame through a re-entrant `set_size`. That frame is the
-            // ground truth even when it differs from the request or the request reports
-            // failure, so nothing is left to apply here.
-            return Ok(());
-        }
-        match result {
-            // Some hosts accept the request but never call `set_size`.
-            Ok(()) => self.apply_host_size(size),
-            Err(error) if host_resizes_without_confirmation(&self.host_context) => {
-                log::debug!(
-                    "wxp controller: applying preferred host frame without host confirmation: {error}"
-                );
-                self.apply_host_size(size)
-            }
-            Err(error) => {
+        match self.resize_handle.request_host_frame(size) {
+            HostFrameAnswer::Delivered => Ok(()),
+            HostFrameAnswer::Granted => self.apply_host_size(size),
+            HostFrameAnswer::Kept(error) => {
                 // The host keeps its current frame. Growing the child WebView regardless
                 // would clip it against the parent, so stay at the last host-confirmed size;
                 // `HostGuiLayout::clamp_host_size` keeps accepting that smaller frame.
@@ -69,33 +56,23 @@ impl WxpGuiController {
         &self,
         requested_size: GuiSize,
     ) -> PluginResult<()> {
-        // This ordering has only been observed through the VST3 content-scale interface.
-        if self.host_context.plugin_format != PluginFormat::Vst3 {
-            return Ok(());
-        }
         let (handle, scale) = {
             let mut state = self.runtime.lock();
             let Some(session) = state.session.as_mut() else {
                 return Ok(());
             };
-            let Some(reported_monitor_scale) = session.monitor_scale_at_scale_report else {
+            let Some(change) = self.monitor_change_since_scale_report(session) else {
                 return Ok(());
             };
-            let Some(monitor_scale) = monitor_scale_for_parent(session.parent) else {
-                return Ok(());
-            };
-            if (monitor_scale - reported_monitor_scale).abs() <= f64::EPSILON {
-                return Ok(());
-            }
             let Some(scale) = scale_implied_by_host_resize(
                 self.layout.accepted_size(),
                 requested_size,
                 self.layout.scale(),
-                monitor_scale / reported_monitor_scale,
+                change.ratio,
             ) else {
                 return Ok(());
             };
-            session.monitor_scale_at_scale_report = Some(monitor_scale);
+            session.monitor_scale_at_scale_report = Some(change.monitor_scale);
             self.layout.set_scale_while_attached(scale);
             (session.handle.clone(), scale)
         };
@@ -104,6 +81,31 @@ impl WxpGuiController {
             handle.set_scale(scale)?;
         }
         Ok(())
+    }
+
+    /// Returns the scale the host is expected to report next when the editor window sits on
+    /// a monitor with a different DPI than the one the active scale was reported for.
+    pub(super) fn scale_pending_from_monitor_change(&self) -> Option<f64> {
+        let state = self.runtime.lock();
+        let change = self.monitor_change_since_scale_report(state.session.as_ref()?)?;
+        Some(self.layout.scale() * change.ratio)
+    }
+
+    fn monitor_change_since_scale_report(&self, session: &GuiSession) -> Option<MonitorChange> {
+        // A host resizing for the new monitor before reporting its scale has only been
+        // observed through the VST3 content-scale interface.
+        if self.resize_handle.host_context.plugin_format != PluginFormat::Vst3 {
+            return None;
+        }
+        let reported_monitor_scale = session.monitor_scale_at_scale_report?;
+        let monitor_scale = monitor_scale_for_parent(session.parent)?;
+        if (monitor_scale - reported_monitor_scale).abs() <= f64::EPSILON {
+            return None;
+        }
+        Some(MonitorChange {
+            monitor_scale,
+            ratio: monitor_scale / reported_monitor_scale,
+        })
     }
 
     /// Records a host-confirmed frame and mirrors it to the WebView runtime.
@@ -149,19 +151,15 @@ impl WxpGuiController {
         // reports the content scale, then resizes the attached view to that stale size.
         // Failing the early query makes Live ask again once the scaled size is known.
         self.layout.scales_with_host_dpi()
-            && self.host_context.plugin_format == PluginFormat::Vst3
-            && self.host_context.host().family == HostFamily::AbletonLive
+            && self.resize_handle.host_context.plugin_format == PluginFormat::Vst3
+            && self.resize_handle.host_context.host().family == HostFamily::AbletonLive
     }
 }
 
-/// Hosts that resize the editor window on a VST3 `resizeView` request without confirming
-/// the new frame through `onSize`, whatever the request returns.
-///
-/// Only consulted on Windows, where the controller requests frames on its own.
-fn host_resizes_without_confirmation(host_context: &HostContext) -> bool {
-    host_context.plugin_format == PluginFormat::Vst3
-        && matches!(
-            host_context.host().family,
-            HostFamily::AbletonLive | HostFamily::BitwigStudio | HostFamily::SteinbergWavelab
-        )
+/// The editor window moved to a monitor whose DPI differs from the one the active scale was
+/// reported for.
+struct MonitorChange {
+    monitor_scale: f64,
+    /// New monitor scale divided by the monitor scale at the last scale report.
+    ratio: f64,
 }

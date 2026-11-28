@@ -6,6 +6,7 @@ use wrac_clap_adapter::interface::{GuiResizeHints, GuiSize, HostGui, PluginError
 use wxp::{WebViewDispatch, dpi::LogicalSize};
 
 use crate::dpi::{DpiConverter, GuiDpiPolicy};
+use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 
 use super::GuiSizeLimits;
 
@@ -37,10 +38,28 @@ pub(super) struct HostGuiLayout {
     resize_policy: GuiResizePolicy,
     dpi_policy: GuiDpiPolicy,
 }
-
+/// Shared handle to the editor's size negotiation with the host.
+///
+/// Owns everything a resize request needs: the layout, the host GUI extension, and the host
+/// identity that selects host-specific workarounds. The controller and the frontend resize
+/// commands both go through this handle so the two cannot disagree on how a host is treated.
 #[derive(Clone)]
 pub struct WxpGuiResizeHandle {
     pub(super) layout: Arc<HostGuiLayout>,
+    pub(super) host_context: HostContext,
+    host_gui: Arc<dyn HostGui>,
+}
+
+/// How the host answered a frame request.
+pub(super) enum HostFrameAnswer {
+    /// The host delivered a frame through a re-entrant `set_size`, which is the ground
+    /// truth even when it differs from the request. Nothing is left to apply.
+    Delivered,
+    /// The host took the request without calling `set_size`, so the requester applies the
+    /// requested frame itself.
+    Granted,
+    /// The host keeps its current frame.
+    Kept(PluginError),
 }
 
 impl HostGuiLayout {
@@ -142,6 +161,21 @@ impl HostGuiLayout {
     /// frame do not clip the child WebView, while hosts that enlarge their frame to the new
     /// scale are accepted up to the scaled maximum.
     pub(super) fn clamp_host_size(&self, size: GuiSize) -> GuiSize {
+        let scale = self.scale();
+        self.clamp_host_size_allowing_scale(size, scale)
+    }
+
+    /// Like [`Self::clamp_host_size`], but also admits frames that are valid at
+    /// `candidate_scale`.
+    ///
+    /// A host that validates a frame through `adjust_size` before delivering it would
+    /// otherwise have a frame sized for a not-yet-adopted scale clamped back to the active
+    /// one, and the delivered frame would no longer reveal the scale change.
+    pub(super) fn clamp_host_size_allowing_scale(
+        &self,
+        size: GuiSize,
+        candidate_scale: f64,
+    ) -> GuiSize {
         if !self.dpi_policy.scales_layout_with_host_dpi() {
             return clamp_size_with_limits(size, self.limits);
         }
@@ -149,9 +183,11 @@ impl HostGuiLayout {
             let state = self.state.lock();
             (state.scale, state.negotiated_scale)
         };
+        let smallest_scale = negotiated_scale.min(scale).min(candidate_scale);
+        let largest_scale = negotiated_scale.max(scale).max(candidate_scale);
         let limits = GuiSizeLimits {
-            min: self.scale_layout_size(self.limits.min, negotiated_scale.min(scale)),
-            max: self.scale_layout_size(self.limits.max, negotiated_scale.max(scale)),
+            min: self.scale_layout_size(self.limits.min, smallest_scale),
+            max: self.scale_layout_size(self.limits.max, largest_scale),
         };
         clamp_size_with_limits(size, limits)
     }
@@ -233,13 +269,20 @@ impl WxpGuiResizeHandle {
     ///
     /// On Windows, sizes are interpreted as 100% logical pixels and scaled into host pixels.
     /// On macOS, sizes are Cocoa logical points. On Linux, sizes remain in host units.
-    pub fn new(initial_size: GuiSize, limits: GuiSizeLimits) -> Self {
+    pub fn new(
+        initial_size: GuiSize,
+        limits: GuiSizeLimits,
+        host_context: HostContext,
+        host_gui: Arc<dyn HostGui>,
+    ) -> Self {
         Self {
             layout: Arc::new(HostGuiLayout::new(
                 initial_size,
                 limits,
                 GuiResizePolicy::RESIZABLE,
             )),
+            host_context,
+            host_gui,
         }
     }
 
@@ -248,6 +291,8 @@ impl WxpGuiResizeHandle {
         initial_size: GuiSize,
         limits: GuiSizeLimits,
         dpi_policy: GuiDpiPolicy,
+        host_context: HostContext,
+        host_gui: Arc<dyn HostGui>,
     ) -> Self {
         Self {
             layout: Arc::new(HostGuiLayout::with_dpi_policy(
@@ -256,7 +301,51 @@ impl WxpGuiResizeHandle {
                 GuiResizePolicy::RESIZABLE,
                 dpi_policy,
             )),
+            host_context,
+            host_gui,
         }
+    }
+
+    /// Asks the host for `size` and reports how it answered.
+    ///
+    /// Must be called on the main thread while the editor is attached, with no controller
+    /// lock held: hosts may call `set_size` re-entrantly from within the request.
+    pub(super) fn request_host_frame(&self, size: GuiSize) -> HostFrameAnswer {
+        let previous_revision = self.layout.accepted_size_revision();
+        let result = self.host_gui.request_resize(size);
+
+        // Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls
+        // `set_size()` re-entrantly, and then returns false to CLAP. Treat that re-entrant
+        // `set_size()` as the ground truth. Optimistically resizing the WebView here would
+        // race geometry with the host and cause visual jitter during grip dragging.
+        if self.layout.accepted_size_revision() != previous_revision {
+            return HostFrameAnswer::Delivered;
+        }
+        match result {
+            // Some hosts accept the request but never call `set_size()`.
+            Ok(()) => HostFrameAnswer::Granted,
+            Err(error) if self.host_resizes_without_confirmation() => {
+                log::debug!(
+                    "wxp resize: treating an unconfirmed frame request as granted: {error}"
+                );
+                HostFrameAnswer::Granted
+            }
+            Err(error) => HostFrameAnswer::Kept(error),
+        }
+    }
+
+    /// Whether the host resizes the editor window on a VST3 `resizeView` request without
+    /// confirming the new frame through `onSize`, whatever the request returns.
+    fn host_resizes_without_confirmation(&self) -> bool {
+        // These hosts are only known to behave this way on Windows. The request cannot
+        // tell a rejection from a missing host frame, which is why requests are limited to
+        // an attached editor (see `request_host_frame`): the frame exists by then.
+        self.layout.scales_with_host_dpi()
+            && self.host_context.plugin_format == PluginFormat::Vst3
+            && matches!(
+                self.host_context.host().family,
+                HostFamily::AbletonLive | HostFamily::BitwigStudio | HostFamily::SteinbergWavelab
+            )
     }
 
     /// Requests a host-approved resize from the GUI event path and mirrors accepted bounds to wxp.
@@ -267,32 +356,16 @@ impl WxpGuiResizeHandle {
         &self,
         requested: LogicalSize<f64>,
         web_view: &WebViewDispatch,
-        host_gui: &dyn HostGui,
     ) -> PluginResult<LogicalSize<f64>> {
-        // `HostGui` can be shared from Send/Sync product state, but the target
-        // API is a host GUI extension. Keep the "GUI command only" threading contract at the
-        // command registration boundary rather than making this a generic background-thread API.
         let scale = self.layout.scale();
         let logical_size = self.layout.clamp_logical_size(requested);
         let dpi = DpiConverter::with_policy(scale, self.layout.dpi_policy);
         let gui_size = dpi.logical_size_to_gui(logical_size);
 
-        let previous_revision = self.layout.accepted_size_revision();
-        let resize_result = host_gui.request_resize(gui_size);
-        let current_revision = self.layout.accepted_size_revision();
-
-        // Logic's AUv2 wrapper applies the NSView frame inside `request_resize()`, calls
-        // `set_size()` re-entrantly, and then returns false to CLAP. Treat that re-entrant
-        // `set_size()` as the ground truth. Optimistically resizing the WebView here would
-        // race geometry with the host and cause visual jitter during grip dragging.
-        if current_revision != previous_revision {
-            return Ok(dpi.gui_size_to_logical(self.layout.accepted_size()));
-        }
-
-        match resize_result {
-            Ok(()) => {
-                // Some hosts accept the request but never call `set_size()`. In that case,
-                // update the WebView directly without waiting for an async callback.
+        match self.request_host_frame(gui_size) {
+            HostFrameAnswer::Delivered => Ok(dpi.gui_size_to_logical(self.layout.accepted_size())),
+            HostFrameAnswer::Granted => {
+                // Update the WebView directly without waiting for an async callback.
                 // Pass `WebViewDispatch` rather than the native owner so the command handler
                 // can resize without extending the lifetime of a closing editor.
                 web_view
@@ -301,12 +374,9 @@ impl WxpGuiResizeHandle {
                 self.layout.store_accepted_size(gui_size);
                 Ok(logical_size)
             }
-            Err(error) => {
-                // A genuine rejection is distinct from the AUv2 re-entry case above. Rather
-                // than speculatively moving the child WebView and rolling it back, keep the
-                // last host-confirmed size.
-                Err(error)
-            }
+            // Rather than speculatively moving the child WebView and rolling it back, keep
+            // the last host-confirmed size.
+            HostFrameAnswer::Kept(error) => Err(error),
         }
     }
 }
