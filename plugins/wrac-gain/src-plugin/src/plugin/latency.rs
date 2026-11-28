@@ -8,7 +8,7 @@
 //! latency makes the host re-run its delay compensation, which hosts do not expect from
 //! automation, so plugins commonly keep such settings out of the parameter list.
 //! Changing it only ever happens on a non-realtime thread (a GUI command or a state
-//! restore), which is also where `host.request_restart()` may be called from.
+//! restore), which is also where latency changes may be requested from the host.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -56,14 +56,14 @@ impl LatencyStore {
     }
 
     /// Selects a delay from [`LATENCY_FRAME_CHOICES`] (a GUI choice or a restored
-    /// state) and asks the host to reactivate the plugin when it differs from the
-    /// reported latency. Returns whether the selection changed. `[non-realtime]`
+    /// state) and asks the host to compensate for it. Returns whether the
+    /// selection changed. `[non-realtime]`
     pub(crate) fn select(&self, frames: u32) -> bool {
         let changed = self.selected_frames.swap(frames, Ordering::AcqRel) != frames;
-        if frames != self.active_frames.load(Ordering::Acquire) {
-            // Some hosts ignore a restart request while the plugin is inactive. The
-            // report still catches up: activate() reads the selection every time.
-            self.host_lifecycle.request_restart();
+        if changed || frames != self.active_frames.load(Ordering::Acquire) {
+            // The wrapper may still hold a previous live selection when frames equals
+            // the activated value, so it needs every change to the selected delay.
+            self.host_lifecycle.request_latency_change(frames);
         }
         changed
     }

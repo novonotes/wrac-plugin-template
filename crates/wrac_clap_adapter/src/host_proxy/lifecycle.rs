@@ -60,6 +60,16 @@ impl HostLifecycle for HostLifecycleProxy {
         }
     }
 
+    fn request_latency_change(&self, frames: u32) {
+        if !self.is_available("request_latency_change") {
+            return;
+        }
+
+        if !self.callbacks.request_live_latency(frames) {
+            self.request_restart();
+        }
+    }
+
     fn request_callback(&self) {
         if !self.is_available("request_callback") {
             return;
@@ -74,6 +84,12 @@ impl HostLifecycle for HostLifecycleProxy {
             request_callback(self.callbacks.host);
         }
     }
+}
+
+// ABI shared with clapwrapper/wrac.h.
+#[repr(C)]
+struct WracHostLatencyChange {
+    request: unsafe extern "C" fn(host: *const clap_host, frames: u32) -> bool,
 }
 
 #[derive(Clone, Copy)]
@@ -91,6 +107,23 @@ unsafe impl Send for HostLifecycleCallbacks {}
 unsafe impl Sync for HostLifecycleCallbacks {}
 
 impl HostLifecycleCallbacks {
+    fn request_live_latency(&self, frames: u32) -> bool {
+        // The owning host keeps its callbacks and extensions alive until plugin destruction.
+        unsafe {
+            let Some(get_extension) = self.host.as_ref().and_then(|host| host.get_extension) else {
+                return false;
+            };
+            let extension = get_extension(
+                self.host,
+                c"com.novonotes.wrac.host-latency-change/0".as_ptr(),
+            )
+            .cast::<WracHostLatencyChange>();
+            extension
+                .as_ref()
+                .is_some_and(|extension| (extension.request)(self.host, frames))
+        }
+    }
+
     fn new(host: *const clap_host) -> Self {
         let Some(host_ref) = (unsafe { host.as_ref() }) else {
             return Self {

@@ -111,6 +111,7 @@ mod tests {
 
     impl HostLifecycle for TestHostLifecycle {
         fn request_restart(&self) {}
+        fn request_latency_change(&self, _frames: u32) {}
         fn request_process(&self) {}
         fn request_callback(&self) {}
     }

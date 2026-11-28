@@ -5,10 +5,13 @@
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/common/memorystream.h"
 #include "pluginterfaces/base/funknownimpl.h"
+#include "pluginterfaces/base/ustring.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/vstspeaker.h"
+
+#include <windows.h>
 
 #include <cstdio>
 #include <stdexcept>
@@ -16,6 +19,15 @@
 
 using namespace Steinberg;
 using namespace Steinberg::Vst;
+
+struct FlStudioHost : HostApplication
+{
+  tresult PLUGIN_API getName(String128 name) override
+  {
+    UString(name, 128).fromAscii("Fruity Wrapper");
+    return kResultOk;
+  }
+};
 
 struct Handler : U::Implements<U::Directly<IComponentHandler>>
 {
@@ -43,6 +55,20 @@ static void setLatency(IComponent *component, uint32 frames)
   require(component->setState(&stream) == kResultOk, "state load failed");
 }
 
+static void waitForLatencyNotification(Handler &handler)
+{
+  // The wrapper delivers CLAP restart requests on its Windows message timer.
+  const auto deadline = GetTickCount64() + 2000;
+  while (!(handler.flags & kLatencyChanged) && GetTickCount64() < deadline)
+  {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+      DispatchMessageW(&message);
+    Sleep(1);
+  }
+  require(handler.flags & kLatencyChanged, "missing deferred latency notification");
+}
+
 int main(int argc, char **argv)
 {
   try
@@ -51,7 +77,7 @@ int main(int argc, char **argv)
     std::string error;
     auto module = VST3::Hosting::Module::create(argv[1], error);
     if (!module) throw std::runtime_error(error);
-    auto host = owned(new HostApplication());
+    auto host = owned(new FlStudioHost());
     auto handler = owned(new Handler());
     auto &factory = module->getFactory();
     factory.setHostContext(host);
@@ -99,6 +125,17 @@ int main(int argc, char **argv)
     setLatency(component, 0);
     require(component->setActive(true) == kResultOk, "zero-latency activation failed");
     require(processor->getLatencySamples() == 0, "zero-latency update failed");
+
+    // FL Studio queries the new latency on kLatencyChanged without reactivating.
+    for (const auto frames : {64u, 0u})
+    {
+      handler->flags = 0;
+      setLatency(component, frames);
+      waitForLatencyNotification(*handler);
+      require(!(handler->flags & kIoChanged), "live latency request also announced an I/O change");
+      require(processor->getLatencySamples() == frames, "active latency was not updated");
+    }
+
     require(component->setActive(false) == kResultOk, "final deactivation failed");
     require(processor->getLatencySamples() == 0, "zero latency was not cached");
 

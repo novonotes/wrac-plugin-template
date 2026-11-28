@@ -206,6 +206,9 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
   {
     if (_active) return kResultFalse;
 
+    // Activation takes its own latency from CLAP, including any sample-rate change.
+    _requestedLatency.exchange(noLatencyRequest);
+
     for (auto i = 0U; i < audioInputs.size(); ++i)
     {
       _plugin->setBusActivation(true, i, audioInputs[i]->isActive());
@@ -221,6 +224,7 @@ tresult PLUGIN_API ClapAsVst3::setActive(TBool state)
     _gesturedparameters.reserve(8192);
 
     _active = true;
+    _liveLatencyReported = false;
     if (_plugin->_ext._latency)
       _cachedLatencySamples = _plugin->_ext._latency->get(_plugin->_plugin);
     _processAdapter = new Clap::ProcessAdapter();
@@ -474,7 +478,8 @@ uint32 PLUGIN_API ClapAsVst3::getLatencySamples()
   }
 
   _missedLatencyRequest = false;
-  _cachedLatencySamples = _plugin->_ext._latency->get(_plugin->_plugin);
+  if (!_liveLatencyReported)
+    _cachedLatencySamples = _plugin->_ext._latency->get(_plugin->_plugin);
   return _cachedLatencySamples;
 }
 
@@ -1897,6 +1902,17 @@ void ClapAsVst3::latency_changed()
     this->componentHandler->restartComponent(Vst::RestartFlags::kLatencyChanged);
 }
 
+#if WIN
+bool ClapAsVst3::request_latency_change(uint32_t frames)
+{
+  // FL Studio reads the new delay on kLatencyChanged without cycling activation.
+  // An I/O restart can leave its input to this component silent during playback.
+  if (underlying_hostname != "Fruity Wrapper") return false;
+  _requestedLatency.store(frames);
+  return true;
+}
+#endif
+
 void ClapAsVst3::tail_changed()
 {
   // TODO: this could also be kIoChanged, we have to check this
@@ -2181,6 +2197,16 @@ void ClapAsVst3::onIdle()
     if (componentHandler)
       componentHandler->restartComponent(Vst::RestartFlags::kIoChanged |
                                          Vst::RestartFlags::kLatencyChanged);
+  }
+
+  if (const auto frames = _requestedLatency.exchange(noLatencyRequest);
+      frames != noLatencyRequest && _active && frames != _cachedLatencySamples)
+  {
+    // FL Studio queries the latency from inside restartComponent. Publish the
+    // live value first and keep it available until the next CLAP activation.
+    _cachedLatencySamples = static_cast<uint32>(frames);
+    _liveLatencyReported = true;
+    latency_changed();
   }
 
   if (_wrappedview)

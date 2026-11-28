@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include <clap/private/macros.h>
+#include <clap/host.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -45,6 +46,17 @@ extern "C"
     // cannot be read.
     bool(CLAP_ABI *set)(const struct clap_plugin *plugin, const void *host_name);
   } wrac_au_host_identifier_t;
+
+  static const CLAP_CONSTEXPR char WRAC_HOST_LATENCY_CHANGE[] =
+      "com.novonotes.wrac.host-latency-change/0";
+
+  typedef struct wrac_host_latency_change
+  {
+    // [thread-safe, !audio-thread] Requests compensation for a latency the plugin applies
+    // during processing. The standard CLAP latency must stay fixed until the next activation.
+    // If the wrapper cannot report live latency, fall back to clap_host.request_restart.
+    bool(CLAP_ABI *request)(const clap_host_t *host, uint32_t frames);
+  } wrac_host_latency_change_t;
 
 #ifdef __cplusplus
 }
