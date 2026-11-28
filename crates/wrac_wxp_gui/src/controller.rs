@@ -22,8 +22,12 @@ use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
 
+/// Minimum and maximum editor bounds in 100% logical pixels.
+///
+/// The controller converts these bounds into the host's GUI size unit at the CLAP
+/// boundary (scaling by the active DPI factor for physical-pixel hosts such as Win32
+/// and X11, and keeping logical points on Cocoa).
 #[derive(Debug, Clone, Copy)]
-/// Editor bounds at 100% on Windows. Other platforms retain their native host units.
 pub struct GuiSizeLimits {
     pub min: GuiSize,
     pub max: GuiSize,
@@ -184,16 +188,10 @@ fn is_cubase_vst3(host_context: &HostContext) -> bool {
         && host_context.plugin_format == PluginFormat::Vst3
 }
 
-fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit {
-    // macOS wrapper formats expose Cocoa/NSView geometry at the CLAP GUI boundary.
-    // Treating those logical coordinates as physical pixels would divide the child
-    // WebView bounds by the scale factor and clip the editor to the top-left area.
-    if cfg!(target_os = "macos")
-        && matches!(
-            host_context.plugin_format,
-            PluginFormat::Vst3 | PluginFormat::Au | PluginFormat::Aax
-        )
-    {
+fn host_gui_size_unit_for_context(_host_context: &HostContext) -> HostGuiSizeUnit {
+    // Cocoa uses logical points at both the native CLAP and wrapper GUI boundaries.
+    // Win32 and X11 exchange physical pixels with the host.
+    if cfg!(target_os = "macos") {
         HostGuiSizeUnit::LogicalPoints
     } else {
         HostGuiSizeUnit::PhysicalPixels
@@ -708,6 +706,10 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         }
         self.destroy_gui_session();
         let scale = *self.scale.lock();
+        // Re-derive the suggested host size from the logical baseline so reopening an editor
+        // after an attached scale change starts at the expected size even if the host skips
+        // calling `set_scale` again before `get_size`.
+        self.layout.apply_preferred_scale(scale);
         let generation = {
             let mut state = self.runtime.lock();
             state.generation = state.generation.wrapping_add(1);
@@ -743,15 +745,15 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         }
         let (handle, scale) = {
             let mut state = self.runtime.lock();
-            let mut previous_scale = self.scale.lock();
+            let mut stored_scale = self.scale.lock();
             let parent = state.session.as_ref().and_then(|session| session.parent);
             let scale = self.correct_host_scale(scale, parent);
             if parent.is_none() {
                 // The host can query get_size before it creates the parent. Scale the
                 // suggested size then, and leave an attached host's frame to set_size.
-                self.layout.rescale_preferred_size(*previous_scale, scale);
+                self.layout.apply_preferred_scale(scale);
             }
-            *previous_scale = scale;
+            *stored_scale = scale;
             let handle = state.session.as_mut().and_then(|session| {
                 session.scale = scale;
                 session.handle.clone()
@@ -800,7 +802,7 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
                 handle.post_set_size(size)?;
             }
         }
-        self.layout.store_accepted_size(size);
+        self.layout.store_accepted_size(size, scale);
         Ok(())
     }
 
@@ -865,8 +867,12 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         }
         session.parent = Some(parent);
         // If `set_scale` arrived before `set_parent`, Cubase VST3 scale correction must
-        // wait until the native parent window is known.
-        session.scale = self.correct_host_scale(session.scale, Some(parent));
+        // wait until the native parent window is known. Mirror the corrected scale to
+        // `self.scale` so `adjust_size` and `request_resize` clamp with the same factor
+        // as `set_size`.
+        let corrected_scale = self.correct_host_scale(session.scale, Some(parent));
+        session.scale = corrected_scale;
+        *self.scale.lock() = corrected_scale;
         if let Some(parent_lease) = parent_lease {
             session.parent_lease = Some(parent_lease);
         }

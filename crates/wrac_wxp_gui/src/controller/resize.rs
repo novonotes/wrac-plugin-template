@@ -13,6 +13,10 @@ pub(super) struct HostGuiLayout {
     // Host-contract size value read by CLAP layout queries without entering the GUI runtime
     // (not a copy of the runtime state).
     accepted_size: AtomicGuiSize,
+    // Preferred editor size in 100% logical pixels. Storing the logical baseline instead of
+    // rescaling rounded physical integers avoids rounding drift across DPI changes and keeps
+    // reopen sizing accurate even when an attached host updates scale without sending set_size.
+    preferred_logical_size: Mutex<LogicalSize<f64>>,
     // Some wrappers call `set_size()` re-entrantly from within `request_resize()` (even
     // when the return value is false). This revision counter lets the request side detect
     // "the size the host confirmed" without holding the runtime lock or guessing the return value.
@@ -37,6 +41,10 @@ impl HostGuiLayout {
         let size = clamp_size_with_limits(size, limits);
         Self {
             accepted_size: AtomicGuiSize::new(size),
+            preferred_logical_size: Mutex::new(LogicalSize::new(
+                size.width as f64,
+                size.height as f64,
+            )),
             accepted_size_revision: AtomicU64::new(0),
             limits,
             resize_policy,
@@ -56,20 +64,18 @@ impl HostGuiLayout {
         clamp_size_with_limits(size, limits)
     }
 
-    pub(super) fn rescale_preferred_size(&self, old_scale: f64, new_scale: f64) {
-        if old_scale != new_scale {
-            let size = self.scale_layout_size(self.accepted_size(), new_scale / old_scale);
-            self.accepted_size.store(self.clamp_size(size, new_scale));
-        }
+    pub(super) fn apply_preferred_scale(&self, scale: f64) {
+        let logical = *self.preferred_logical_size.lock();
+        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        let scaled = dpi.logical_size_to_gui(logical);
+        self.accepted_size.store(self.clamp_size(scaled, scale));
     }
 
     fn scale_layout_size(&self, size: GuiSize, scale: f64) -> GuiSize {
-        if cfg!(windows) {
-            let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
-            dpi.logical_size_to_gui(LogicalSize::new(size.width as f64, size.height as f64))
-        } else {
-            size
-        }
+        // Convert 100% logical limits into the host's boundary unit so physical-pixel hosts
+        // (Win32, X11) scale consistently while logical-point hosts (Cocoa) stay unscaled.
+        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        dpi.logical_size_to_gui(LogicalSize::new(size.width as f64, size.height as f64))
     }
 
     pub(super) fn clamp_logical_size(
@@ -80,8 +86,8 @@ impl HostGuiLayout {
         let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
         // Resize commands receive frontend logical pixels. Convert through the host
         // boundary unit before clamping so limits remain comparable to host callbacks.
-        let physical = dpi.logical_size_to_gui(size);
-        let clamped = self.clamp_size(physical, scale);
+        let host_size = dpi.logical_size_to_gui(size);
+        let clamped = self.clamp_size(host_size, scale);
         dpi.gui_size_to_logical(clamped)
     }
 
@@ -93,7 +99,9 @@ impl HostGuiLayout {
         HostGuiSizeUnit::from_u8(self.host_size_unit.load(Ordering::Relaxed))
     }
 
-    pub(super) fn store_accepted_size(&self, size: GuiSize) {
+    pub(super) fn store_accepted_size(&self, size: GuiSize, scale: f64) {
+        let dpi = DpiConverter::with_host_size_unit(scale, self.host_size_unit());
+        *self.preferred_logical_size.lock() = dpi.gui_size_to_logical(size);
         self.accepted_size.store(size);
         self.accepted_size_revision.fetch_add(1, Ordering::Relaxed);
     }
@@ -112,6 +120,8 @@ impl HostGuiLayout {
 }
 
 impl WxpGuiResizeHandle {
+    /// Creates a resize handle from the preferred editor size and resize limits in 100%
+    /// logical pixels.
     pub fn new(initial_size: GuiSize, limits: GuiSizeLimits) -> Self {
         Self {
             layout: Arc::new(HostGuiLayout::new(
@@ -170,7 +180,7 @@ impl WxpGuiResizeHandle {
                 web_view
                     .post_set_bounds(dpi.create_webview_bounds(logical_size))
                     .map_err(|_| PluginError::Message("failed to resize webview".into()))?;
-                self.layout.store_accepted_size(gui_size);
+                self.layout.store_accepted_size(gui_size, scale);
                 Ok(logical_size)
             }
             Err(error) => {

@@ -146,7 +146,7 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         self.webview.set_scale(scale)
     }
 
-    /// Called when the host changes the window size. Clamps to the valid range before applying.
+    /// Called with the controller-clamped window size from the host.
     fn set_size(&mut self, size: GuiSize) -> PluginResult<()> {
         self.webview.set_size(size)
     }
