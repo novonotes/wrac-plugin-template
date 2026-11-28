@@ -147,9 +147,9 @@ impl WxpGuiController {
 
     /// Whether `get_size` must fail until the parent window is attached.
     pub(super) fn defers_size_report_until_attached(&self) -> bool {
-        // Ableton Live on Windows queries the VST3 view size before it attaches the view and
-        // reports the content scale, then resizes the attached view to that stale size.
-        // Failing the early query makes Live ask again once the scaled size is known.
+        // Live on Windows asks for the VST3 view size while the scale is still unknown and
+        // later forces that answer onto the attached view. With no answer to reuse, it has
+        // to ask again after attaching, when the size is already scaled.
         self.layout.scales_with_host_dpi()
             && self.resize_handle.host_context.plugin_format == PluginFormat::Vst3
             && self.resize_handle.host_context.host().family == HostFamily::AbletonLive

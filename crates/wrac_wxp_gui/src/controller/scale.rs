@@ -110,10 +110,10 @@ pub(super) fn monitor_scale_for_parent(_parent: Option<StoredParentWindow>) -> O
 
 /// Decides whether a host resize already applied a monitor DPI change to the frame.
 ///
-/// A per-monitor DPI aware host such as REAPER resizes a resizable view for the new monitor
-/// before it reports the new content scale. Interpreting that frame with the stale scale
-/// would store an enlarged logical size, and the scale report that follows would enlarge
-/// the frame a second time.
+/// When the editor window lands on a monitor with a different DPI, REAPER first delivers a
+/// frame already multiplied by the DPI ratio and only then reports the new scale. Reading
+/// that frame at the old scale would record a logical size that is too large (or too
+/// small), and the scale report arriving afterwards would apply the ratio once more.
 ///
 /// `monitor_scale_ratio` is the current monitor scale divided by the monitor scale at the
 /// time `scale` was reported. Returns the scale to adopt when `requested` is closer to

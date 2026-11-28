@@ -707,10 +707,10 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             handle.set_scale(scale)?;
         }
         if attached {
-            // Hosts may report the content scale after attaching the view, and report a new
-            // one when the window moves to another monitor. The frame they created for the
-            // previous scale then shows a smaller logical viewport than the editor's
-            // minimum, which clips the layout.
+            // The frame on screen was created for the previous scale. At a larger scale it
+            // holds fewer logical pixels than the editor's minimum and the layout is cut
+            // off, so the frame has to be renegotiated whenever the scale moves under an
+            // attached editor.
             self.request_preferred_host_frame_if_stale()?;
         }
         log::debug!("wxp controller: set_scale completed");
@@ -785,8 +785,8 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             return Err(PluginError::InvalidState);
         }
         session.parent = Some(parent);
-        // Hosts may report the content scale either before or after attaching the view, so
-        // the monitor scale is recorded both here and in `set_scale`.
+        // The monitor scale has to be captured at whichever of `set_scale` and `set_parent`
+        // comes last, because the order of the two is up to the host.
         session.monitor_scale_at_scale_report = host_reported_scale
             .then(|| monitor_scale_for_parent(Some(parent)))
             .flatten();
