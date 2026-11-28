@@ -189,16 +189,12 @@ impl WxpGuiController {
         let layout = self.layout.clone();
         let runtime = self.runtime.clone();
         let post_result = RunLoop::post(move |_| {
-            let handle =
-                {
-                    let state = runtime.lock();
-                    let Some(session) = state.session.as_ref().filter(|session| {
-                        session.generation == generation && session.parent.is_some()
-                    }) else {
-                        return;
-                    };
-                    session.handle.clone()
-                };
+            if matches!(
+                attached_session(&runtime, generation),
+                AttachedSession::Gone
+            ) {
+                return;
+            }
             // The host may have resized the frame between the callback and this task.
             let Some(size) = layout.host_size_to_unclip_at_active_scale() else {
                 return;
@@ -208,10 +204,15 @@ impl WxpGuiController {
                 size.width,
                 size.height
             );
-            let result = layout.request_host_resize(size, |size| match &handle {
-                Some(handle) => handle.set_size(size),
-                // The runtime reads the accepted size when its pending creation runs.
-                None => Ok(()),
+            let result = layout.request_host_resize(size, |size| {
+                // Look the session up again: the host may destroy or recreate the editor while
+                // `request_resize()` runs, and a stale session must not record its size.
+                match attached_session(&runtime, generation) {
+                    AttachedSession::Gone => Err(PluginError::InvalidState),
+                    AttachedSession::Runtime(handle) => handle.set_size(size),
+                    // The runtime reads the accepted size when its pending creation runs.
+                    AttachedSession::RuntimePending => Ok(()),
+                }
             });
             if let Err(error) = result {
                 log::debug!("wxp controller: attached scale resize was not applied: {error:?}");
@@ -431,6 +432,30 @@ fn schedule_runtime_creation(
         return Err(PluginError::InvalidState);
     }
     Ok(())
+}
+
+/// State of the attached session a deferred task was scheduled for.
+enum AttachedSession {
+    /// The session was destroyed, replaced by a newer generation, or never got a parent.
+    Gone,
+    /// The parent is attached but the runtime is still being created.
+    RuntimePending,
+    Runtime(GuiRuntimeHandle),
+}
+
+fn attached_session(runtime: &Mutex<GuiRuntimeState>, generation: u64) -> AttachedSession {
+    let state = runtime.lock();
+    let Some(session) = state
+        .session
+        .as_ref()
+        .filter(|session| session.generation == generation && session.parent.is_some())
+    else {
+        return AttachedSession::Gone;
+    };
+    match session.handle.clone() {
+        Some(handle) => AttachedSession::Runtime(handle),
+        None => AttachedSession::RuntimePending,
+    }
 }
 
 fn clear_runtime_creation_after_post_failure(runtime: &Mutex<GuiRuntimeState>, generation: u64) {

@@ -337,10 +337,6 @@ impl WxpGuiResizeHandle {
                 .post_set_bounds(dpi.create_webview_bounds(logical_size))
                 .map_err(|_| PluginError::Message("failed to resize webview".into()))
         })?;
-        if accepted.width == gui_size.width && accepted.height == gui_size.height {
-            // Return the unrounded logical size the frontend asked for.
-            return Ok(logical_size);
-        }
         Ok(dpi.gui_size_to_logical(accepted))
     }
 }
