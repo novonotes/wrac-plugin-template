@@ -132,8 +132,16 @@ impl HostGuiLayout {
             min: self.scale_layout_size(self.limits.min, state.scale),
             max: self.scale_layout_size(self.limits.max, state.scale),
         };
+        // Compare against the truncated minimum rather than the rounded one used for clamping.
+        // A host that scales the frame itself before reporting the scale may truncate, landing
+        // 1px below the rounded minimum; treating that as clipped would scale the editor twice.
+        // A frame left at the previous scale is short by far more than 1px, so it still counts.
+        let clip_threshold = GuiSize {
+            width: (self.limits.min.width as f64 * state.scale).floor() as u32,
+            height: (self.limits.min.height as f64 * state.scale).floor() as u32,
+        };
         let accepted = self.accepted_size();
-        if accepted.width >= limits.min.width && accepted.height >= limits.min.height {
+        if accepted.width >= clip_threshold.width && accepted.height >= clip_threshold.height {
             return None;
         }
         let dpi = DpiConverter::with_policy(state.scale, self.dpi_policy);

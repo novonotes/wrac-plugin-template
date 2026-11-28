@@ -125,6 +125,38 @@ fn leaves_frame_alone_when_host_resized_before_reporting_scale() {
 }
 
 #[test]
+fn tolerates_host_truncating_the_scaled_frame_before_reporting_scale() {
+    // 961 * 1.5 = 1441.5. The clamp rounds the minimum to 1442, but a host that truncates
+    // sends 1441 before set_scale; that frame already fits and must not be scaled again.
+    let layout = HostGuiLayout::with_dpi_policy(
+        GuiSize {
+            width: 961,
+            height: 480,
+        },
+        GuiSizeLimits {
+            min: GuiSize {
+                width: 961,
+                height: 400,
+            },
+            max: GuiSize {
+                width: 2760,
+                height: 1260,
+            },
+        },
+        GuiResizePolicy::RESIZABLE,
+        GuiDpiPolicy::Windows,
+        Arc::new(UnusedHostGui),
+    );
+    layout.store_accepted_size(GuiSize {
+        width: 1441,
+        height: 720,
+    });
+    layout.set_scale_while_attached(1.5);
+
+    assert!(layout.host_size_to_unclip_at_active_scale().is_none());
+}
+
+#[test]
 fn never_requests_attached_scale_resize_on_macos_or_linux() {
     for policy in [GuiDpiPolicy::Macos, GuiDpiPolicy::Linux] {
         let layout = min_width_layout(policy);
