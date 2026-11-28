@@ -9,8 +9,8 @@ use wrac_clap_adapter::interface::{
     PluginResult,
 };
 use wrac_wxp_gui::{
-    GuiSizeLimits, ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime,
-    WxpWebViewConfig, WxpWebViewSession,
+    ParentWindowHandle, WxpFrontendSource, WxpGuiResizeHandle, WxpGuiRuntime, WxpWebViewConfig,
+    WxpWebViewSession,
 };
 use wxp::WxpCommandHandler;
 
@@ -85,7 +85,6 @@ impl WracGainGuiRuntime {
         );
 
         let command_handler = Rc::new(WxpCommandHandler::new());
-        let host_size_unit = dependencies.resize_handle.host_size_unit();
         register_commands(
             command_handler.clone(),
             CommandRegistrationDependencies {
@@ -106,11 +105,6 @@ impl WracGainGuiRuntime {
             WxpWebViewConfig {
                 plugin_id: dependencies.descriptor.id,
                 initial_size,
-                limits: GuiSizeLimits {
-                    min: MIN_GUI_SIZE,
-                    max: MAX_GUI_SIZE,
-                },
-                host_size_unit,
                 parent,
                 frontend: frontend_source(),
                 devtools: cfg!(debug_assertions),
@@ -150,7 +144,7 @@ impl WxpGuiRuntime for WracGainGuiRuntime {
         self.webview.set_scale(scale)
     }
 
-    /// Called when the host changes the window size. Clamps to the valid range before applying.
+    /// Called with the controller-clamped window size from the host.
     fn set_size(&mut self, size: GuiSize) -> PluginResult<()> {
         self.webview.set_size(size)
     }

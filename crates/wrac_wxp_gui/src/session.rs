@@ -8,8 +8,7 @@ use url::{Host, Url};
 use wrac_clap_adapter::interface::{GuiSize, PluginError, PluginResult};
 use wxp::{WebContext, WxpCommandHandler, WxpWebView, WxpWebViewBuilder, dpi::LogicalSize};
 
-use crate::controller::GuiSizeLimits;
-use crate::dpi::{DpiConverter, HostGuiSizeUnit};
+use crate::dpi::DpiConverter;
 use crate::window::ParentWindowHandle;
 
 const URL_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -40,12 +39,10 @@ pub enum WxpFrontendSource {
 /// isolated by DPI awareness; it must not be the source of cross-host product state.
 /// Existing Windows cookies and local storage in the unpartitioned directory are
 /// not migrated to these separate browser profiles.
-/// Size limits use the same unit as the host GUI size callbacks selected by `host_size_unit`.
 pub struct WxpWebViewConfig {
     pub plugin_id: &'static str,
+    /// Initial size negotiated with the host by the GUI controller.
     pub initial_size: GuiSize,
-    pub limits: GuiSizeLimits,
-    pub host_size_unit: HostGuiSizeUnit,
     pub parent: ParentWindowHandle,
     pub frontend: WxpFrontendSource,
     pub devtools: bool,
@@ -65,7 +62,6 @@ pub struct WxpWebViewSession {
     command_handler: Rc<WxpCommandHandler>,
     host_size: GuiSize,
     logical_size: LogicalSize<f64>,
-    limits: GuiSizeLimits,
     dpi_converter: DpiConverter,
 }
 
@@ -87,10 +83,10 @@ impl WxpWebViewSession {
         log::debug!("using GUI data directory: {}", data_dir.display());
 
         let mut wxp_context = WebContext::new(data_dir);
-        let dpi_converter = DpiConverter::with_host_size_unit(1.0, config.host_size_unit);
+        let dpi_converter = DpiConverter::new(1.0);
         // Convert initial bounds here so product runtimes never need host- or
         // platform-specific DPI branches.
-        let host_size = clamp_size(config.initial_size, config.limits);
+        let host_size = config.initial_size;
         let logical_size = dpi_converter.gui_size_to_logical(host_size);
         let bounds = dpi_converter.create_webview_bounds(logical_size);
 
@@ -154,7 +150,6 @@ impl WxpWebViewSession {
             command_handler,
             host_size,
             logical_size,
-            limits: config.limits,
             dpi_converter,
         })
     }
@@ -163,13 +158,13 @@ impl WxpWebViewSession {
         log::debug!("setting wxp WebView scale: scale={scale}");
         self.dpi_converter.set_scale(scale);
         // Hosts may not resend set_size after a scale change. Reapply bounds immediately
-        // so Linux physical bounds and macOS/Windows logical bounds do not keep stale scale.
+        // so the child view does not keep bounds derived from a stale scale.
         self.logical_size = self.dpi_converter.gui_size_to_logical(self.host_size);
         self.apply_bounds()
     }
 
     pub fn set_size(&mut self, size: GuiSize) -> PluginResult<()> {
-        self.host_size = clamp_size(size, self.limits);
+        self.host_size = size;
         self.logical_size = self.dpi_converter.gui_size_to_logical(self.host_size);
         log::debug!(
             "setting wxp WebView size: requested_width={}, requested_height={}, applied_width={}, applied_height={}",
@@ -532,13 +527,6 @@ fn escape_js_string(value: &str) -> String {
     escaped
 }
 
-fn clamp_size(size: GuiSize, limits: GuiSizeLimits) -> GuiSize {
-    GuiSize {
-        width: size.width.clamp(limits.min.width, limits.max.width),
-        height: size.height.clamp(limits.min.height, limits.max.height),
-    }
-}
-
 fn webview_data_dir(plugin_id: &str) -> PluginResult<PathBuf> {
     let plugin_dir = sanitize_plugin_data_dir(plugin_id);
     // Derive the user-data path from plugin_id so a plugin created from the template
@@ -642,29 +630,6 @@ mod tests {
         })
         .join()
         .unwrap();
-    }
-
-    #[test]
-    fn clamps_host_size_with_physical_limits() {
-        let clamped = clamp_size(
-            GuiSize {
-                width: 100,
-                height: 900,
-            },
-            GuiSizeLimits {
-                min: GuiSize {
-                    width: 320,
-                    height: 240,
-                },
-                max: GuiSize {
-                    width: 640,
-                    height: 480,
-                },
-            },
-        );
-
-        assert_eq!(clamped.width, 320);
-        assert_eq!(clamped.height, 480);
     }
 
     #[test]

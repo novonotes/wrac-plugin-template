@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::dpi::HostGuiSizeUnit;
 use crate::runtime::{
     GuiRuntimeHandle, GuiThreadLease, WxpGuiFactory, create_gui_runtime_handle, is_gui_thread,
 };
@@ -17,11 +16,18 @@ use wrac_host_context::{HostContext, HostFamily, PluginFormat};
 
 mod defaults;
 mod resize;
+mod scale;
 
 use self::defaults::{default_gui_api, default_gui_configuration};
 use self::resize::HostGuiLayout;
 pub use self::resize::WxpGuiResizeHandle;
+use self::scale::corrected_scale_for_parent;
 
+/// Minimum and maximum editor bounds.
+///
+/// On Windows, bounds are specified in 100% logical pixels and scaled into host pixels by
+/// the controller. On macOS, bounds are Cocoa logical points. On Linux, bounds remain in
+/// host units.
 #[derive(Debug, Clone, Copy)]
 pub struct GuiSizeLimits {
     pub min: GuiSize,
@@ -39,7 +45,6 @@ pub struct GuiSizeLimits {
 pub struct WxpGuiController {
     factory: Arc<dyn WxpGuiFactory>,
     layout: Arc<HostGuiLayout>,
-    scale: Arc<Mutex<f64>>,
     runtime: Arc<Mutex<GuiRuntimeState>>,
     host_context: HostContext,
 }
@@ -73,7 +78,6 @@ const WEBVIEW_RECREATE_QUIET_PERIOD: Duration = Duration::from_millis(500);
 struct GuiSession {
     generation: u64,
     configuration: GuiConfig,
-    scale: f64,
     parent: Option<StoredParentWindow>,
     parent_lease: Option<GuiThreadLease>,
     handle: Option<GuiRuntimeHandle>,
@@ -103,11 +107,9 @@ impl WxpGuiController {
         resize_handle: WxpGuiResizeHandle,
         host_context: HostContext,
     ) -> Self {
-        resize_handle.set_host_size_unit(host_gui_size_unit_for_context(&host_context));
         Self {
             factory: Arc::new(factory),
             layout: resize_handle.layout.clone(),
-            scale: resize_handle.scale.clone(),
             runtime: Arc::new(Mutex::new(GuiRuntimeState {
                 session: None,
                 generation: 0,
@@ -181,22 +183,6 @@ impl WxpGuiController {
 fn is_cubase_vst3(host_context: &HostContext) -> bool {
     host_context.host().family == HostFamily::SteinbergCubase
         && host_context.plugin_format == PluginFormat::Vst3
-}
-
-fn host_gui_size_unit_for_context(host_context: &HostContext) -> HostGuiSizeUnit {
-    // macOS wrapper formats expose Cocoa/NSView geometry at the CLAP GUI boundary.
-    // Treating those logical coordinates as physical pixels would divide the child
-    // WebView bounds by the scale factor and clip the editor to the top-left area.
-    if cfg!(target_os = "macos")
-        && matches!(
-            host_context.plugin_format,
-            PluginFormat::Vst3 | PluginFormat::Au | PluginFormat::Aax
-        )
-    {
-        HostGuiSizeUnit::LogicalPoints
-    } else {
-        HostGuiSizeUnit::PhysicalPixels
-    }
 }
 
 fn schedule_runtime_creation(
@@ -547,7 +533,7 @@ fn latest_runtime_creation_inputs(
     if session.generation != generation {
         return None;
     }
-    Some((layout.accepted_size(), session.scale))
+    Some((layout.accepted_size(), layout.scale()))
 }
 
 fn latest_runtime_state(
@@ -560,7 +546,7 @@ fn latest_runtime_state(
     if session.generation != generation {
         return None;
     }
-    Some((session.visible, layout.accepted_size(), session.scale))
+    Some((session.visible, layout.accepted_size(), layout.scale()))
 }
 
 fn finish_runtime_creation_requested_destroy(
@@ -583,81 +569,6 @@ fn finish_runtime_creation_requested_destroy(
         state.destroy_requested_while_creating = false;
     }
     should_destroy
-}
-
-#[cfg(windows)]
-fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> Option<f64> {
-    use std::sync::OnceLock;
-
-    use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Graphics::Gdi::{
-        HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
-    };
-    use windows_sys::Win32::UI::HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE};
-
-    type GetDpiForWindowFn = unsafe extern "system" fn(HWND) -> u32;
-    type GetDpiForMonitorFn =
-        unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut u32, *mut u32) -> i32;
-
-    let hwnd = parent?.win32_hwnd()? as HWND;
-    if hwnd.is_null() {
-        return None;
-    }
-
-    static GET_DPI_FOR_WINDOW: OnceLock<Option<GetDpiForWindowFn>> = OnceLock::new();
-    if let Some(get_dpi_for_window) = *GET_DPI_FOR_WINDOW
-        .get_or_init(|| unsafe { load_windows_proc(b"user32.dll\0", b"GetDpiForWindow\0") })
-    {
-        let window_dpi = unsafe { get_dpi_for_window(hwnd) };
-        if window_dpi > 0 {
-            return Some(window_dpi as f64 / 96.0);
-        }
-    }
-
-    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
-    if monitor.is_null() {
-        return None;
-    }
-
-    static GET_DPI_FOR_MONITOR: OnceLock<Option<GetDpiForMonitorFn>> = OnceLock::new();
-    let get_dpi_for_monitor = (*GET_DPI_FOR_MONITOR
-        .get_or_init(|| unsafe { load_windows_proc(b"shcore.dll\0", b"GetDpiForMonitor\0") }))?;
-
-    let mut dpi_x = 0u32;
-    let mut dpi_y = 0u32;
-    let result = unsafe {
-        get_dpi_for_monitor(
-            monitor,
-            MDT_EFFECTIVE_DPI,
-            &mut dpi_x as *mut u32,
-            &mut dpi_y as *mut u32,
-        )
-    };
-    if result == 0 && dpi_x > 0 {
-        Some(dpi_x as f64 / 96.0)
-    } else {
-        None
-    }
-}
-
-#[cfg(windows)]
-unsafe fn load_windows_proc<T>(module_name: &[u8], proc_name: &[u8]) -> Option<T>
-where
-    T: Copy,
-{
-    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
-
-    let module = unsafe { LoadLibraryA(module_name.as_ptr()) };
-    if module.is_null() {
-        return None;
-    }
-    let proc = unsafe { GetProcAddress(module, proc_name.as_ptr()) }?;
-    Some(unsafe { std::mem::transmute_copy(&proc) })
-}
-
-#[cfg(not(windows))]
-fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
-    None
 }
 
 impl PluginGuiApiSupportExtension for WxpGuiController {
@@ -690,7 +601,7 @@ impl PluginGuiQueryExtension for WxpGuiController {
     }
 
     fn adjust_size(&self, size: GuiSize) -> PluginResult<GuiSize> {
-        Ok(self.layout.clamp_size(size))
+        Ok(self.layout.clamp_host_size(size))
     }
 }
 
@@ -706,7 +617,10 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             return Err(PluginError::Message("unsupported GUI configuration".into()));
         }
         self.destroy_gui_session();
-        let scale = *self.scale.lock();
+        // Re-derive the suggested host size from the logical baseline so reopening an editor
+        // after an attached scale change starts at the expected size even if the host skips
+        // calling `set_scale` again before `get_size`.
+        self.layout.prepare_for_new_session();
         let generation = {
             let mut state = self.runtime.lock();
             state.generation = state.generation.wrapping_add(1);
@@ -714,7 +628,6 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
             state.session = Some(GuiSession {
                 generation,
                 configuration,
-                scale,
                 parent: None,
                 parent_lease: None,
                 handle: None,
@@ -737,35 +650,43 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
 
     fn set_scale(&self, scale: f64) -> PluginResult<()> {
         log::debug!("wxp controller: set_scale called: scale={scale}");
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(PluginError::Message("invalid GUI scale".into()));
+        }
         let (handle, scale) = {
-            let mut state = self.runtime.lock();
-            if let Some(session) = &mut state.session {
-                let corrected_scale = self.correct_host_scale(scale, session.parent);
-                session.scale = corrected_scale;
-                (session.handle.clone(), corrected_scale)
+            let state = self.runtime.lock();
+            let parent = state.session.as_ref().and_then(|session| session.parent);
+            let scale = self.correct_host_scale(scale, parent);
+            // The host can query get_size before it creates the parent. Scale the
+            // suggested size then, and leave an attached host's frame to set_size.
+            if parent.is_none() {
+                self.layout.set_scale_before_attach(scale);
             } else {
-                (None, scale)
+                self.layout.set_scale_while_attached(scale);
             }
+            let handle = state
+                .session
+                .as_ref()
+                .and_then(|session| session.handle.clone());
+            (handle, scale)
         };
         if let Some(handle) = handle {
             handle.set_scale(scale)?;
         }
-        *self.scale.lock() = scale;
         log::debug!("wxp controller: set_scale completed");
         Ok(())
     }
 
     fn set_size(&self, requested_size: GuiSize) -> PluginResult<()> {
-        let size = self.layout.clamp_size(requested_size);
+        let size = self.layout.clamp_host_size(requested_size);
         let previous_size = self.layout.accepted_size();
         let size_changed = previous_size.width != size.width || previous_size.height != size.height;
-        let handle = {
-            self.runtime
-                .lock()
-                .session
-                .as_ref()
-                .and_then(|session| session.handle.clone())
-        };
+        let handle = self
+            .runtime
+            .lock()
+            .session
+            .as_ref()
+            .and_then(|session| session.handle.clone());
 
         // Some hosts repeatedly send the same size until the editor window settles.
         // Re-applying identical bounds does not violate the contract but adds redundant
@@ -854,8 +775,10 @@ impl PluginGuiMainThreadExtension for WxpGuiController {
         }
         session.parent = Some(parent);
         // If `set_scale` arrived before `set_parent`, Cubase VST3 scale correction must
-        // wait until the native parent window is known.
-        session.scale = self.correct_host_scale(session.scale, Some(parent));
+        // wait until the native parent window is known. Update the shared layout scale
+        // without rescaling the already-created host frame.
+        let corrected_scale = self.correct_host_scale(self.layout.scale(), Some(parent));
+        self.layout.set_scale_while_attached(corrected_scale);
         if let Some(parent_lease) = parent_lease {
             session.parent_lease = Some(parent_lease);
         }

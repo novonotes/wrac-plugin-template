@@ -1,0 +1,80 @@
+use crate::window::StoredParentWindow;
+
+/// Queries the native parent window's effective DPI scale on Windows.
+///
+/// Some Windows hosts (notably Cubase 10 VST3) report integer scale factors even on
+/// fractional-DPI monitors, so the controller falls back to inspecting the parent HWND.
+#[cfg(windows)]
+pub(super) fn corrected_scale_for_parent(parent: Option<StoredParentWindow>) -> Option<f64> {
+    use std::sync::OnceLock;
+
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{
+        HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
+    };
+    use windows_sys::Win32::UI::HiDpi::{MDT_EFFECTIVE_DPI, MONITOR_DPI_TYPE};
+
+    type GetDpiForWindowFn = unsafe extern "system" fn(HWND) -> u32;
+    type GetDpiForMonitorFn =
+        unsafe extern "system" fn(HMONITOR, MONITOR_DPI_TYPE, *mut u32, *mut u32) -> i32;
+
+    let hwnd = parent?.win32_hwnd()? as HWND;
+    if hwnd.is_null() {
+        return None;
+    }
+
+    static GET_DPI_FOR_WINDOW: OnceLock<Option<GetDpiForWindowFn>> = OnceLock::new();
+    if let Some(get_dpi_for_window) = *GET_DPI_FOR_WINDOW
+        .get_or_init(|| unsafe { load_windows_proc(b"user32.dll\0", b"GetDpiForWindow\0") })
+    {
+        let window_dpi = unsafe { get_dpi_for_window(hwnd) };
+        if window_dpi > 0 {
+            return Some(window_dpi as f64 / 96.0);
+        }
+    }
+
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return None;
+    }
+
+    static GET_DPI_FOR_MONITOR: OnceLock<Option<GetDpiForMonitorFn>> = OnceLock::new();
+    let get_dpi_for_monitor = (*GET_DPI_FOR_MONITOR
+        .get_or_init(|| unsafe { load_windows_proc(b"shcore.dll\0", b"GetDpiForMonitor\0") }))?;
+
+    let mut dpi_x = 0u32;
+    let mut dpi_y = 0u32;
+    let result = unsafe {
+        get_dpi_for_monitor(
+            monitor,
+            MDT_EFFECTIVE_DPI,
+            &mut dpi_x as *mut u32,
+            &mut dpi_y as *mut u32,
+        )
+    };
+    if result == 0 && dpi_x > 0 {
+        Some(dpi_x as f64 / 96.0)
+    } else {
+        None
+    }
+}
+
+#[cfg(windows)]
+unsafe fn load_windows_proc<T>(module_name: &[u8], proc_name: &[u8]) -> Option<T>
+where
+    T: Copy,
+{
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+
+    let module = unsafe { LoadLibraryA(module_name.as_ptr()) };
+    if module.is_null() {
+        return None;
+    }
+    let proc = unsafe { GetProcAddress(module, proc_name.as_ptr()) }?;
+    Some(unsafe { std::mem::transmute_copy(&proc) })
+}
+
+#[cfg(not(windows))]
+pub(super) fn corrected_scale_for_parent(_parent: Option<StoredParentWindow>) -> Option<f64> {
+    None
+}

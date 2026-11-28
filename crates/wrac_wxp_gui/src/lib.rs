@@ -15,7 +15,6 @@ mod window;
 
 pub use commands::{register_native_cursor_bridge_commands, register_resize_commands};
 pub use controller::{GuiSizeLimits, WxpGuiController, WxpGuiResizeHandle};
-pub use dpi::HostGuiSizeUnit;
 pub use resize_drag::WxpNativeResizeDrag;
 pub use runtime::{WxpGuiFactory, WxpGuiRuntime};
 pub use session::{WxpFrontendSource, WxpWebViewConfig, WxpWebViewSession};
