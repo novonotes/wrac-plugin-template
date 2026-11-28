@@ -334,6 +334,9 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   bool gui_request_hide() override;
 
   void latency_changed() override;
+#if WIN
+  bool request_latency_change(uint32_t frames) override;
+#endif
 
   void tail_changed() override;
 
@@ -473,6 +476,9 @@ class ClapAsVst3 : public Steinberg::Vst::SingleComponentEffect,
   std::recursive_mutex _mainThreadLock;
   bool _missedLatencyRequest = false;
   uint32 _cachedLatencySamples = 0;
+  bool _liveLatencyReported = false;
+  static constexpr int64_t noLatencyRequest = -1;
+  std::atomic<int64_t> _requestedLatency{noLatencyRequest};
   Clap::MainThreadAttachment _mainThreadAttachment;
 
   std::thread::id _main_thread_id{};

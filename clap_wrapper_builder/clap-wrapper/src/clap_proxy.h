@@ -62,6 +62,8 @@ class IHost
   virtual void param_request_flush() = 0;
 
   virtual void latency_changed() = 0;
+  // Wrappers that can report live latency opt in. Other hosts require a CLAP restart.
+  virtual bool request_latency_change(uint32_t /*frames*/) { return false; }
   virtual void tail_changed() = 0;
 
   virtual bool gui_can_resize() = 0;
@@ -310,6 +312,10 @@ class Plugin
   const clap_wrapper_standalone_features_t *standalone_features()
   {
     return _parentHost->standalone_features();
+  }
+  bool request_latency_change(uint32_t frames)
+  {
+    return _parentHost->request_latency_change(frames);
   }
 
   // clap_timer support

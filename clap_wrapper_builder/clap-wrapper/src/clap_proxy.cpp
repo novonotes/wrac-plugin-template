@@ -1,4 +1,5 @@
 #include "clap_proxy.h"
+#include "clapwrapper/wrac.h"
 #include "detail/clap/fsutil.h"
 #include <cstring>
 
@@ -113,6 +114,10 @@ const clap_host_posix_fd_support hostposixfd = {
 
 const clap_host_latency latency = {[](const clap_host_t *host) -> void
                                    { self(host)->latency_changed(); }};
+
+const wrac_host_latency_change_t liveLatency = {
+    [](const clap_host_t *host, uint32_t frames) -> bool
+    { return self(host)->request_latency_change(frames); }};
 
 const clap_host_state_t state = {[](const clap_host_t *host) -> void { self(host)->mark_dirty(); }};
 
@@ -593,6 +598,7 @@ const void *Plugin::clapExtension(const clap_host *host, const char *extension)
   if (!strcmp(extension, CLAP_EXT_GUI)) return &HostExt::hostgui;
   if (!strcmp(extension, CLAP_EXT_TIMER_SUPPORT)) return &HostExt::hosttimer;
   if (!strcmp(extension, CLAP_EXT_LATENCY)) return &HostExt::latency;
+  if (!strcmp(extension, WRAC_HOST_LATENCY_CHANGE)) return &HostExt::liveLatency;
   if (!strcmp(extension, CLAP_EXT_TAIL)) return &HostExt::tail;
   if (!strcmp(extension, CLAP_EXT_STATE)) return &HostExt::state;
   if (!strcmp(extension, CLAP_EXT_CONTEXT_MENU)) return &HostExt::context_menu;

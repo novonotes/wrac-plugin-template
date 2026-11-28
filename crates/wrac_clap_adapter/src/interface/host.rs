@@ -65,6 +65,11 @@ pub trait HostLifecycle: Send + Sync {
     /// Calls CLAP `host.request_restart`. `[non-realtime & thread-safe]`
     fn request_restart(&self);
 
+    /// Requests compensation for a latency the plugin applies during processing.
+    /// Hosts without live latency support are asked to reactivate the plugin.
+    /// `[non-realtime & thread-safe]`
+    fn request_latency_change(&self, frames: u32);
+
     /// Calls CLAP `host.request_process`. `[non-realtime & thread-safe]`
     fn request_process(&self);
 
